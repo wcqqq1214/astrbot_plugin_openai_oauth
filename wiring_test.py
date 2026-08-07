@@ -138,7 +138,7 @@ def main() -> int:
         "过期但无 refresh_token 时静默跳过",
     )
 
-    print("\n=== 6. _persist_key：把凭据写回配置里的 provider key ===")
+    print("\n=== 6. _persist_key：把凭据写回 provider_sources 的 source key ===")
     FRESH = {
         "access_token": "sk-ant-oat01-fresh.fresh.fresh",
         "refresh_token": "rt-fresh",
@@ -160,13 +160,13 @@ def main() -> int:
             self.default_conf = conf
 
     persist_prov = ProviderOpenAICodex(make_config(creds), {})
-    persist_prov.provider_config["id"] = "prov-1"
+    persist_prov.provider_config["provider_source_id"] = "prov-1"
     stored = {
         "id": "prov-1",
         "type": module._PROVIDER_TYPE,
         "key": json.dumps(creds),
     }
-    fake_conf = _FakeConfig({"provider": [stored]})
+    fake_conf = _FakeConfig({"provider_sources": [stored]})
     module._config_mgr = _FakeCfgMgr(fake_conf)
     persist_prov.creds = dict(FRESH)
     try:
@@ -185,7 +185,7 @@ def main() -> int:
         module._config_mgr = None
 
     no_mgr = ProviderOpenAICodex(make_config(creds), {})
-    no_mgr.provider_config["id"] = "prov-1"
+    no_mgr.provider_config["provider_source_id"] = "prov-1"
     asyncio.run(no_mgr._persist_key())  # _config_mgr 为 None 时静默跳过
     check(True, "无 _config_mgr 时静默跳过")
 
@@ -195,7 +195,7 @@ def main() -> int:
         "type": module._PROVIDER_TYPE,
         "key": json.dumps(creds),
     }
-    fake_conf2 = _FakeConfig({"provider": [stored2]})
+    fake_conf2 = _FakeConfig({"provider_sources": [stored2]})
     module._config_mgr = _FakeCfgMgr(fake_conf2)
     expired = ProviderOpenAICodex(
         make_config(
@@ -208,7 +208,7 @@ def main() -> int:
         ),
         {},
     )
-    expired.provider_config["id"] = "prov-2"
+    expired.provider_config["provider_source_id"] = "prov-2"
     try:
         with mock.patch.object(
             module,

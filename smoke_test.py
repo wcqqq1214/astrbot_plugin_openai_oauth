@@ -116,6 +116,22 @@ def main() -> int:
         "provider 元数据仍是首次导入的类（未重复注册）",
     )
 
+    print("\n=== 7. WebUI 插件登录页随插件分发 ===")
+    pages_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "pages"))
+    login_html = os.path.join(pages_dir, "login", "index.html")
+    check(os.path.isfile(login_html), "pages/login/index.html 存在")
+    if os.path.isfile(login_html):
+        with open(login_html, encoding="utf-8") as fh:
+            page = fh.read()
+        check(
+            "/api/plugin/page/bridge-sdk.js" in page,
+            "页面引用插件页面桥接 SDK",
+        )
+        check(
+            "device/start" in page and "save_creds" in page,
+            "页面调用 start / save_creds 接口",
+        )
+
     print()
     if FAILED:
         print(f"=== 冒烟验证失败：{len(FAILED)} 项 ===")

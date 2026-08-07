@@ -90,6 +90,12 @@ class OpenAI_OAuth_Plugin(Star):
             ["GET"],
             "Codex 设备登录页面",
         )
+        self.context.register_web_api(
+            "/astrbot_plugin_openai_oauth/save_creds",
+            _handle_save_creds,
+            ["POST"],
+            "保存登录凭据到 provider 配置",
+        )
 
 
 def _register_provider_adapter_if_absent(cls: type) -> type:
@@ -237,20 +243,27 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                 logger.error(f"OpenAI Codex token refresh failed: {e}")
 
     async def _persist_key(self) -> None:
-        """把当前凭据写回 AstrBot 配置里的 provider key，重启后免重新登录。"""
+        """把当前凭据写回配置里的 provider source key，重启后免重新登录。
+
+        合并配置里 id 是模型 id，key 属于 `provider_sources` 里的 source 配置
+        （按 provider_source_id / type 匹配），不能写进 `provider` 模型列表。
+        """
         cfg_mgr = _config_mgr
-        provider_id = self.provider_config.get("id")
-        if cfg_mgr is None or not provider_id:
+        if cfg_mgr is None:
             return
+        source_id = self.provider_config.get("provider_source_id") or _PROVIDER_TYPE
         try:
             conf = cfg_mgr.default_conf
-            for provider in conf["provider"]:
-                if provider.get("id") == provider_id:
-                    provider["key"] = dump_credentials(self.creds)
+            for source in conf.get("provider_sources", []):
+                if (
+                    source.get("id") == source_id
+                    or source.get("type") == _PROVIDER_TYPE
+                ):
+                    source["key"] = dump_credentials(self.creds)
                     await conf.save_config_async()
                     return
             logger.warning(
-                f"OpenAI Codex provider {provider_id} not found in config; "
+                f"OpenAI Codex source {source_id!r} not found in config; "
                 "refreshed token not persisted."
             )
         except Exception as e:  # noqa: BLE001 - a failed persist must not break the request
@@ -362,6 +375,51 @@ async def _handle_login_page() -> HTMLResponse:
     return HTMLResponse(_LOGIN_PAGE_HTML)
 
 
+async def _handle_save_creds() -> Any:
+    """把设备登录得到的凭据写入 `provider_sources` 里本插件的 source。
+
+    找不到对应 source 时按默认模板自动创建，让用户可以先登录、再回模型配置。
+    """
+    body = await request.json(default={}) or {}
+    creds = body.get("creds")
+    if not isinstance(creds, dict) or not creds.get("access_token"):
+        return json_response({"status": "error", "message": "凭据无效"})
+    cfg_mgr = _config_mgr
+    if cfg_mgr is None:
+        return json_response({"status": "error", "message": "配置管理器不可用"})
+    try:
+        conf = cfg_mgr.default_conf
+        sources = conf.setdefault("provider_sources", [])
+        source = next(
+            (
+                s
+                for s in sources
+                if s.get("type") == _PROVIDER_TYPE or s.get("id") == _PROVIDER_TYPE
+            ),
+            None,
+        )
+        if source is None:
+            source = {
+                "provider": "openai",
+                "type": _PROVIDER_TYPE,
+                "provider_type": "chat_completion",
+                "key": "",
+                "api_base": CODEX_BASE,
+                "proxy": "",
+                "originator": DEFAULT_ORIGINATOR,
+                "user_agent": DEFAULT_USER_AGENT,
+                "id": _PROVIDER_TYPE,
+                "enable": True,
+            }
+            sources.append(source)
+        source["key"] = dump_credentials(creds)
+        await conf.save_config_async()
+    except Exception as exc:  # noqa: BLE001 - 失败信息透传到页面
+        logger.exception("OpenAI Codex 保存凭据失败。")
+        return json_response({"status": "error", "message": f"保存失败：{exc}"})
+    return json_response({"status": "ok", "message": "登录凭据已写入模型配置"})
+
+
 _LOGIN_PAGE_HTML = """<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -395,7 +453,7 @@ _LOGIN_PAGE_HTML = """<!doctype html>
   </div>
   <div id="status"></div>
   <div id="result" hidden>
-    <p class="ok">登录成功！复制下方凭据，粘贴到模型配置中该 provider 的 <code>key</code> 字段：</p>
+    <p class="ok" id="result-text">登录成功，凭据已写入模型配置。</p>
     <textarea id="creds" readonly></textarea>
     <button id="copy">复制凭据</button>
   </div>
@@ -429,15 +487,33 @@ _LOGIN_PAGE_HTML = """<!doctype html>
           const data = await resp.json();
           if (data.status === "success") {
             clearInterval(timer);
-            $("result").hidden = false;
-            $("creds").value = JSON.stringify(data.creds, null, 2);
-            setStatus("登录成功。");
+            await saveCreds(data.creds);
           } else if (data.status === "error" || data.status === "timeout") {
             clearInterval(timer);
             showError(data.error || "登录失败");
           }
         } catch (e) { /* 瞬时错误继续轮询 */ }
       }, interval * 1000);
+    }
+    async function saveCreds(creds) {
+      $("creds").value = JSON.stringify(creds, null, 2);
+      $("result").hidden = false;
+      try {
+        const resp = await fetch(BASE + "/save_creds", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ creds: creds }),
+        });
+        const data = await resp.json();
+        if (data.status === "ok") {
+          $("result-text").textContent = "登录成功，凭据已写入模型配置。";
+        } else {
+          $("result-text").textContent = "登录成功，但自动写入失败：" + (data.message || "未知错误") + "。请手动复制下方凭据到 key 字段。";
+        }
+      } catch (e) {
+        $("result-text").textContent = "登录成功，但自动写入失败：" + e + "。请手动复制下方凭据到 key 字段。";
+      }
+      setStatus("登录成功。");
     }
     $("copy").addEventListener("click", async () => {
       try {

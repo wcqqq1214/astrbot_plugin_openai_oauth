@@ -290,6 +290,141 @@ def test_login_page() -> None:
     check("开始登录" in html, "页面含登录按钮")
 
 
+class _FakeConf(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.saved = 0
+
+    async def save_config_async(self) -> None:
+        self.saved += 1
+
+
+class _FakeConfigMgr:
+    def __init__(self, conf: dict):
+        self.default_conf = _FakeConf(conf)
+
+
+def test_save_creds() -> None:
+    print("\n=== 7. save_creds：更新已有 source / 自动创建 / 校验 ===")
+    old_mgr = plugin_mod._config_mgr
+    try:
+        # 7a: 已有 source 时更新 key
+        conf = {
+            "provider_sources": [
+                {
+                    "type": plugin_mod._PROVIDER_TYPE,
+                    "id": plugin_mod._PROVIDER_TYPE,
+                    "key": "old",
+                }
+            ]
+        }
+        mgr = _FakeConfigMgr(conf)
+        plugin_mod._config_mgr = mgr
+
+        async def _update():
+            req = _FakeRequest(
+                {"creds": {"access_token": "at1", "refresh_token": "rt1"}}
+            )
+            with bind_request_context(PluginRequest(req)):
+                return await plugin_mod._handle_save_creds()
+
+        data = json.loads(asyncio.run(_update()).body)
+        check(data["status"] == "ok", "已有 source 时 save_creds 返回 ok")
+        key = json.loads(conf["provider_sources"][0]["key"])
+        check(key["access_token"] == "at1", "凭据写入已有 source 的 key")
+        check(len(conf["provider_sources"]) == 1, "不新增重复 source")
+        check(mgr.default_conf.saved == 1, "配置已保存")
+
+        # 7b: 无 source 时自动创建
+        conf2 = {
+            "provider_sources": [{"id": "deepseek", "type": "deepseek", "key": []}]
+        }
+        mgr2 = _FakeConfigMgr(conf2)
+        plugin_mod._config_mgr = mgr2
+
+        async def _create():
+            req = _FakeRequest({"creds": {"access_token": "at2"}})
+            with bind_request_context(PluginRequest(req)):
+                return await plugin_mod._handle_save_creds()
+
+        data2 = json.loads(asyncio.run(_create()).body)
+        check(data2["status"] == "ok", "无 source 时自动创建返回 ok")
+        created = [
+            s
+            for s in conf2["provider_sources"]
+            if s.get("type") == plugin_mod._PROVIDER_TYPE
+        ]
+        check(len(created) == 1, "自动创建了 source")
+        check(created[0]["id"] == plugin_mod._PROVIDER_TYPE, "创建的 source id=type")
+        check(created[0]["enable"] is True, "创建的 source enable=True")
+        check(created[0]["provider"] == "openai", "创建的 source 带图标字段")
+        check(
+            json.loads(created[0]["key"])["access_token"] == "at2",
+            "创建的 source 带 key",
+        )
+        check(mgr2.default_conf.saved == 1, "创建后已保存")
+
+        # 7c: 无效凭据
+        async def _invalid():
+            req = _FakeRequest({"creds": {}})
+            with bind_request_context(PluginRequest(req)):
+                return await plugin_mod._handle_save_creds()
+
+        data3 = json.loads(asyncio.run(_invalid()).body)
+        check(data3["status"] == "error", "空凭据返回 error")
+    finally:
+        plugin_mod._config_mgr = old_mgr
+
+
+def test_persist_key() -> None:
+    print("\n=== 8. _persist_key：刷新凭据写回 provider_sources 而非 provider ===")
+    old_mgr = plugin_mod._config_mgr
+    try:
+        conf = {
+            "provider_sources": [
+                {
+                    "type": plugin_mod._PROVIDER_TYPE,
+                    "id": plugin_mod._PROVIDER_TYPE,
+                    "key": "old",
+                }
+            ],
+            "provider": [
+                {
+                    "id": f"{plugin_mod._PROVIDER_TYPE}/gpt-5.4-mini",
+                    "provider_source_id": plugin_mod._PROVIDER_TYPE,
+                    "model": "gpt-5.4-mini",
+                }
+            ],
+        }
+        mgr = _FakeConfigMgr(conf)
+        plugin_mod._config_mgr = mgr
+        provider = plugin_mod.ProviderOpenAICodex.__new__(
+            plugin_mod.ProviderOpenAICodex
+        )
+        provider.creds = {"access_token": "new-at", "refresh_token": "new-rt"}
+        provider.provider_config = {
+            "id": f"{plugin_mod._PROVIDER_TYPE}/gpt-5.4-mini",
+            "provider_source_id": plugin_mod._PROVIDER_TYPE,
+        }
+        asyncio.run(provider._persist_key())
+        key = json.loads(conf["provider_sources"][0]["key"])
+        check(key["access_token"] == "new-at", "刷新凭据写入 source key")
+        check("key" not in conf["provider"][0], "不污染 provider 模型配置")
+        check(mgr.default_conf.saved == 1, "配置已保存")
+
+        # 找不到 source 时静默告警、不抛异常、不保存
+        conf3 = {
+            "provider_sources": [{"id": "deepseek", "type": "deepseek", "key": []}]
+        }
+        mgr3 = _FakeConfigMgr(conf3)
+        plugin_mod._config_mgr = mgr3
+        provider.provider_config = {"provider_source_id": "missing"}
+        asyncio.run(provider._persist_key())
+        check(mgr3.default_conf.saved == 0, "找不到 source 时不保存、不抛异常")
+    finally:
+        plugin_mod._config_mgr = old_mgr
+
+
 def main() -> int:
     test_usercode()
     test_poll()
@@ -297,6 +432,8 @@ def main() -> int:
     test_jwt()
     test_handlers()
     test_login_page()
+    test_save_creds()
+    test_persist_key()
     print()
     if FAILED:
         print(f"=== 登录验证失败：{len(FAILED)} 项 ===")
