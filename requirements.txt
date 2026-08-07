@@ -1,0 +1,1 @@
+# No runtime dependencies. httpx and the openai SDK are provided by AstrBot.

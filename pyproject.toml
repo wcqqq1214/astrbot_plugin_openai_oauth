@@ -1,0 +1,19 @@
+[project]
+name = "astrbot-plugin-openai-oauth"
+version = "0.1.0"
+description = "AstrBot provider plugin: log in with your ChatGPT subscription (Codex OAuth) and use its quota instead of an API key"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+requires-python = ">=3.12"
+# The plugin's own runtime dependencies. AstrBot (and its framework
+# dependencies, including httpx and the openai SDK) is provided by the
+# AstrBot process the plugin runs in.
+dependencies = []
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9,<1",
+]

@@ -1,0 +1,125 @@
+name: auto-release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'metadata.yaml'
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version_changed: ${{ steps.check.outputs.changed }}
+      new_version: ${{ steps.check.outputs.version }}
+      old_version: ${{ steps.check.outputs.old_version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Check version change
+        id: check
+        run: |
+          VERSION="$(sed -n 's/^version:[[:space:]]*\([^ #]*\).*/\1/p' metadata.yaml)"
+          if [ -z "$VERSION" ]; then
+            echo "::error::could not parse version from metadata.yaml"
+            exit 1
+          fi
+          echo "Current version: $VERSION"
+
+          # Manual dispatch always releases the current version.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "old_version=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Compare against the version in the previous commit.
+          PREVIOUS_VERSION="$(git show HEAD~1:metadata.yaml 2>/dev/null | sed -n 's/^version:[[:space:]]*\([^ #]*\).*/\1/p')"
+          PREVIOUS_VERSION="${PREVIOUS_VERSION:-none}"
+          echo "Previous version: $PREVIOUS_VERSION"
+
+          if [ "$VERSION" != "$PREVIOUS_VERSION" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "old_version=$PREVIOUS_VERSION" >> "$GITHUB_OUTPUT"
+            echo "Version changed from $PREVIOUS_VERSION to $VERSION"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No version change detected"
+          fi
+
+  create-release:
+    needs: check-version
+    if: needs.check-version.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Package plugin
+        run: |
+          VERSION="${{ needs.check-version.outputs.new_version }}"
+          mkdir -p dist
+          git ls-files | grep -v '^\.github/' | zip -@ "dist/astrbot_plugin_openai_oauth-${VERSION}.zip"
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          NEW_VERSION="${{ needs.check-version.outputs.new_version }}"
+          OLD_VERSION="${{ needs.check-version.outputs.old_version }}"
+          REPO="${{ github.repository }}"
+
+          echo "## ${NEW_VERSION}" > release_notes.md
+          echo "" >> release_notes.md
+
+          if [ "$OLD_VERSION" != "none" ] && git rev-parse "$OLD_VERSION" >/dev/null 2>&1; then
+            git log --pretty=format:"%s|%h|%H" "$OLD_VERSION..HEAD" --no-merges > commits.txt
+
+            print_category() {
+              title="$1"; pattern="$2"
+              hits="$(grep -iE "$pattern" commits.txt || true)"
+              if [ -n "$hits" ]; then
+                echo "### $title" >> release_notes.md
+                printf '%s\n' "$hits" | while IFS='|' read -r msg hash full; do
+                  echo "- ${msg} ([${hash}](https://github.com/${REPO}/commit/${full}))" >> release_notes.md
+                done
+                echo "" >> release_notes.md
+              fi
+            }
+
+            print_category "Features" "^(feat|feature)(\([^)]*\))?:"
+            print_category "Fixes" "^fix(\([^)]*\))?:"
+            print_category "Documentation" "^docs(\([^)]*\))?:"
+            print_category "Chores" "^(chore|style|refactor|perf|test|ci|build)(\([^)]*\))?:"
+
+            rm -f commits.txt
+            echo "**Full Changelog**: https://github.com/${REPO}/compare/${OLD_VERSION}...${NEW_VERSION}" >> release_notes.md
+          else
+            echo "### Initial release" >> release_notes.md
+            echo "" >> release_notes.md
+            git log --pretty=format:"- %s ([%h](https://github.com/${REPO}/commit/%H))" -10 --no-merges >> release_notes.md
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.check-version.outputs.new_version }}
+          name: OpenAI 订阅登录 ${{ needs.check-version.outputs.new_version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+          files: dist/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
