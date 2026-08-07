@@ -1,0 +1,151 @@
+"""无网络 provider 接线验证：用假凭据实例化 ProviderOpenAICodex，
+断言 api_base / client key / custom_headers / get_keys / set_key /
+无 token 时 get_models 回退 / 无需刷新时 _ensure_fresh_token 短路。
+
+从仓库根运行：
+    .venv/bin/python /Users/wcqqq1214/Project/astrbot_plugin_openai_oauth/wiring_test.py
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+
+# 解析 AstrBot 仓库根（本文件位于 Project/astrbot_plugin_openai_oauth/ 下）
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "AstrBot"))
+sys.path.insert(0, REPO_ROOT)
+os.chdir(REPO_ROOT)  # 使 `data` 命名空间包可解析
+
+import importlib
+
+module = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.main")
+oauth = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.oauth")
+ProviderOpenAICodex = module.ProviderOpenAICodex
+
+FAILED = []
+
+ACCESS_TOKEN = "sk-ant-oat01-aaaa.bbbb.cccc"
+REFRESH_TOKEN = "rt-fake-refresh-token"
+ACCOUNT_ID = "user-12345"
+
+
+def check(cond: bool, msg: str) -> None:
+    tag = "PASS" if cond else "FAIL"
+    print(f"[{tag}] {msg}")
+    if not cond:
+        FAILED.append(msg)
+
+
+def make_config(creds: dict) -> dict:
+    return {
+        "type": "openai_codex",
+        "key": json.dumps(creds),
+        "model": "gpt-5.4-mini",
+        "proxy": "",
+        "originator": oauth.DEFAULT_ORIGINATOR,
+        "user_agent": oauth.DEFAULT_USER_AGENT,
+    }
+
+
+def main() -> int:
+    print("=== 1. 实例化：api_base / client key / 自定义头 ===")
+    creds = {
+        "access_token": ACCESS_TOKEN,
+        "refresh_token": REFRESH_TOKEN,
+        "expires": int(__import__("time").time()) + 99999,
+        "account_id": ACCOUNT_ID,
+    }
+    prov = ProviderOpenAICodex(make_config(creds), {})
+    check(
+        prov.provider_config["api_base"] == oauth.CODEX_BASE, "api_base 指向 Codex 后端"
+    )
+    check(
+        str(prov.client.base_url).rstrip("/") == oauth.CODEX_BASE,
+        "client.base_url == CODEX_BASE",
+    )
+    check(prov.client.api_key == ACCESS_TOKEN, "client.api_key 已修正为 access_token")
+    check(prov.api_keys == [ACCESS_TOKEN], "api_keys 列表同步")
+    headers = prov.client.default_headers or {}
+    check(
+        headers.get("chatgpt-account-id") == ACCOUNT_ID,
+        f"自定义头含 chatgpt-account-id: {headers.get('chatgpt-account-id')}",
+    )
+    check(
+        headers.get("originator") == oauth.DEFAULT_ORIGINATOR, "自定义头含 originator"
+    )
+    check("OpenAI-Beta" in headers, "自定义头含 OpenAI-Beta")
+    check(prov.model_name == "gpt-5.4-mini", f"model_name: {prov.model_name}")
+
+    print("\n=== 2. get_keys / get_current_key ===")
+    check(prov.get_keys() == [ACCESS_TOKEN], "get_keys 返回 access_token")
+    check(prov.get_current_key() == ACCESS_TOKEN, "get_current_key 返回 access_token")
+
+    print("\n=== 3. set_key：裸 token 与 JSON 凭据 ===")
+    prov.set_key("sk-ant-oat01-new.new.new")
+    check(
+        prov.get_current_key() == "sk-ant-oat01-new.new.new",
+        "裸 token 直接作为 access_token",
+    )
+    check(prov.client.api_key == "sk-ant-oat01-new.new.new", "client key 同步")
+    check(
+        (prov.client.default_headers or {}).get("chatgpt-account-id") is None,
+        "裸 token 无 account_id 时清掉旧头",
+    )
+    new_creds = {
+        "access_token": "sk-ant-oat01-two.two.two",
+        "refresh_token": "rt-two",
+        "expires": 9999999999,
+        "account_id": "user-999",
+    }
+    prov.set_key(json.dumps(new_creds))
+    check(
+        prov.get_current_key() == "sk-ant-oat01-two.two.two",
+        "JSON 凭据解析 access_token",
+    )
+    check(
+        (prov.client.default_headers or {}).get("chatgpt-account-id") == "user-999",
+        "JSON 凭据更新 account_id 头",
+    )
+
+    print("\n=== 4. 无 access_token 时 get_models 回退离线列表（不发网络请求） ===")
+    no_token = ProviderOpenAICodex(make_config({"refresh_token": "rt-only"}), {})
+    models = asyncio.run(no_token.get_models())
+    check(models == list(oauth.CODEX_FALLBACK_MODELS), "无 token 返回离线模型列表")
+
+    print("\n=== 5. _ensure_fresh_token 无需刷新时短路（不发网络请求） ===")
+    future = ProviderOpenAICodex(
+        make_config(
+            {
+                "access_token": ACCESS_TOKEN,
+                "refresh_token": REFRESH_TOKEN,
+                "expires": 9999999999,
+            }
+        ),
+        {},
+    )
+    asyncio.run(future._ensure_fresh_token())
+    check(future.get_current_key() == ACCESS_TOKEN, "未过期时 token 不变")
+
+    expired_no_refresh = ProviderOpenAICodex(
+        make_config({"access_token": ACCESS_TOKEN, "expires": 1}), {}
+    )
+    asyncio.run(expired_no_refresh._ensure_fresh_token())
+    check(
+        expired_no_refresh.get_current_key() == ACCESS_TOKEN,
+        "过期但无 refresh_token 时静默跳过",
+    )
+
+    print()
+    if FAILED:
+        print(f"=== 接线验证失败：{len(FAILED)} 项 ===")
+        for f in FAILED:
+            print(f"  - {f}")
+        return 1
+    print("=== 接线验证全部通过 ===")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

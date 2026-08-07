@@ -40,7 +40,7 @@ an OAuth token obtained from a device-code login, so billing draws on your
 
 - [x] Plugin scaffold + provider registration verified end-to-end (WebUI
       visibility confirmed).
-- [ ] Provider logic: endpoint wiring, dynamic model list, token refresh.
+- [x] Provider logic: endpoint wiring, dynamic model list, token refresh.
 - [ ] Device-code login flow (WebUI login button).
 - [ ] Release.
 
@@ -48,9 +48,13 @@ an OAuth token obtained from a device-code login, so billing draws on your
 
 - `main.py` — registers the `openai_codex` provider adapter and the plugin
   Star.
-- `oauth.py` — (planned) the Codex OAuth device-code flow.
+- `oauth.py` — Codex OAuth protocol constants, credential helpers, token
+  refresh (device-code login flow planned).
 - `smoke_test.py` — verifies that a plugin can register a provider and that
   the WebUI metadata builder sees it.
+- `wiring_test.py` — instantiates the provider with fake credentials and
+  verifies endpoint wiring, key handling and refresh short-circuits
+  (no network).
 
 The protocol follows the implementations in
 [opencode](https://github.com/sst/opencode),
