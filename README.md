@@ -4,7 +4,7 @@
 
 一个 [AstrBot](https://astrbot.app) 插件：用你的 ChatGPT 账号（Plus / Pro 订阅）登录，将账号订阅额度作为模型 provider 使用——无需 API Key。
 
-它在 WebUI 模型配置中注册了一个 `openai_codex` provider。AI 调用通过 OpenAI 的 Codex 后端（`chatgpt.com/backend-api/codex`）发出，使用设备码登录获取的 OAuth token，因此计费走你的**订阅额度**，而不是预付的 API 余额。
+它在 WebUI 模型配置中注册了一个 `openai_subscription_oauth` provider。AI 调用通过 OpenAI 的 Codex 后端（`chatgpt.com/backend-api/codex`）发出，使用设备码登录获取的 OAuth token，因此计费走你的**订阅额度**，而不是预付的 API 余额。
 
 > ⚠️ **服务条款提醒。** 本项目像官方 Codex CLI 一样，以消费者身份使用 ChatGPT 后端，而非付费 OpenAI API。仅用于**个人自用**（单用户、非商用）。OpenAI 随时可能改动或封禁该流程，插件可能无预警失效。Anthropic 已于 2026 年 2 月关闭了 Claude 的同类方案，Google 对 Gemini 也做了同样的事。
 
@@ -43,7 +43,7 @@
 
 ## 架构
 
-- `main.py` — 注册 `openai_codex` provider 适配器、插件 Star 以及设备登录 Web API（`device/start`、`device/poll`、`login` 页面）。
+- `main.py` — 注册 `openai_subscription_oauth` provider 适配器、插件 Star 以及设备登录 Web API（`device/start`、`device/poll`、`login` 页面）。
 - `oauth.py` — Codex OAuth 协议常量、凭据辅助、token 刷新以及设备码登录协议（user-code 请求、轮询、授权码交换、JWT account-id 提取）。
 - `smoke_test.py` — 验证插件能注册 provider，且 WebUI 元数据构建器能看到它。
 - `wiring_test.py` — 用假凭据实例化 provider，验证端点接线、key 处理与刷新短路（无网络）。

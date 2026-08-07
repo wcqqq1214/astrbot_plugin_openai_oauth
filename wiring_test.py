@@ -41,7 +41,7 @@ def check(cond: bool, msg: str) -> None:
 
 def make_config(creds: dict) -> dict:
     return {
-        "type": "openai_codex",
+        "type": module._PROVIDER_TYPE,
         "key": json.dumps(creds),
         "model": "gpt-5.4-mini",
         "proxy": "",
@@ -163,7 +163,7 @@ def main() -> int:
     persist_prov.provider_config["id"] = "prov-1"
     stored = {
         "id": "prov-1",
-        "type": "openai_codex",
+        "type": module._PROVIDER_TYPE,
         "key": json.dumps(creds),
     }
     fake_conf = _FakeConfig({"provider": [stored]})
@@ -192,7 +192,7 @@ def main() -> int:
     print("\n=== 7. _ensure_fresh_token 刷新后自动持久化 ===")
     stored2 = {
         "id": "prov-2",
-        "type": "openai_codex",
+        "type": module._PROVIDER_TYPE,
         "key": json.dumps(creds),
     }
     fake_conf2 = _FakeConfig({"provider": [stored2]})

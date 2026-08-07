@@ -1,7 +1,7 @@
 """astrbot_plugin_openai_oauth — ChatGPT 订阅 (Codex OAuth) provider.
 
-注册一个 `openai_codex` provider：登录 ChatGPT 账号后，AI 调用走账号订阅额度。
-个人自用场景使用。
+注册一个 `openai_subscription_oauth` provider：登录 ChatGPT 账号后，AI 调用
+走账号订阅额度。个人自用场景使用。
 """
 
 from __future__ import annotations
@@ -17,7 +17,10 @@ from astrbot.api import AstrBotConfig
 from astrbot.api.star import Context, Star, register
 from astrbot.api.web import json_response, request
 from astrbot.core.provider.entities import LLMResponse
-from astrbot.core.provider.register import register_provider_adapter
+from astrbot.core.provider.register import (
+    provider_cls_map,
+    register_provider_adapter,
+)
 from astrbot.core.provider.sources.openai_responses_source import (
     ProviderOpenAIResponses,
 )
@@ -44,6 +47,9 @@ from .oauth import (
 )
 
 _REFRESH_SKEW_SECONDS = 120
+
+# WebUI 模型配置里展示的 provider 类型名。
+_PROVIDER_TYPE = "openai_subscription_oauth"
 
 # 由 OpenAI_OAuth_Plugin 注入，供 provider 把刷新的凭据写回 AstrBot 配置。
 _config_mgr: Any = None
@@ -86,19 +92,31 @@ class OpenAI_OAuth_Plugin(Star):
         )
 
 
-@register_provider_adapter(
-    "openai_codex",
-    "OpenAI 订阅登录 (Codex OAuth) Provider",
-    provider_display_name="OpenAI 订阅 (ChatGPT 登录)",
-    default_config_tmpl={
-        # key 存放凭据 JSON：{access_token, refresh_token, expires, account_id}
-        "key": "",
-        "model": "gpt-5.4-mini",
-        "proxy": "",
-        "originator": DEFAULT_ORIGINATOR,
-        "user_agent": DEFAULT_USER_AGENT,
-    },
-)
+def _register_provider_adapter_if_absent(cls: type) -> type:
+    """仅在类型未注册时才注册 provider 适配器。
+
+    AstrBot 的 provider 注册不幂等：插件热重载（astrbot run --reload）会清掉
+    sys.modules 里的插件模块，却不清 provider_cls_map；重导入会再次执行注册并
+    抛“已经注册”错误。这里跳过已注册类型，保证 reload 后插件仍能正常加载。
+    """
+    if _PROVIDER_TYPE not in provider_cls_map:
+        return register_provider_adapter(
+            _PROVIDER_TYPE,
+            "OpenAI 订阅登录 (Codex OAuth) Provider",
+            provider_display_name="OpenAI 订阅 (ChatGPT 登录)",
+            default_config_tmpl={
+                # key 存放凭据 JSON：{access_token, refresh_token, expires, account_id}
+                "key": "",
+                "model": "gpt-5.4-mini",
+                "proxy": "",
+                "originator": DEFAULT_ORIGINATOR,
+                "user_agent": DEFAULT_USER_AGENT,
+            },
+        )(cls)
+    return cls
+
+
+@_register_provider_adapter_if_absent
 class ProviderOpenAICodex(ProviderOpenAIResponses):
     """ChatGPT subscription provider backed by the Codex OAuth flow.
 

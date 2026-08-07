@@ -6,7 +6,7 @@ An [AstrBot](https://astrbot.app) provider plugin: log in with your ChatGPT
 account (Plus / Pro subscription) and use its quota as a model provider —
 no API key needed.
 
-It registers an `openai_codex` provider in the WebUI model configuration. AI
+It registers an `openai_subscription_oauth` provider in the WebUI model configuration. AI
 calls go through OpenAI's Codex backend (`chatgpt.com/backend-api/codex`) with
 an OAuth token obtained from a device-code login, so billing draws on your
 **subscription**, not prepaid API credits.
@@ -65,7 +65,7 @@ an OAuth token obtained from a device-code login, so billing draws on your
 
 ## Architecture
 
-- `main.py` — registers the `openai_codex` provider adapter, the plugin Star,
+- `main.py` — registers the `openai_subscription_oauth` provider adapter, the plugin Star,
   and the device-login Web API (`device/start`, `device/poll`, `login` page).
 - `oauth.py` — Codex OAuth protocol constants, credential helpers, token
   refresh, and the device-code login protocol (user-code request, polling,
