@@ -62,6 +62,10 @@ def main() -> int:
             "config 模板带 provider=openai（前端图标查找）",
         )
         check(
+            (meta.default_config_tmpl or {}).get("provider_type") == "chat_completion",
+            "config 模板带 provider_type=chat_completion（前端 tab 过滤）",
+        )
+        check(
             "key" in (meta.default_config_tmpl or {}),
             "config 模板包含 key 字段",
         )

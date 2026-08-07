@@ -106,7 +106,10 @@ def _register_provider_adapter_if_absent(cls: type) -> type:
             provider_display_name="OpenAI Subscribe",
             default_config_tmpl={
                 # provider 字段被前端 getProviderIcon 读取，映射到 OpenAI 官方图标。
+                # provider_type 被前端按 tab 过滤（chat_completion），缺失会导致
+                # 模型配置下拉里看不到这个 provider。
                 "provider": "openai",
+                "provider_type": "chat_completion",
                 # key 存放凭据 JSON：{access_token, refresh_token, expires, account_id}
                 "key": "",
                 "model": "gpt-5.4-mini",
