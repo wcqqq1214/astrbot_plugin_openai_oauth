@@ -127,6 +127,15 @@ def main() -> int:
     )
     check("save_creds" in main_src, "登录页可自动写回凭据")
 
+    print("\n=== 8. README 提供详情页直达登录链接（方案2） ===")
+    login_path = "/api/plugins/extensions/astrbot_plugin_openai_oauth/login"
+    repo_root = os.path.dirname(__file__)
+    for fname in ("README.md", "README_EN.md"):
+        with open(os.path.join(repo_root, fname), encoding="utf-8") as fh:
+            readme_src = fh.read()
+        check(f"({login_path})" in readme_src, f"{fname} 含详情页直达链接")
+        check("http://<host>" in readme_src, f"{fname} 含 <host> 兜底完整地址")
+
     print()
     if FAILED:
         print(f"=== 冒烟验证失败：{len(FAILED)} 项 ===")

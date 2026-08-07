@@ -10,13 +10,13 @@
 
 1. 从 AstrBot 插件市场安装（或克隆到 `data/plugins/`）。
 2. 在 WebUI 模型配置中添加一个类型为 **OpenAI Subscribe** 的 provider。
-3. 登录你的 ChatGPT 账号。在浏览器打开登录页（把 `<host>` 换成你访问 WebUI 的地址——localhost、局域网 IP、域名、端口均可，地址自适应，无需改动插件）：
+3. 登录你的 ChatGPT 账号。在 WebUI 插件详情页点击 [打开登录页](/api/plugins/extensions/astrbot_plugin_openai_oauth/login) 直达（地址自适应，无需改动插件）。在 GitHub 等外部页面看到本说明时该相对链接不可用，请手动打开：
 
    ```text
    http://<host>/api/plugins/extensions/astrbot_plugin_openai_oauth/login
    ```
 
-   点击 **开始登录**，复制显示的链接（到新标签页打开）并输入设备码完成授权。登录成功后凭据会自动写入 provider 的 `key` 字段，无需复制粘贴；只有自动写入失败时才需要把显示的凭据 JSON 手动复制到 `key` 字段。
+   把 `<host>` 换成你访问 WebUI 的地址（localhost、局域网 IP、域名、端口均可）。点击 **开始登录**，复制显示的链接（到新标签页打开）并输入设备码完成授权。登录成功后凭据会自动写入 provider 的 `key` 字段，无需复制粘贴；只有自动写入失败时才需要把显示的凭据 JSON 手动复制到 `key` 字段。
 
    > 需要在你的 ChatGPT 安全设置中开启设备码登录（“Enable device code authentication for Codex”）；未开启时页面会提示。
 

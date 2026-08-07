@@ -16,20 +16,22 @@ an OAuth token obtained from a device-code login, so billing draws on your
    `data/plugins/`).
 2. In the WebUI model configuration, add a provider of type
    **OpenAI Subscribe**.
-3. Log in with your ChatGPT account. Open the login page in your browser
-   (replace `<host>` with the address you use to reach the WebUI — localhost,
-   LAN IP, domain or port all work; the link adapts automatically, no plugin
-   change needed):
+3. Log in with your ChatGPT account. On the WebUI plugin detail page, click
+   [open the login page](/api/plugins/extensions/astrbot_plugin_openai_oauth/login)
+   to go straight there — the link adapts to your host automatically, no
+   plugin change needed. When reading this README on GitHub or elsewhere the
+   relative link is not usable, so open this address manually:
 
    ```text
    http://<host>/api/plugins/extensions/astrbot_plugin_openai_oauth/login
    ```
 
-   Click **开始登录**, copy the shown link (open it in a new tab), enter the
-   device code and approve. On success the credentials are written into the
-   provider's `key` field automatically — no copy/paste needed. Only if that
-   auto-save fails do you copy the shown credential JSON into the `key` field
-   manually.
+   Replace `<host>` with the address you use to reach the WebUI (localhost,
+   LAN IP, domain or port all work). Click **开始登录**, copy the shown link
+   (open it in a new tab), enter the device code and approve. On success the
+   credentials are written into the provider's `key` field automatically — no
+   copy/paste needed. Only if that auto-save fails do you copy the shown
+   credential JSON into the `key` field manually.
 
    > Device-code login must be enabled in your ChatGPT security settings
    > (“Enable device code authentication for Codex”); the page reports it if
