@@ -51,7 +51,9 @@ an OAuth token obtained from a device-code login, so billing draws on your
 
 - [x] Plugin scaffold + provider registration verified end-to-end (WebUI
       visibility confirmed).
-- [x] Provider logic: endpoint wiring, dynamic model list, token refresh.
+- [x] Provider logic: endpoint wiring, dynamic model list, token refresh
+      (each refresh is persisted back into the provider config, so a
+      restart does not require re-login).
 - [x] Device-code login flow (login page + polling backend; copy the
       resulting credential JSON into the provider `key` field).
 - [x] Live verification against the real ChatGPT backend (device login, model

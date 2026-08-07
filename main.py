@@ -45,6 +45,9 @@ from .oauth import (
 
 _REFRESH_SKEW_SECONDS = 120
 
+# 由 OpenAI_OAuth_Plugin 注入，供 provider 把刷新的凭据写回 AstrBot 配置。
+_config_mgr: Any = None
+
 
 @register(
     "astrbot_plugin_openai_oauth",
@@ -58,7 +61,9 @@ class OpenAI_OAuth_Plugin(Star):
         context: Context,
         config: AstrBotConfig | None = None,
     ) -> None:
+        global _config_mgr
         super().__init__(context)
+        _config_mgr = context.astrbot_config_mgr
         self.config = config if config is not None else AstrBotConfig()
         # 设备登录的后端接口与页面：/api/plugins/extensions/<route>
         self.context.register_web_api(
@@ -203,9 +208,30 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                 )
                 self.provider_config["key"] = dump_credentials(self.creds)
                 self._sync_client_key()
+                await self._persist_key()
                 logger.info("OpenAI Codex token refreshed.")
             except Exception as e:  # noqa: BLE001 - a failed refresh must not break the request
                 logger.error(f"OpenAI Codex token refresh failed: {e}")
+
+    async def _persist_key(self) -> None:
+        """把当前凭据写回 AstrBot 配置里的 provider key，重启后免重新登录。"""
+        cfg_mgr = _config_mgr
+        provider_id = self.provider_config.get("id")
+        if cfg_mgr is None or not provider_id:
+            return
+        try:
+            conf = cfg_mgr.default_conf
+            for provider in conf["provider"]:
+                if provider.get("id") == provider_id:
+                    provider["key"] = dump_credentials(self.creds)
+                    await conf.save_config_async()
+                    return
+            logger.warning(
+                f"OpenAI Codex provider {provider_id} not found in config; "
+                "refreshed token not persisted."
+            )
+        except Exception as e:  # noqa: BLE001 - a failed persist must not break the request
+            logger.error(f"OpenAI Codex failed to persist refreshed token: {e}")
 
     async def text_chat(self, *args, **kwargs) -> LLMResponse:
         await self._ensure_fresh_token()

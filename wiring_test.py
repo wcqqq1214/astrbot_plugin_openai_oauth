@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import sys
+from unittest import mock
 
 # 解析 AstrBot 仓库根（本文件位于 Project/astrbot_plugin_openai_oauth/ 下）
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "AstrBot"))
@@ -136,6 +137,101 @@ def main() -> int:
         expired_no_refresh.get_current_key() == ACCESS_TOKEN,
         "过期但无 refresh_token 时静默跳过",
     )
+
+    print("\n=== 6. _persist_key：把凭据写回配置里的 provider key ===")
+    FRESH = {
+        "access_token": "sk-ant-oat01-fresh.fresh.fresh",
+        "refresh_token": "rt-fresh",
+        "expires": 9999999999,
+        "account_id": ACCOUNT_ID,
+    }
+
+    class _FakeConfig(dict):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.saved = None
+
+        async def save_config_async(self):
+            self.saved = dict(self)
+            return True
+
+    class _FakeCfgMgr:
+        def __init__(self, conf):
+            self.default_conf = conf
+
+    persist_prov = ProviderOpenAICodex(make_config(creds), {})
+    persist_prov.provider_config["id"] = "prov-1"
+    stored = {
+        "id": "prov-1",
+        "type": "openai_codex",
+        "key": json.dumps(creds),
+    }
+    fake_conf = _FakeConfig({"provider": [stored]})
+    module._config_mgr = _FakeCfgMgr(fake_conf)
+    persist_prov.creds = dict(FRESH)
+    try:
+        asyncio.run(persist_prov._persist_key())
+        parsed = json.loads(stored["key"])
+        check(
+            parsed["access_token"] == FRESH["access_token"],
+            "刷新后的 access_token 写回 key",
+        )
+        check(
+            parsed["refresh_token"] == FRESH["refresh_token"], "refresh_token 一并写回"
+        )
+        check(parsed["account_id"] == ACCOUNT_ID, "account_id 一并写回")
+        check(fake_conf.saved is not None, "save_config_async 被调用")
+    finally:
+        module._config_mgr = None
+
+    no_mgr = ProviderOpenAICodex(make_config(creds), {})
+    no_mgr.provider_config["id"] = "prov-1"
+    asyncio.run(no_mgr._persist_key())  # _config_mgr 为 None 时静默跳过
+    check(True, "无 _config_mgr 时静默跳过")
+
+    print("\n=== 7. _ensure_fresh_token 刷新后自动持久化 ===")
+    stored2 = {
+        "id": "prov-2",
+        "type": "openai_codex",
+        "key": json.dumps(creds),
+    }
+    fake_conf2 = _FakeConfig({"provider": [stored2]})
+    module._config_mgr = _FakeCfgMgr(fake_conf2)
+    expired = ProviderOpenAICodex(
+        make_config(
+            {
+                "access_token": ACCESS_TOKEN,
+                "refresh_token": REFRESH_TOKEN,
+                "expires": 1,
+                "account_id": ACCOUNT_ID,
+            }
+        ),
+        {},
+    )
+    expired.provider_config["id"] = "prov-2"
+    try:
+        with mock.patch.object(
+            module,
+            "refresh_access_token",
+            new=mock.AsyncMock(return_value=dict(FRESH)),
+        ):
+            asyncio.run(expired._ensure_fresh_token())
+        check(
+            expired.get_current_key() == FRESH["access_token"],
+            "内存 token 已刷新",
+        )
+        parsed2 = json.loads(stored2["key"])
+        check(
+            parsed2["access_token"] == FRESH["access_token"],
+            "刷新结果持久化到配置",
+        )
+        check(
+            parsed2["refresh_token"] == FRESH["refresh_token"],
+            "轮换的 refresh_token 持久化",
+        )
+        check(fake_conf2.saved is not None, "save_config_async 被调用")
+    finally:
+        module._config_mgr = None
 
     print()
     if FAILED:
