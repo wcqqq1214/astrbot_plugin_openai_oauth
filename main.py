@@ -14,6 +14,7 @@ from typing import Any
 
 from astrbot import logger
 from astrbot.api import AstrBotConfig
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star, register
 from astrbot.api.web import json_response, request
 from astrbot.core.provider.entities import LLMResponse
@@ -34,12 +35,14 @@ from .oauth import (
     CODEX_MODELS_URL,
     DEFAULT_ORIGINATOR,
     DEFAULT_USER_AGENT,
+    CredentialExpiredError,
     DeviceAuthError,
     DeviceAuthTimeout,
     build_credentials,
     dump_credentials,
     exchange_authorization_code,
     extract_model_ids,
+    fetch_rate_limits,
     load_credentials,
     poll_device_authorization,
     refresh_access_token,
@@ -96,6 +99,11 @@ class OpenAI_OAuth_Plugin(Star):
             ["POST"],
             "保存登录凭据到 provider 配置",
         )
+
+    @filter.command("usage")
+    async def usage(self, event: AstrMessageEvent) -> None:
+        """查询 OpenAI 订阅剩余额度。"""
+        await event.send(MessageChain().message(await build_usage_message()))
 
 
 def _register_provider_adapter_if_absent(cls: type) -> type:
@@ -286,6 +294,92 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         await self._ensure_fresh_token()
         async for item in super().text_chat_stream(*args, **kwargs):
             yield item
+
+
+# ---- 订阅额度查询（/usage 聊天命令） ----
+
+# /wham/usage 的 limit_window_seconds → 可读窗口名（与 Codex CLI /status、
+# cc-switch 的窗口映射一致）。
+_WINDOW_LABELS = {18000: "5小时窗口", 604800: "7天窗口", 2592000: "30天窗口"}
+
+
+def _window_label(seconds: Any) -> str:
+    if seconds in _WINDOW_LABELS:
+        return _WINDOW_LABELS[seconds]
+    if isinstance(seconds, (int, float)) and seconds:
+        if seconds % 86400 == 0:
+            return f"{seconds // 86400}天窗口"
+        if seconds % 3600 == 0:
+            return f"{seconds // 3600}小时窗口"
+    return "额度窗口"
+
+
+def _format_reset(seconds: Any) -> str:
+    if not isinstance(seconds, (int, float)) or seconds < 0:
+        return ""
+    seconds = int(seconds)
+    hours, rem = divmod(seconds, 3600)
+    minutes = rem // 60
+    if hours >= 48:
+        return f"，重置 {hours // 24} 天后"
+    return f"，重置 {hours} 小时 {minutes} 分后"
+
+
+def format_usage(usage: dict) -> str:
+    """把 fetch_rate_limits 的结果渲染成聊天回复文本。"""
+    lines = ["OpenAI 订阅额度："]
+    windows = usage.get("windows") or []
+    if not windows:
+        lines.append("当前账号暂无可用额度窗口。")
+    for window in windows:
+        used = window.get("used_percent", 0.0)
+        remaining = max(0.0, 100.0 - float(used))
+        lines.append(
+            f"· {_window_label(window.get('label_seconds'))}："
+            f"已用 {used:.0f}%，剩余 {remaining:.0f}%"
+            f"{_format_reset(window.get('reset_after_seconds'))}"
+        )
+    if usage.get("limit_reached"):
+        lines.append("状态：已达额度上限，等待窗口重置。")
+    elif not usage.get("allowed"):
+        lines.append("状态：当前不可用。")
+    else:
+        lines.append("状态：可用。")
+    return "\n".join(lines)
+
+
+async def build_usage_message() -> str:
+    """读取 provider 配置里的凭据并查询额度，返回要发送的文本。"""
+    cfg_mgr = _config_mgr
+    if cfg_mgr is None:
+        return "配置管理器不可用。"
+    source = next(
+        (
+            s
+            for s in cfg_mgr.default_conf.get("provider_sources", [])
+            if s.get("type") == _PROVIDER_TYPE or s.get("id") == _PROVIDER_TYPE
+        ),
+        None,
+    )
+    creds = load_credentials(source.get("key")) if source else {}
+    if not creds.get("access_token"):
+        return (
+            "尚未登录。请在 WebUI 插件详情页点击『打开登录页』，"
+            "用 ChatGPT 账号完成 Codex 设备码登录后重试。"
+        )
+    proxy = str((source or {}).get("proxy", "") or "")
+    try:
+        usage = await fetch_rate_limits(
+            creds.get("access_token", ""),
+            creds.get("account_id", ""),
+            proxy,
+        )
+    except CredentialExpiredError:
+        return "凭据已失效，请在插件详情页重新登录。"
+    except Exception as exc:  # noqa: BLE001 - 查询失败信息透传给用户
+        logger.error(f"OpenAI Codex 额度查询失败: {exc}")
+        return f"额度查询失败：{exc}"
+    return format_usage(usage)
 
 
 # ---- 设备登录 Web API（个人自用，进程内存即可） ----

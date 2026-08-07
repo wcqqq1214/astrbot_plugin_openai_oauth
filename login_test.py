@@ -64,6 +64,12 @@ class _FakeClient:
             return self._responses.pop(0)
         raise AssertionError("_FakeClient response queue exhausted")
 
+    async def get(self, url: str, **kwargs) -> _FakeResponse:
+        self.calls.append((url, kwargs))
+        if self._responses:
+            return self._responses.pop(0)
+        raise AssertionError("_FakeClient response queue exhausted")
+
     async def aclose(self) -> None:
         self.closed = True
 
@@ -425,6 +431,188 @@ def test_persist_key() -> None:
         plugin_mod._config_mgr = old_mgr
 
 
+def test_usage_fetch() -> None:
+    print("\n=== 9. fetch_rate_limits：当前 schema / 旧版 schema / 401 ===")
+    payload = {
+        "plan_type": "plus",
+        "rate_limit": {
+            "allowed": True,
+            "limit_reached": False,
+            "primary_window": {
+                "used_percent": 35,
+                "limit_window_seconds": 18000,
+                "reset_after_seconds": 1200,
+                "reset_at": 1234567890,
+            },
+            "secondary_window": {
+                "used_percent": 12,
+                "limit_window_seconds": 604800,
+                "reset_after_seconds": 95000,
+                "reset_at": 1234567890,
+            },
+        },
+    }
+    client = _FakeClient([_FakeResponse(200, payload)])
+    with mock.patch.object(oauth, "create_proxy_client", return_value=client):
+        result = asyncio.run(oauth.fetch_rate_limits("at", "acc-1"))
+    check(
+        result["allowed"] is True and result["limit_reached"] is False,
+        "解析 allowed/limit_reached",
+    )
+    windows = result["windows"]
+    check(len(windows) == 2, "primary + secondary 两个窗口")
+    check(
+        windows[0]["used_percent"] == 35.0 and windows[0]["label_seconds"] == 18000,
+        "primary 窗口 used_percent/窗口秒数",
+    )
+    check(windows[1]["reset_after_seconds"] == 95000, "secondary 窗口重置倒计时")
+    url, kwargs = client.calls[0]
+    check(url == oauth.CODEX_USAGE_URL, "请求 /wham/usage")
+    check(kwargs["headers"]["Authorization"] == "Bearer at", "Authorization 头")
+    check(kwargs["headers"]["ChatGPT-Account-Id"] == "acc-1", "账号 id 头")
+
+    # 旧版 /wham/usage 形态：rate_limits.codex[] 带 usage/limit 秒数
+    legacy = {
+        "rate_limits": {
+            "codex": [
+                {
+                    "key": "5h",
+                    "usage_in_seconds": 6300,
+                    "limit_in_seconds": 18000,
+                    "resets_in_seconds": 1200,
+                    "is_exceeded": False,
+                },
+                {
+                    "key": "weekly",
+                    "usage_in_seconds": 90000,
+                    "limit_in_seconds": 750000,
+                    "resets_in_seconds": 95000,
+                    "is_exceeded": False,
+                },
+            ]
+        }
+    }
+    client2 = _FakeClient([_FakeResponse(200, legacy)])
+    with mock.patch.object(oauth, "create_proxy_client", return_value=client2):
+        result2 = asyncio.run(oauth.fetch_rate_limits("at"))
+    w2 = result2["windows"]
+    check(len(w2) == 2, "旧版 schema 解析两个窗口")
+    check(round(w2[0]["used_percent"], 1) == 35.0, "旧版 schema 换算百分比")
+    check(w2[1]["label_seconds"] == 750000, "旧版 schema 保留窗口秒数")
+
+    client3 = _FakeClient([_FakeResponse(401)])
+    with mock.patch.object(oauth, "create_proxy_client", return_value=client3):
+        try:
+            asyncio.run(oauth.fetch_rate_limits("at"))
+            check(False, "401 应抛 CredentialExpiredError")
+        except oauth.CredentialExpiredError:
+            check(True, "401 → CredentialExpiredError")
+
+
+def test_usage_format() -> None:
+    print("\n=== 10. format_usage：文本渲染 ===")
+    msg = plugin_mod.format_usage(
+        {
+            "allowed": True,
+            "limit_reached": False,
+            "windows": [
+                {
+                    "label_seconds": 18000,
+                    "used_percent": 35.0,
+                    "reset_after_seconds": 1200,
+                    "reset_at": None,
+                },
+                {
+                    "label_seconds": 604800,
+                    "used_percent": 12.0,
+                    "reset_after_seconds": 95000,
+                    "reset_at": None,
+                },
+            ],
+        }
+    )
+    check(
+        "5小时窗口" in msg and "已用 35%" in msg and "剩余 65%" in msg, "5 小时窗口渲染"
+    )
+    check("重置 0 小时 20 分后" in msg, "20 分钟重置倒计时")
+    check("7天窗口" in msg and "剩余 88%" in msg, "7 天窗口渲染")
+    check("重置 26 小时 23 分后" in msg, "26 小时重置倒计时")
+    check("状态：可用。" in msg, "可用状态")
+
+    reached = plugin_mod.format_usage(
+        {
+            "allowed": False,
+            "limit_reached": True,
+            "windows": [],
+        }
+    )
+    check(
+        "已达额度上限" in reached and "当前账号暂无可用额度窗口" in reached,
+        "上限/无窗口渲染",
+    )
+
+
+def test_usage_command() -> None:
+    print("\n=== 11. /usage 命令：未登录 / 正常查询 ===")
+    old_mgr = plugin_mod._config_mgr
+    try:
+        mgr = _FakeConfigMgr(
+            {
+                "provider_sources": [
+                    {
+                        "type": plugin_mod._PROVIDER_TYPE,
+                        "id": plugin_mod._PROVIDER_TYPE,
+                        "key": "",
+                        "proxy": "",
+                    }
+                ]
+            }
+        )
+        plugin_mod._config_mgr = mgr
+        msg = asyncio.run(plugin_mod.build_usage_message())
+        check("尚未登录" in msg, "未登录时提示去登录")
+
+        mgr2 = _FakeConfigMgr(
+            {
+                "provider_sources": [
+                    {
+                        "type": plugin_mod._PROVIDER_TYPE,
+                        "id": plugin_mod._PROVIDER_TYPE,
+                        "key": oauth.dump_credentials(
+                            {
+                                "access_token": "at",
+                                "account_id": "acc",
+                                "refresh_token": "rt",
+                            }
+                        ),
+                        "proxy": "",
+                    }
+                ]
+            }
+        )
+        plugin_mod._config_mgr = mgr2
+
+        async def _fetch(at: str, acc: str, proxy: str) -> dict:
+            return {
+                "allowed": True,
+                "limit_reached": False,
+                "windows": [
+                    {
+                        "label_seconds": 18000,
+                        "used_percent": 35.0,
+                        "reset_after_seconds": 1200,
+                        "reset_at": None,
+                    }
+                ],
+            }
+
+        with mock.patch.object(plugin_mod, "fetch_rate_limits", side_effect=_fetch):
+            msg2 = asyncio.run(plugin_mod.build_usage_message())
+        check("剩余 65%" in msg2, "已登录时返回额度文本")
+    finally:
+        plugin_mod._config_mgr = old_mgr
+
+
 def main() -> int:
     test_usercode()
     test_poll()
@@ -434,6 +622,9 @@ def main() -> int:
     test_login_page()
     test_save_creds()
     test_persist_key()
+    test_usage_fetch()
+    test_usage_format()
+    test_usage_command()
     print()
     if FAILED:
         print(f"=== 登录验证失败：{len(FAILED)} 项 ===")

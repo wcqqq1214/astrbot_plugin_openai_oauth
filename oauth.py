@@ -22,6 +22,9 @@ CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_BASE = "https://chatgpt.com/backend-api/codex"
 CODEX_MODELS_URL = f"{CODEX_BASE}/models"
+# 订阅额度查询（与 Codex CLI /status、cc-switch 一致）：rate_limit 下按
+# primary_window（5 小时滚动）/ secondary_window（周）各带 used_percent。
+CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 
 # Codex CLI 的新版设备登录流程（device_code_auth.rs）：先取 user_code，
 # 用户去 codex/device 输入并授权，轮询到 authorization_code 后换 token。
@@ -148,6 +151,10 @@ class DeviceAuthTimeout(DeviceAuthError):
     """设备码在有效期内未被用户授权。"""
 
 
+class CredentialExpiredError(Exception):
+    """访问令牌已失效（HTTP 401/403），需要重新登录。"""
+
+
 async def request_device_user_code(proxy: str | None = None) -> tuple[str, str, int]:
     """请求一个设备码，返回 ``(device_auth_id, user_code, interval)``。
 
@@ -239,6 +246,88 @@ async def exchange_authorization_code(
         return resp.json()
     finally:
         await client.aclose()
+
+
+async def fetch_rate_limits(
+    access_token: str,
+    account_id: str = "",
+    proxy: str | None = None,
+) -> dict:
+    """查询 ChatGPT 订阅剩余额度（GET /wham/usage）。
+
+    返回 ``{"allowed": bool, "limit_reached": bool, "windows": [...]}``，
+    每个 window 含 ``used_percent``/``label_seconds``/``reset_after_seconds``/
+    ``reset_at``。当前后端返回 ``rate_limit.primary_window/secondary_window``
+    （各带 used_percent）；兼容旧版 ``rate_limits.codex[]`` 的
+    usage_in_seconds/limit_in_seconds 形态。
+    """
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "User-Agent": DEFAULT_USER_AGENT,
+        "Accept": "application/json",
+    }
+    if account_id:
+        headers["ChatGPT-Account-Id"] = account_id
+    client = create_proxy_client("OpenAI Codex", proxy)
+    try:
+        resp = await client.get(CODEX_USAGE_URL, headers=headers, timeout=15)
+        if resp.status_code in (401, 403):
+            raise CredentialExpiredError()
+        resp.raise_for_status()
+        data = resp.json()
+    finally:
+        await client.aclose()
+    return _parse_usage_payload(data)
+
+
+def _parse_usage_payload(data: Any) -> dict:
+    allowed = True
+    limit_reached = False
+    windows: list[dict] = []
+    rate_limit = data.get("rate_limit") if isinstance(data, dict) else None
+    if isinstance(rate_limit, dict):
+        allowed = bool(rate_limit.get("allowed", True))
+        limit_reached = bool(rate_limit.get("limit_reached", False))
+        for window in ("primary_window", "secondary_window"):
+            item = rate_limit.get(window)
+            if isinstance(item, dict) and isinstance(
+                item.get("used_percent"), (int, float)
+            ):
+                windows.append(
+                    {
+                        "label_seconds": item.get("limit_window_seconds"),
+                        "used_percent": float(item["used_percent"]),
+                        "reset_after_seconds": item.get("reset_after_seconds"),
+                        "reset_at": item.get("reset_at"),
+                    }
+                )
+    # 旧版 /wham/usage 形态：rate_limits.codex[].{usage_in_seconds,
+    # limit_in_seconds, resets_in_seconds}
+    if not windows and isinstance(data, dict):
+        codex = data.get("rate_limits")
+        if isinstance(codex, dict):
+            codex = codex.get("codex")
+        if isinstance(codex, list):
+            for item in codex:
+                if not isinstance(item, dict):
+                    continue
+                limit_s = item.get("limit_in_seconds")
+                usage_s = item.get("usage_in_seconds")
+                if isinstance(limit_s, (int, float)) and limit_s:
+                    used = usage_s * 100.0 / limit_s if usage_s else 0.0
+                    windows.append(
+                        {
+                            "label_seconds": int(limit_s),
+                            "used_percent": min(used, 100.0),
+                            "reset_after_seconds": item.get("resets_in_seconds"),
+                            "reset_at": None,
+                        }
+                    )
+    return {
+        "allowed": allowed,
+        "limit_reached": limit_reached,
+        "windows": windows,
+    }
 
 
 def extract_account_id(access_token: str) -> str:
