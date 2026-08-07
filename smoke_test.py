@@ -25,7 +25,8 @@ from astrbot.dashboard.services.config_service import (
 
 FAILED = []
 
-# 与 main.py 的 _PROVIDER_TYPE 保持一致。
+# 步骤 1 在导入前就需要该类型名，因此静态声明；步骤 2 导入后会校验与
+# module._PROVIDER_TYPE 一致，避免改名后测试静默失联。
 PROVIDER_TYPE = "OpenAI Subscribe"
 
 
@@ -46,6 +47,10 @@ def main() -> int:
 
     module = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.main")
     check(module is not None, "data.plugins.astrbot_plugin_openai_oauth.main 导入成功")
+    check(
+        PROVIDER_TYPE == module._PROVIDER_TYPE,
+        f"测试常量与 module._PROVIDER_TYPE 一致（{module._PROVIDER_TYPE}）",
+    )
 
     print("\n=== 3. provider 已进入注册表 ===")
     check(PROVIDER_TYPE in provider_cls_map, "provider_cls_map 包含 provider")
