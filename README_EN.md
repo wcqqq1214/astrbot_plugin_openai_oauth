@@ -17,13 +17,13 @@ an OAuth token obtained from a device-code login, so billing draws on your
 2. In the WebUI model configuration, add a provider of type
    **OpenAI Subscribe**.
 3. Log in with your ChatGPT account. On the WebUI plugin detail page, click
-   [open the login page](/api/plugins/extensions/astrbot_plugin_openai_oauth/login)
+   [open the login page](/api/v1/plugins/extensions/astrbot_plugin_openai_oauth/login)
    to go straight there — the link adapts to your host automatically, no
    plugin change needed. When reading this README on GitHub or elsewhere the
    relative link is not usable, so open this address manually:
 
    ```text
-   http://<host>/api/plugins/extensions/astrbot_plugin_openai_oauth/login
+   http://<host>/api/v1/plugins/extensions/astrbot_plugin_openai_oauth/login
    ```
 
    Replace `<host>` with the address you use to reach the WebUI (localhost,

@@ -71,7 +71,7 @@ class OpenAI_OAuth_Plugin(Star):
         super().__init__(context)
         _config_mgr = context.astrbot_config_mgr
         self.config = config if config is not None else AstrBotConfig()
-        # 设备登录的后端接口与页面：/api/plugins/extensions/<route>
+        # 设备登录的后端接口与页面：/api/v1/plugins/extensions/<route>
         self.context.register_web_api(
             "/astrbot_plugin_openai_oauth/device/start",
             _handle_device_start,
@@ -459,7 +459,7 @@ _LOGIN_PAGE_HTML = """<!doctype html>
   </div>
   <div id="error" hidden></div>
   <script>
-    const BASE = "/api/plugins/extensions/astrbot_plugin_openai_oauth";
+    const BASE = "/api/v1/plugins/extensions/astrbot_plugin_openai_oauth";
     const $ = (id) => document.getElementById(id);
     const startBtn = $("start");
     startBtn.addEventListener("click", async () => {
