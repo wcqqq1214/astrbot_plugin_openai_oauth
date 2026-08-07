@@ -1,36 +1,24 @@
 # astrbot_plugin_openai_oauth
 
-An [AstrBot](https://astrbot.app) provider plugin: log in with your ChatGPT
-account (Plus / Pro subscription) and use its quota as a model provider —
-no API key needed.
+简体中文 | [English](README_EN.md)
 
-It registers an `openai_codex` provider in the WebUI model configuration. AI
-calls go through OpenAI's Codex backend (`chatgpt.com/backend-api/codex`) with
-an OAuth token obtained from a device-code login, so billing draws on your
-**subscription**, not prepaid API credits.
+一个 [AstrBot](https://astrbot.app) 插件：用你的 ChatGPT 账号（Plus / Pro 订阅）登录，将账号订阅额度作为模型 provider 使用——无需 API Key。
 
-> ⚠️ **Terms of Service caution.** This uses the consumer ChatGPT backend by
-> authenticating like the official Codex CLI, not the paid OpenAI API. It is
-> meant for **personal, self-hosted use only** (single user, non-commercial).
-> OpenAI can change the flow or revoke it at any time; the plugin may stop
-> working without notice. Anthropic already shut down the equivalent for Claude
-> (Feb 2026), and Google did the same for Gemini.
+它在 WebUI 模型配置中注册了一个 `openai_codex` provider。AI 调用通过 OpenAI 的 Codex 后端（`chatgpt.com/backend-api/codex`）发出，使用设备码登录获取的 OAuth token，因此计费走你的**订阅额度**，而不是预付的 API 余额。
 
-## Usage
+> ⚠️ **服务条款提醒。** 本项目像官方 Codex CLI 一样，以消费者身份使用 ChatGPT 后端，而非付费 OpenAI API。仅用于**个人自用**（单用户、非商用）。OpenAI 随时可能改动或封禁该流程，插件可能无预警失效。Anthropic 已于 2026 年 2 月关闭了 Claude 的同类方案，Google 对 Gemini 也做了同样的事。
 
-1. Install the plugin from the AstrBot plugin market (or clone it into
-   `data/plugins/`).
-2. In the WebUI model configuration, add a provider of type
-   **OpenAI 订阅 (ChatGPT 登录)**.
-3. Log in with your ChatGPT account using the plugin's device-code page:
+## 使用方法
+
+1. 从 AstrBot 插件市场安装（或克隆到 `data/plugins/`）。
+2. 在 WebUI 模型配置中添加一个类型为 **OpenAI 订阅（ChatGPT 登录）** 的 provider。
+3. 使用插件的设备码页面登录你的 ChatGPT 账号：
 
    ```text
    http://<astrbot-host>/api/plugins/extensions/astrbot_plugin_openai_oauth/login
    ```
 
-   Click **开始登录**, open the shown link, enter the device code, and
-   approve. When the login succeeds the page shows the credential JSON —
-   copy it into the provider's `key` field:
+   点击 **开始登录**，打开显示的链接，输入设备码并确认。登录成功后页面会显示凭据 JSON——把它复制到 provider 的 `key` 字段：
 
    ```json
    {
@@ -41,46 +29,28 @@ an OAuth token obtained from a device-code login, so billing draws on your
    }
    ```
 
-   > Device-code login must be enabled in your ChatGPT security settings
-   > (“Enable device code authentication for Codex”); the page reports it if
-   > not.
+   > 需要在你的 ChatGPT 安全设置中开启设备码登录（“Enable device code authentication for Codex”）；未开启时页面会提示。
 
-4. Pick a model (e.g. `gpt-5.4-mini`) and enable the provider.
+4. 选择模型（例如 `gpt-5.4-mini`）并启用该 provider。
 
-## Status
+## 状态
 
-- [x] Plugin scaffold + provider registration verified end-to-end (WebUI
-      visibility confirmed).
-- [x] Provider logic: endpoint wiring, dynamic model list, token refresh
-      (each refresh is persisted back into the provider config, so a
-      restart does not require re-login).
-- [x] Device-code login flow (login page + polling backend; copy the
-      resulting credential JSON into the provider `key` field).
-- [x] Live verification against the real ChatGPT backend (device login, model
-      catalog, and the Responses request shape — account-id JWT claim and the
-      backend's stream-only requirement).
-- [ ] Release.
+- [x] 插件脚手架 + provider 注册端到端验证（WebUI 可见性已确认）。
+- [x] Provider 逻辑：端点接线、动态模型列表、token 刷新（每次刷新都会写回 provider 配置，重启无需重新登录）。
+- [x] 设备码登录流程（登录页 + 轮询后端；将得到的凭据 JSON 复制到 provider 的 `key` 字段）。
+- [x] 针对真实 ChatGPT 后端的实测验证（设备登录、模型目录、Responses 请求格式——account-id JWT claim 与后端仅支持流式输出）。
+- [ ] 正式发布。
 
-## Architecture
+## 架构
 
-- `main.py` — registers the `openai_codex` provider adapter, the plugin Star,
-  and the device-login Web API (`device/start`, `device/poll`, `login` page).
-- `oauth.py` — Codex OAuth protocol constants, credential helpers, token
-  refresh, and the device-code login protocol (user-code request, polling,
-  authorization-code exchange, JWT account-id extraction).
-- `smoke_test.py` — verifies that a plugin can register a provider and that
-  the WebUI metadata builder sees it.
-- `wiring_test.py` — instantiates the provider with fake credentials and
-  verifies endpoint wiring, key handling and refresh short-circuits
-  (no network).
-- `login_test.py` — exercises the device-login protocol and the web handlers
-  with a mocked network (no network).
+- `main.py` — 注册 `openai_codex` provider 适配器、插件 Star 以及设备登录 Web API（`device/start`、`device/poll`、`login` 页面）。
+- `oauth.py` — Codex OAuth 协议常量、凭据辅助、token 刷新以及设备码登录协议（user-code 请求、轮询、授权码交换、JWT account-id 提取）。
+- `smoke_test.py` — 验证插件能注册 provider，且 WebUI 元数据构建器能看到它。
+- `wiring_test.py` — 用假凭据实例化 provider，验证端点接线、key 处理与刷新短路（无网络）。
+- `login_test.py` — 用 mock 网络走一遍设备登录协议与 web handler（无网络）。
 
-The protocol follows the implementations in
-[opencode](https://github.com/sst/opencode),
-[openclaw](https://github.com/openclaw/openclaw) and
-[hermes-agent](https://github.com/NousResearch/hermes-agent).
+协议参考 [opencode](https://github.com/sst/opencode)、[openclaw](https://github.com/openclaw/openclaw) 与 [hermes-agent](https://github.com/NousResearch/hermes-agent) 的实现。
 
-## License
+## License / 许可证
 
-AGPL-3.0-only.
+AGPL-3.0-only。
