@@ -1,7 +1,7 @@
 """astrbot_plugin_openai_oauth — ChatGPT 订阅 (Codex OAuth) provider.
 
-注册一个 `openai_subscription_oauth` provider：登录 ChatGPT 账号后，AI 调用
-走账号订阅额度。个人自用场景使用。
+注册一个 `OpenAI Subscribe` provider：登录 ChatGPT 账号后，AI 调用走账号订阅
+额度。个人自用场景使用。
 """
 
 from __future__ import annotations
@@ -48,8 +48,8 @@ from .oauth import (
 
 _REFRESH_SKEW_SECONDS = 120
 
-# WebUI 模型配置里展示的 provider 类型名。
-_PROVIDER_TYPE = "openai_subscription_oauth"
+# WebUI 模型配置里展示的 provider 类型名（也是配置里的 type/id）。
+_PROVIDER_TYPE = "OpenAI Subscribe"
 
 # 由 OpenAI_OAuth_Plugin 注入，供 provider 把刷新的凭据写回 AstrBot 配置。
 _config_mgr: Any = None
@@ -103,8 +103,10 @@ def _register_provider_adapter_if_absent(cls: type) -> type:
         return register_provider_adapter(
             _PROVIDER_TYPE,
             "OpenAI 订阅登录 (Codex OAuth) Provider",
-            provider_display_name="OpenAI 订阅 (ChatGPT 登录)",
+            provider_display_name="OpenAI Subscribe",
             default_config_tmpl={
+                # provider 字段被前端 getProviderIcon 读取，映射到 OpenAI 官方图标。
+                "provider": "openai",
                 # key 存放凭据 JSON：{access_token, refresh_token, expires, account_id}
                 "key": "",
                 "model": "gpt-5.4-mini",

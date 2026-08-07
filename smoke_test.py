@@ -26,7 +26,7 @@ from astrbot.dashboard.services.config_service import (
 FAILED = []
 
 # 与 main.py 的 _PROVIDER_TYPE 保持一致。
-PROVIDER_TYPE = "openai_subscription_oauth"
+PROVIDER_TYPE = "OpenAI Subscribe"
 
 
 def check(cond: bool, msg: str) -> None:
@@ -53,10 +53,14 @@ def main() -> int:
     if meta is not None:
         check(bool(meta.desc), f"描述非空: {meta.desc[:40]}...")
         check(
-            meta.provider_display_name == "OpenAI 订阅 (ChatGPT 登录)",
+            meta.provider_display_name == "OpenAI Subscribe",
             f"provider_display_name: {meta.provider_display_name}",
         )
         check(meta.default_config_tmpl is not None, "default_config_tmpl 存在")
+        check(
+            (meta.default_config_tmpl or {}).get("provider") == "openai",
+            "config 模板带 provider=openai（前端图标查找）",
+        )
         check(
             "key" in (meta.default_config_tmpl or {}),
             "config 模板包含 key 字段",
