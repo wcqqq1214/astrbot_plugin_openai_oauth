@@ -22,8 +22,15 @@ an OAuth token obtained from a device-code login, so billing draws on your
    `data/plugins/`).
 2. In the WebUI model configuration, add a provider of type
    **OpenAI 订阅 (ChatGPT 登录)**.
-3. In its `key` field, put the credential JSON produced by the plugin's
-   login flow:
+3. Log in with your ChatGPT account using the plugin's device-code page:
+
+   ```text
+   http://<astrbot-host>/api/plugins/extensions/astrbot_plugin_openai_oauth/login
+   ```
+
+   Click **开始登录**, open the shown link, enter the device code, and
+   approve. When the login succeeds the page shows the credential JSON —
+   copy it into the provider's `key` field:
 
    ```json
    {
@@ -34,6 +41,10 @@ an OAuth token obtained from a device-code login, so billing draws on your
    }
    ```
 
+   > Device-code login must be enabled in your ChatGPT security settings
+   > (“Enable device code authentication for Codex”); the page reports it if
+   > not.
+
 4. Pick a model (e.g. `gpt-5.4-mini`) and enable the provider.
 
 ## Status
@@ -41,20 +52,25 @@ an OAuth token obtained from a device-code login, so billing draws on your
 - [x] Plugin scaffold + provider registration verified end-to-end (WebUI
       visibility confirmed).
 - [x] Provider logic: endpoint wiring, dynamic model list, token refresh.
-- [ ] Device-code login flow (WebUI login button).
+- [x] Device-code login flow (login page + polling backend; copy the
+      resulting credential JSON into the provider `key` field).
+- [ ] Live verification against the real ChatGPT backend.
 - [ ] Release.
 
 ## Architecture
 
-- `main.py` — registers the `openai_codex` provider adapter and the plugin
-  Star.
+- `main.py` — registers the `openai_codex` provider adapter, the plugin Star,
+  and the device-login Web API (`device/start`, `device/poll`, `login` page).
 - `oauth.py` — Codex OAuth protocol constants, credential helpers, token
-  refresh (device-code login flow planned).
+  refresh, and the device-code login protocol (user-code request, polling,
+  authorization-code exchange, JWT account-id extraction).
 - `smoke_test.py` — verifies that a plugin can register a provider and that
   the WebUI metadata builder sees it.
 - `wiring_test.py` — instantiates the provider with fake credentials and
   verifies endpoint wiring, key handling and refresh short-circuits
   (no network).
+- `login_test.py` — exercises the device-login protocol and the web handlers
+  with a mocked network (no network).
 
 The protocol follows the implementations in
 [opencode](https://github.com/sst/opencode),

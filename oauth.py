@@ -9,6 +9,8 @@ API calls go to the Responses-style endpoint under
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 import time
 from typing import Any
@@ -20,6 +22,19 @@ CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_BASE = "https://chatgpt.com/backend-api/codex"
 CODEX_MODELS_URL = f"{CODEX_BASE}/models"
+
+# Codex CLI 的新版设备登录流程（device_code_auth.rs）：先取 user_code，
+# 用户去 codex/device 输入并授权，轮询到 authorization_code 后换 token。
+# PKCE 的 code_verifier 由服务端在授权后随 authorization_code 一并下发。
+CODEX_DEVICE_ACCOUNTS_BASE = "https://auth.openai.com/api/accounts"
+CODEX_DEVICE_USERCODE_URL = f"{CODEX_DEVICE_ACCOUNTS_BASE}/deviceauth/usercode"
+CODEX_DEVICE_TOKEN_URL = f"{CODEX_DEVICE_ACCOUNTS_BASE}/deviceauth/token"
+CODEX_DEVICE_VERIFY_URL = "https://auth.openai.com/codex/device"
+CODEX_OAUTH_REDIRECT_URI = "https://auth.openai.com/deviceauth/callback"
+CODEX_DEVICE_LOGIN_TIMEOUT = 15 * 60
+
+# JWT payload 里承载 ChatGPT 账号 id 的 claim。
+_CHATGPT_ACCOUNT_ID_CLAIM = "https://api.openai.com/auth.chatgpt_account_id"
 
 # Models reachable through a ChatGPT subscription. The live catalog comes from
 # GET /codex/models; this list is the offline fallback for the WebUI dropdown.
@@ -120,3 +135,135 @@ def extract_model_ids(data: Any) -> list[str]:
         for item in data:
             add(item)
     return ids
+
+
+class DeviceAuthError(Exception):
+    """设备登录流程的硬性失败（未启用、被拒绝等）。"""
+
+
+class DeviceAuthTimeout(DeviceAuthError):
+    """设备码在有效期内未被用户授权。"""
+
+
+async def request_device_user_code(proxy: str | None = None) -> tuple[str, str, int]:
+    """请求一个设备码，返回 ``(device_auth_id, user_code, interval)``。
+
+    该流程要求 ChatGPT 账号已开启 “Enable device code authentication for
+    Codex”（安全设置），否则接口返回 404。
+    """
+    client = create_proxy_client("OpenAI Codex", proxy)
+    try:
+        resp = await client.post(
+            CODEX_DEVICE_USERCODE_URL,
+            json={"client_id": CODEX_OAUTH_CLIENT_ID},
+            headers={"Accept": "application/json"},
+            timeout=30,
+        )
+        if resp.status_code == 404:
+            raise DeviceAuthError(
+                "device code 登录未启用：请先在 ChatGPT 安全设置中开启"
+                " “Enable device code authentication for Codex”"
+            )
+        resp.raise_for_status()
+        data = resp.json()
+    finally:
+        await client.aclose()
+    device_auth_id = data["device_auth_id"]
+    user_code = data.get("user_code") or data.get("usercode")
+    if not user_code:
+        raise DeviceAuthError("OpenAI 未返回 user_code。")
+    interval = int(data.get("interval", 5))
+    return device_auth_id, user_code, interval
+
+
+async def poll_device_authorization(
+    device_auth_id: str,
+    user_code: str,
+    interval: int,
+    proxy: str | None = None,
+    timeout_seconds: int = CODEX_DEVICE_LOGIN_TIMEOUT,
+) -> tuple[str, str]:
+    """轮询用户是否完成授权，返回 ``(authorization_code, code_verifier)``。
+
+    403/404 表示仍在等待；到时抛 ``DeviceAuthTimeout``。
+    """
+    client = create_proxy_client("OpenAI Codex", proxy)
+    deadline = time.monotonic() + timeout_seconds
+    try:
+        while time.monotonic() < deadline:
+            await asyncio.sleep(interval)
+            try:
+                resp = await client.post(
+                    CODEX_DEVICE_TOKEN_URL,
+                    json={"device_auth_id": device_auth_id, "user_code": user_code},
+                    headers={"Accept": "application/json"},
+                    timeout=30,
+                )
+            except Exception:  # noqa: BLE001 - 瞬时网络错误只需继续轮询
+                logger.warning("Codex 设备登录轮询网络错误，重试。")
+                continue
+            if resp.status_code == 200:
+                data = resp.json()
+                return data["authorization_code"], data["code_verifier"]
+            if resp.status_code in (403, 404):
+                continue  # 尚未授权
+            raise DeviceAuthError(f"设备登录轮询失败：HTTP {resp.status_code}")
+    finally:
+        await client.aclose()
+    raise DeviceAuthTimeout("设备码已过期，请在 15 分钟内完成授权。")
+
+
+async def exchange_authorization_code(
+    authorization_code: str,
+    code_verifier: str,
+    proxy: str | None = None,
+) -> dict:
+    """用授权码换取 token，返回原始 token 载荷（access_token 等）。"""
+    client = create_proxy_client("OpenAI Codex", proxy)
+    try:
+        resp = await client.post(
+            CODEX_OAUTH_TOKEN_URL,
+            data={
+                "grant_type": "authorization_code",
+                "client_id": CODEX_OAUTH_CLIENT_ID,
+                "code": authorization_code,
+                "code_verifier": code_verifier,
+                "redirect_uri": CODEX_OAUTH_REDIRECT_URI,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+    finally:
+        await client.aclose()
+
+
+def extract_account_id(access_token: str) -> str:
+    """从 access_token（JWT，可能带 sk-ant-oat01- 前缀）里解出 ChatGPT 账号 id。
+
+    账号 id 取自 payload claim ``https://api.openai.com/auth.chatgpt_account_id``。
+    """
+    token = access_token
+    token = token.removeprefix("sk-ant-oat01-")
+    try:
+        _, payload_b64, _ = token.split(".", 2)
+        padding = "=" * (-len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64 + padding))
+        value = payload.get(_CHATGPT_ACCOUNT_ID_CLAIM)
+        return value if isinstance(value, str) else ""
+    except Exception:  # noqa: BLE001 - 非 JWT 时静默返回空串
+        return ""
+
+
+def build_credentials(
+    access_token: str,
+    refresh_token: str,
+    expires_in: int,
+) -> dict:
+    """把登录/刷新结果组装成 provider key 字段使用的凭据 JSON。"""
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires": int(time.time()) + int(expires_in),
+        "account_id": extract_account_id(access_token),
+    }
