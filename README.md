@@ -83,4 +83,4 @@ The protocol follows the implementations in
 
 ## License
 
-AGPL-3.0-or-later.
+AGPL-3.0-only.
