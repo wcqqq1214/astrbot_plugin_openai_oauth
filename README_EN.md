@@ -10,14 +10,6 @@ It registers an `OpenAI Subscribe` provider in the WebUI model configuration. AI
 calls go through OpenAI's Codex backend (`chatgpt.com/backend-api/codex`) with
 an OAuth token obtained from a device-code login, so billing draws on your
 **subscription**, not prepaid API credits.
-
-> ⚠️ **Terms of Service caution.** This uses the consumer ChatGPT backend by
-> authenticating like the official Codex CLI, not the paid OpenAI API. It is
-> meant for **personal, self-hosted use only** (single user, non-commercial).
-> OpenAI can change the flow or revoke it at any time; the plugin may stop
-> working without notice. Anthropic already shut down the equivalent for Claude
-> (Feb 2026), and Google did the same for Gemini.
-
 ## Usage
 
 1. Install the plugin from the AstrBot plugin market (or clone it into

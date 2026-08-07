@@ -6,8 +6,6 @@
 
 它在 WebUI 模型配置中注册了一个 `OpenAI Subscribe` provider。AI 调用通过 OpenAI 的 Codex 后端（`chatgpt.com/backend-api/codex`）发出，使用设备码登录获取的 OAuth token，因此计费走你的**订阅额度**，而不是预付的 API 余额。
 
-> ⚠️ **服务条款提醒。** 本项目像官方 Codex CLI 一样，以消费者身份使用 ChatGPT 后端，而非付费 OpenAI API。仅用于**个人自用**（单用户、非商用）。OpenAI 随时可能改动或封禁该流程，插件可能无预警失效。Anthropic 已于 2026 年 2 月关闭了 Claude 的同类方案，Google 对 Gemini 也做了同样的事。
-
 ## 使用方法
 
 1. 从 AstrBot 插件市场安装（或克隆到 `data/plugins/`）。
