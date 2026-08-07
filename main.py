@@ -209,7 +209,14 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
 
     async def text_chat(self, *args, **kwargs) -> LLMResponse:
         await self._ensure_fresh_token()
-        return await super().text_chat(*args, **kwargs)
+        # Codex 后端只接受 stream=true，非流式路径也改走流式并聚合出完整响应。
+        final_response = None
+        async for chunk in super().text_chat_stream(*args, **kwargs):
+            if not chunk.is_chunk:
+                final_response = chunk
+        if final_response is None:
+            raise RuntimeError("OpenAI Codex 未返回完整响应。")
+        return final_response
 
     async def text_chat_stream(
         self, *args, **kwargs

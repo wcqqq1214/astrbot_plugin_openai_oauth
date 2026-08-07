@@ -54,7 +54,9 @@ an OAuth token obtained from a device-code login, so billing draws on your
 - [x] Provider logic: endpoint wiring, dynamic model list, token refresh.
 - [x] Device-code login flow (login page + polling backend; copy the
       resulting credential JSON into the provider `key` field).
-- [ ] Live verification against the real ChatGPT backend.
+- [x] Live verification against the real ChatGPT backend (device login, model
+      catalog, and the Responses request shape — account-id JWT claim and the
+      backend's stream-only requirement).
 - [ ] Release.
 
 ## Architecture

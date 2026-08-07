@@ -153,14 +153,23 @@ def test_exchange() -> None:
 
 def test_jwt() -> None:
     print("\n=== 4. extract_account_id / build_credentials ===")
-    token = _jwt({"https://api.openai.com/auth.chatgpt_account_id": "user-abc"})
-    check(oauth.extract_account_id(token) == "user-abc", "从 JWT payload 提取账号 id")
+    token = _jwt({"https://api.openai.com/auth": {"chatgpt_account_id": "user-abc"}})
+    check(
+        oauth.extract_account_id(token) == "user-abc", "从嵌套 auth claim 提取账号 id"
+    )
     check(
         oauth.extract_account_id("sk-ant-oat01-" + token) == "user-abc",
         "带前缀也能提取",
     )
+    check(
+        oauth.extract_account_id(
+            _jwt({"https://api.openai.com/auth.chatgpt_account_id": "user-abc"})
+        )
+        == "user-abc",
+        "旧版平铺 claim 也能提取",
+    )
     check(oauth.extract_account_id("not-a-jwt") == "", "非 JWT 返回空串")
-    check(oauth.extract_account_id(_jwt({})) == "", "无该 claim 返回空串")
+    check(oauth.extract_account_id(_jwt({})) == "", "无账号 id claim 返回空串")
 
     creds = oauth.build_credentials(token, "rt2", 3600)
     check(creds["access_token"] == token, "build_credentials 保留 access_token")

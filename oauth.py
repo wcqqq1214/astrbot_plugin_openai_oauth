@@ -33,7 +33,10 @@ CODEX_DEVICE_VERIFY_URL = "https://auth.openai.com/codex/device"
 CODEX_OAUTH_REDIRECT_URI = "https://auth.openai.com/deviceauth/callback"
 CODEX_DEVICE_LOGIN_TIMEOUT = 15 * 60
 
-# JWT payload 里承载 ChatGPT 账号 id 的 claim。
+# JWT payload 里承载 ChatGPT 账号 id 的 claim。新版 token 是嵌套对象
+# `https://api.openai.com/auth` 下的 `chatgpt_account_id`；旧版是平铺 claim。
+_CHATGPT_AUTH_CLAIM = "https://api.openai.com/auth"
+_CHATGPT_ACCOUNT_ID_KEY = "chatgpt_account_id"
 _CHATGPT_ACCOUNT_ID_CLAIM = "https://api.openai.com/auth.chatgpt_account_id"
 
 # Models reachable through a ChatGPT subscription. The live catalog comes from
@@ -241,18 +244,23 @@ async def exchange_authorization_code(
 def extract_account_id(access_token: str) -> str:
     """从 access_token（JWT，可能带 sk-ant-oat01- 前缀）里解出 ChatGPT 账号 id。
 
-    账号 id 取自 payload claim ``https://api.openai.com/auth.chatgpt_account_id``。
+    账号 id 在嵌套 claim ``https://api.openai.com/auth`` 的
+    ``chatgpt_account_id`` 字段；旧版平铺 claim 也兼容。
     """
-    token = access_token
-    token = token.removeprefix("sk-ant-oat01-")
+    token = access_token.removeprefix("sk-ant-oat01-")
     try:
         _, payload_b64, _ = token.split(".", 2)
         padding = "=" * (-len(payload_b64) % 4)
         payload = json.loads(base64.urlsafe_b64decode(payload_b64 + padding))
-        value = payload.get(_CHATGPT_ACCOUNT_ID_CLAIM)
-        return value if isinstance(value, str) else ""
     except Exception:  # noqa: BLE001 - 非 JWT 时静默返回空串
         return ""
+    auth_claims = payload.get(_CHATGPT_AUTH_CLAIM)
+    if isinstance(auth_claims, dict):
+        value = auth_claims.get(_CHATGPT_ACCOUNT_ID_KEY)
+        if isinstance(value, str) and value:
+            return value
+    value = payload.get(_CHATGPT_ACCOUNT_ID_CLAIM)
+    return value if isinstance(value, str) else ""
 
 
 def build_credentials(
