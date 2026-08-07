@@ -11,8 +11,10 @@ import asyncio
 import base64
 import json
 import os
+import re
 import sys
 import time
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest import mock
 
@@ -511,6 +513,8 @@ def test_usage_fetch() -> None:
 
 def test_usage_format() -> None:
     print("\n=== 10. format_usage：文本渲染 ===")
+    local_tz = datetime.now(UTC).astimezone().tzinfo
+    reset_ts = int(datetime(2026, 8, 8, 15, 30, tzinfo=local_tz).timestamp())
     msg = plugin_mod.format_usage(
         {
             "allowed": True,
@@ -519,8 +523,8 @@ def test_usage_format() -> None:
                 {
                     "label_seconds": 18000,
                     "used_percent": 35.0,
-                    "reset_after_seconds": 1200,
-                    "reset_at": None,
+                    "reset_after_seconds": None,
+                    "reset_at": reset_ts,
                 },
                 {
                     "label_seconds": 604800,
@@ -534,9 +538,12 @@ def test_usage_format() -> None:
     check(
         "5小时窗口" in msg and "已用 35%" in msg and "剩余 65%" in msg, "5 小时窗口渲染"
     )
-    check("重置 0 小时 20 分后" in msg, "20 分钟重置倒计时")
+    check("重置 8月8日 15:30" in msg, "reset_at → 准确本地时间")
     check("7天窗口" in msg and "剩余 88%" in msg, "7 天窗口渲染")
-    check("重置 26 小时 23 分后" in msg, "26 小时重置倒计时")
+    check(
+        re.search(r"\d{1,2}月\d{1,2}日 \d{2}:\d{2}", msg),
+        "reset_after 推算出的准确时间",
+    )
     check("状态：可用。" in msg, "可用状态")
 
     reached = plugin_mod.format_usage(
@@ -552,26 +559,31 @@ def test_usage_format() -> None:
     )
 
 
+class _FakeEvent:
+    def __init__(self):
+        self.call_llm = True
+        self.sent: list = []
+
+    def should_call_llm(self, call_llm: bool) -> None:
+        self.call_llm = call_llm
+
+    async def send(self, message) -> None:
+        self.sent.append(message)
+
+
 def test_usage_command() -> None:
-    print("\n=== 11. /usage 命令：未登录 / 正常查询 ===")
+    print("\n=== 11. /usage 命令：未登录拦截 / 正常查询 ===")
     old_mgr = plugin_mod._config_mgr
     try:
-        mgr = _FakeConfigMgr(
-            {
-                "provider_sources": [
-                    {
-                        "type": plugin_mod._PROVIDER_TYPE,
-                        "id": plugin_mod._PROVIDER_TYPE,
-                        "key": "",
-                        "proxy": "",
-                    }
-                ]
-            }
-        )
-        plugin_mod._config_mgr = mgr
-        msg = asyncio.run(plugin_mod.build_usage_message())
-        check("尚未登录" in msg, "未登录时提示去登录")
+        # 未登录：命令被拦截（静默，不触发默认 LLM，不回复）
+        plugin_mod._config_mgr = _FakeConfigMgr({"provider_sources": []})
+        ev = _FakeEvent()
+        asyncio.run(plugin_mod.OpenAI_OAuth_Plugin.usage(None, ev))
+        check(ev.call_llm is False, "未登录时阻止默认 LLM")
+        check(ev.sent == [], "未登录时不发送任何内容")
+        check(plugin_mod._is_logged_in() is False, "无 source 视为未登录")
 
+        # 已登录：正常查询并回复
         mgr2 = _FakeConfigMgr(
             {
                 "provider_sources": [
@@ -591,6 +603,7 @@ def test_usage_command() -> None:
             }
         )
         plugin_mod._config_mgr = mgr2
+        check(plugin_mod._is_logged_in() is True, "有 access_token 视为已登录")
 
         async def _fetch(at: str, acc: str, proxy: str) -> dict:
             return {
@@ -600,14 +613,18 @@ def test_usage_command() -> None:
                     {
                         "label_seconds": 18000,
                         "used_percent": 35.0,
-                        "reset_after_seconds": 1200,
+                        "reset_after_seconds": None,
                         "reset_at": None,
                     }
                 ],
             }
 
+        ev2 = _FakeEvent()
         with mock.patch.object(plugin_mod, "fetch_rate_limits", side_effect=_fetch):
+            asyncio.run(plugin_mod.OpenAI_OAuth_Plugin.usage(None, ev2))
             msg2 = asyncio.run(plugin_mod.build_usage_message())
+        check(len(ev2.sent) == 1, "已登录时发送一条回复")
+        check(ev2.call_llm is True, "已登录时不改动 LLM 开关")
         check("剩余 65%" in msg2, "已登录时返回额度文本")
     finally:
         plugin_mod._config_mgr = old_mgr

@@ -10,6 +10,7 @@ import asyncio
 import secrets
 import time
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from typing import Any
 
 from astrbot import logger
@@ -103,6 +104,10 @@ class OpenAI_OAuth_Plugin(Star):
     @filter.command("usage")
     async def usage(self, event: AstrMessageEvent) -> None:
         """查询 OpenAI 订阅剩余额度。"""
+        if not _is_logged_in():
+            # 未登录时命令不可用：静默拦截，不触发默认 LLM。
+            event.should_call_llm(False)
+            return
         await event.send(MessageChain().message(await build_usage_message()))
 
 
@@ -314,15 +319,27 @@ def _window_label(seconds: Any) -> str:
     return "额度窗口"
 
 
-def _format_reset(seconds: Any) -> str:
-    if not isinstance(seconds, (int, float)) or seconds < 0:
+def _format_reset_at(reset_at: Any, reset_after: Any) -> str:
+    """把重置时间渲染成“M月d日 HH:MM”的准确本地时间。
+
+    优先使用后端下发的 reset_at（unix 秒）；旧版 schema 只有
+    reset_after_seconds 时用 now + 秒数推算。
+    """
+    ts = reset_at
+    if not isinstance(ts, (int, float)):
+        if isinstance(reset_after, (int, float)) and reset_after >= 0:
+            ts = time.time() + reset_after
+        else:
+            return ""
+    try:
+        dt = datetime.fromtimestamp(ts, tz=UTC).astimezone()
+    except (OSError, OverflowError, ValueError):
         return ""
-    seconds = int(seconds)
-    hours, rem = divmod(seconds, 3600)
-    minutes = rem // 60
-    if hours >= 48:
-        return f"，重置 {hours // 24} 天后"
-    return f"，重置 {hours} 小时 {minutes} 分后"
+    now = datetime.now(UTC).astimezone()
+    date_part = f"{dt.month}月{dt.day}日"
+    if dt.year != now.year:
+        date_part = f"{dt.year}年{date_part}"
+    return f"，重置 {date_part} {dt:%H:%M}"
 
 
 def format_usage(usage: dict) -> str:
@@ -337,7 +354,7 @@ def format_usage(usage: dict) -> str:
         lines.append(
             f"· {_window_label(window.get('label_seconds'))}："
             f"已用 {used:.0f}%，剩余 {remaining:.0f}%"
-            f"{_format_reset(window.get('reset_after_seconds'))}"
+            f"{_format_reset_at(window.get('reset_at'), window.get('reset_after_seconds'))}"
         )
     if usage.get("limit_reached"):
         lines.append("状态：已达额度上限，等待窗口重置。")
@@ -348,12 +365,12 @@ def format_usage(usage: dict) -> str:
     return "\n".join(lines)
 
 
-async def build_usage_message() -> str:
-    """读取 provider 配置里的凭据并查询额度，返回要发送的文本。"""
+def _get_source() -> dict | None:
+    """从 AstrBot 配置里找本插件的 provider source。"""
     cfg_mgr = _config_mgr
     if cfg_mgr is None:
-        return "配置管理器不可用。"
-    source = next(
+        return None
+    return next(
         (
             s
             for s in cfg_mgr.default_conf.get("provider_sources", [])
@@ -361,12 +378,23 @@ async def build_usage_message() -> str:
         ),
         None,
     )
+
+
+def _is_logged_in() -> bool:
+    """是否已登录：provider source 里存有 access_token。"""
+    source = _get_source()
+    if not source:
+        return False
+    return bool(load_credentials(source.get("key")).get("access_token"))
+
+
+async def build_usage_message() -> str:
+    """读取 provider 配置里的凭据并查询额度，返回要发送的文本。"""
+    source = _get_source()
     creds = load_credentials(source.get("key")) if source else {}
     if not creds.get("access_token"):
-        return (
-            "尚未登录。请在 WebUI 插件详情页点击『打开登录页』，"
-            "用 ChatGPT 账号完成 Codex 设备码登录后重试。"
-        )
+        # 正常路径已被 /usage 指令的登录门槛挡住，这里仅作兜底。
+        return "尚未登录。"
     proxy = str((source or {}).get("proxy", "") or "")
     try:
         usage = await fetch_rate_limits(
