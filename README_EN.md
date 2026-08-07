@@ -16,23 +16,20 @@ an OAuth token obtained from a device-code login, so billing draws on your
    `data/plugins/`).
 2. In the WebUI model configuration, add a provider of type
    **OpenAI Subscribe**.
-3. Log in with your ChatGPT account. After the plugin is installed the WebUI
-   exposes a login entry:
-   - the **插件 WebUI** group in the sidebar → this plugin; or
-   - the **打开 WebUI** button on the plugin card under **已安装插件**.
+3. Log in with your ChatGPT account. Open the login page in your browser
+   (replace `<host>` with the address you use to reach the WebUI — localhost,
+   LAN IP, domain or port all work; the link adapts automatically, no plugin
+   change needed):
+
+   ```text
+   http://<host>/api/plugins/extensions/astrbot_plugin_openai_oauth/login
+   ```
+
    Click **开始登录**, copy the shown link (open it in a new tab), enter the
    device code and approve. On success the credentials are written into the
-   provider's `key` field automatically — no copy/paste needed.
-
-   > If your AstrBot version does not support plugin pages, the standalone
-   > login page still works:
-   >
-   > ```text
-   > http://<astrbot-host>/api/plugins/extensions/astrbot_plugin_openai_oauth/login
-   > ```
-   >
-   > It runs the same flow and auto-saves the credentials; only if that fails
-   > do you copy the shown credential JSON into the `key` field manually.
+   provider's `key` field automatically — no copy/paste needed. Only if that
+   auto-save fails do you copy the shown credential JSON into the `key` field
+   manually.
 
    > Device-code login must be enabled in your ChatGPT security settings
    > (“Enable device code authentication for Codex”); the page reports it if
@@ -43,10 +40,9 @@ an OAuth token obtained from a device-code login, so billing draws on your
 ## Architecture
 
 - `main.py` — registers the `OpenAI Subscribe` provider adapter, the plugin Star,
-  and the device-login Web API (`device/start`, `device/poll`, `save_creds`,
-  `login` page).
-- `pages/login/index.html` — the in-WebUI plugin login page (rendered through
-  AstrBot's plugin-page system; writes the credentials back on success).
+  the device-login Web API (`device/start`, `device/poll`, `save_creds`), and the
+  standalone login page (`/login`; the link-login entry, auto-saves credentials
+  on success).
 - `oauth.py` — Codex OAuth protocol constants, credential helpers, token
   refresh, and the device-code login protocol (user-code request, polling,
   authorization-code exchange, JWT account-id extraction).

@@ -116,21 +116,16 @@ def main() -> int:
         "provider 元数据仍是首次导入的类（未重复注册）",
     )
 
-    print("\n=== 7. WebUI 插件登录页随插件分发 ===")
-    pages_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "pages"))
-    login_html = os.path.join(pages_dir, "login", "index.html")
-    check(os.path.isfile(login_html), "pages/login/index.html 存在")
-    if os.path.isfile(login_html):
-        with open(login_html, encoding="utf-8") as fh:
-            page = fh.read()
-        check(
-            "/api/plugin/page/bridge-sdk.js" in page,
-            "页面引用插件页面桥接 SDK",
-        )
-        check(
-            "device/start" in page and "save_creds" in page,
-            "页面调用 start / save_creds 接口",
-        )
+    print("\n=== 7. 独立登录页随插件分发（链接登录入口） ===")
+    main_py = os.path.abspath(os.path.join(os.path.dirname(__file__), "main.py"))
+    with open(main_py, encoding="utf-8") as fh:
+        main_src = fh.read()
+    check("_LOGIN_PAGE_HTML" in main_src, "main.py 内含独立登录页模板")
+    check(
+        "/astrbot_plugin_openai_oauth/login" in main_src,
+        "登录页注册了 /login 路由（链接入口）",
+    )
+    check("save_creds" in main_src, "登录页可自动写回凭据")
 
     print()
     if FAILED:

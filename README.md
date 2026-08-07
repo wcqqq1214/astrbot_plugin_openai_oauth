@@ -10,18 +10,13 @@
 
 1. 从 AstrBot 插件市场安装（或克隆到 `data/plugins/`）。
 2. 在 WebUI 模型配置中添加一个类型为 **OpenAI Subscribe** 的 provider。
-3. 登录你的 ChatGPT 账号。插件安装后，WebUI 里会出现登录入口：
-   - 侧边栏 **插件 WebUI** 分组，点击本插件；
-   - 或在 **已安装插件** 列表中，点插件卡片上的 **打开 WebUI**。
-   在登录页点击 **开始登录**，复制显示的链接（到新标签页打开）并输入设备码完成授权。登录成功后凭据会自动写入 provider 的 `key` 字段，无需复制粘贴。
+3. 登录你的 ChatGPT 账号。在浏览器打开登录页（把 `<host>` 换成你访问 WebUI 的地址——localhost、局域网 IP、域名、端口均可，地址自适应，无需改动插件）：
 
-   > 若你的 AstrBot 版本不支持插件页面，仍可使用独立登录页：
-   >
-   > ```text
-   > http://<astrbot-host>/api/plugins/extensions/astrbot_plugin_openai_oauth/login
-   > ```
-   >
-   > 它会执行同样的流程并自动写入凭据；只有自动写入失败时才需要把显示的凭据 JSON 手动复制到 `key` 字段。
+   ```text
+   http://<host>/api/plugins/extensions/astrbot_plugin_openai_oauth/login
+   ```
+
+   点击 **开始登录**，复制显示的链接（到新标签页打开）并输入设备码完成授权。登录成功后凭据会自动写入 provider 的 `key` 字段，无需复制粘贴；只有自动写入失败时才需要把显示的凭据 JSON 手动复制到 `key` 字段。
 
    > 需要在你的 ChatGPT 安全设置中开启设备码登录（“Enable device code authentication for Codex”）；未开启时页面会提示。
 
@@ -29,8 +24,7 @@
 
 ## 架构
 
-- `main.py` — 注册 `OpenAI Subscribe` provider 适配器、插件 Star 以及设备登录 Web API（`device/start`、`device/poll`、`save_creds`、`login` 页面）。
-- `pages/login/index.html` — WebUI 插件登录页（通过 AstrBot 插件页面系统内嵌渲染，登录成功后自动写回凭据）。
+- `main.py` — 注册 `OpenAI Subscribe` provider 适配器、插件 Star、设备登录 Web API（`device/start`、`device/poll`、`save_creds`）以及独立登录页（`/login`，链接登录入口，登录成功后自动写回凭据）。
 - `oauth.py` — Codex OAuth 协议常量、凭据辅助、token 刷新以及设备码登录协议（user-code 请求、轮询、授权码交换、JWT account-id 提取）。
 - `smoke_test.py` — 验证插件能注册 provider，且 WebUI 元数据构建器能看到它。
 - `wiring_test.py` — 用假凭据实例化 provider，验证端点接线、key 处理与刷新短路（无网络）。
