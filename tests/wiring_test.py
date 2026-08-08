@@ -88,6 +88,27 @@ def main() -> int:
     check(prov.get_keys() == [ACCESS_TOKEN], "get_keys 返回 access_token")
     check(prov.get_current_key() == ACCESS_TOKEN, "get_current_key 返回 access_token")
 
+    print("\n=== 1.1 Hot reload provider registration ===")
+    provider_metadata = module.provider_cls_map[module._PROVIDER_TYPE]
+    original_provider_cls = provider_metadata.cls_type
+
+    class _StaleProvider:
+        pass
+
+    provider_metadata.cls_type = _StaleProvider
+    try:
+        returned_cls = module._register_provider_adapter_if_absent(ProviderOpenAICodex)
+        check(
+            returned_cls is ProviderOpenAICodex,
+            "hot reload returns the newly imported provider class",
+        )
+        check(
+            provider_metadata.cls_type is ProviderOpenAICodex,
+            "provider metadata points to the newly imported class",
+        )
+    finally:
+        provider_metadata.cls_type = original_provider_cls
+
     print("\n=== 3. set_key：裸 token 与 JSON 凭据 ===")
     prov.set_key("sk-ant-oat01-new.new.new")
     check(

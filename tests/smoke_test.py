@@ -97,10 +97,11 @@ def main() -> int:
     registered = [k for k in star_map if "astrbot_plugin_openai_oauth" in k]
     check(bool(registered), f"star_map 含插件注册项: {registered}")
 
-    print("\n=== 6. 热重载模拟：清 sys.modules 后重导入，注册必须幂等 ===")
-    # AstrBot 插件热重载（astrbot run --reload）会清掉 sys.modules 里的插件
-    # 模块，却不清 provider_cls_map；重导入会再次执行注册。若注册非幂等，会抛
-    # “已经注册” ValueError。这里模拟 _cleanup_plugin_state 并重导入，验证不报错。
+    print(
+        "\n=== 6. Hot reload: provider registration is idempotent and refreshes class ==="
+    )
+    # AstrBot plugin hot reload clears the plugin modules from sys.modules but keeps
+    # provider_cls_map. Re-importing must not raise and must replace stale metadata.
     first_cls = provider_cls_map[PROVIDER_TYPE].cls_type
     prefix = "data.plugins.astrbot_plugin_openai_oauth"
     for key in [m for m in sys.modules if m == prefix or m.startswith(prefix + ".")]:
@@ -115,8 +116,8 @@ def main() -> int:
     if not reload_ok:
         check(False, f"重复注册报错：{reload_error}")
     check(
-        provider_cls_map[PROVIDER_TYPE].cls_type is first_cls,
-        "provider 元数据仍是首次导入的类（未重复注册）",
+        provider_cls_map[PROVIDER_TYPE].cls_type is not first_cls,
+        "provider metadata points to the newly imported class after reload",
     )
 
     print("\n=== 7. 独立登录页随插件分发（链接登录入口） ===")

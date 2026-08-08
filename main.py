@@ -122,11 +122,11 @@ class OpenAI_OAuth_Plugin(Star):
 
 
 def _register_provider_adapter_if_absent(cls: type) -> type:
-    """仅在类型未注册时才注册 provider 适配器。
+    """Register the provider once and refresh its class on plugin reload.
 
-    AstrBot 的 provider 注册不幂等：插件热重载（astrbot run --reload）会清掉
-    sys.modules 里的插件模块，却不清 provider_cls_map；重导入会再次执行注册并
-    抛“已经注册”错误。这里跳过已注册类型，保证 reload 后插件仍能正常加载。
+    AstrBot keeps ``provider_cls_map`` when a plugin module is reloaded. Avoiding
+    duplicate registration is necessary, but the metadata must still point to the
+    newly imported class or provider instances will continue using stale code.
     """
     if _PROVIDER_TYPE not in provider_cls_map:
         return register_provider_adapter(
@@ -147,6 +147,7 @@ def _register_provider_adapter_if_absent(cls: type) -> type:
                 "user_agent": DEFAULT_USER_AGENT,
             },
         )(cls)
+    provider_cls_map[_PROVIDER_TYPE].cls_type = cls
     return cls
 
 
