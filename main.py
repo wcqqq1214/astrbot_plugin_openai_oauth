@@ -71,7 +71,7 @@ _allow_insecure_local_http = False
     "astrbot_plugin_openai_oauth",
     "wcqqq1214",
     "ChatGPT 订阅 (Codex OAuth) provider 插件",
-    "0.1.0",
+    "1.0.0",
 )
 class OpenAI_OAuth_Plugin(Star):
     def __init__(

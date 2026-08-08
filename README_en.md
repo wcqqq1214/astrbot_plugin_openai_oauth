@@ -62,16 +62,23 @@ an OAuth token obtained from a device-code login, so billing draws on your
 ### Optional reasoning-effort setting
 
 In the WebUI model configuration, edit the specific model under
-`OpenAI Subscribe`, find `custom_extra_body`, and add:
+`OpenAI Subscribe`, find `custom_extra_body`, and add a new entry in the
+visual editor:
+
+- Key: `reasoning_effort`
+- Value type: `string`
+- Value: `max` or `ultra`
+
+If you edit the underlying JSON directly, the equivalent configuration is:
 
 ```json
 {
-  "reasoning_effort": "high"
+  "reasoning_effort": "max"
 }
 ```
 
 The plugin converts this to the Codex Responses API shape
-`{"reasoning": {"effort": "high"}}`. Depending on the model, use
+`{"reasoning": {"effort": "max"}}`. Depending on the model, use
 `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`.
 `max` and `ultra` are not supported by every model or backend; the plugin does
 not pre-validate these values, so the backend remains the final authority.

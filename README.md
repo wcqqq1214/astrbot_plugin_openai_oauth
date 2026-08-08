@@ -35,16 +35,22 @@
 ### 设置模型思考强度（可选）
 
 在 WebUI 的模型配置中，打开 `OpenAI Subscribe` 下具体模型的编辑窗口，找到
-`自定义请求体参数（custom_extra_body）`，添加：
+`自定义请求体参数（custom_extra_body）`。在可视化编辑器中点击添加，填写：
+
+- 键名：`reasoning_effort`
+- 值类型：`string`
+- 值：`max` 或 `ultra`
+
+如果直接编辑底层 JSON，等价配置为：
 
 ```json
 {
-  "reasoning_effort": "high"
+  "reasoning_effort": "max"
 }
 ```
 
 插件会把它转换为 Codex Responses API 的
-`{"reasoning": {"effort": "high"}}`。可按模型能力使用
+`{"reasoning": {"effort": "max"}}`。可按模型能力使用
 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` 或 `ultra`。
 `max`/`ultra` 不是所有模型或后端都支持；插件不会预先拦截这些值，最终以接口返回为准。
 
