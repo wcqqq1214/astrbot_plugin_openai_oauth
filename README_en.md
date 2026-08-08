@@ -45,28 +45,6 @@ an OAuth token obtained from a device-code login, so billing draws on your
 
 4. Pick a model (e.g. `gpt-5.4-mini`) and enable the provider.
 
-## Architecture
-
-- `main.py` — registers the `OpenAI Subscribe` provider adapter, the plugin Star,
-  the device-login Web API (`device/start`, `device/poll`, `save_creds`), and the
-  standalone login page (`/login`; the link-login entry, auto-saves credentials
-  on success).
-- `oauth.py` — Codex OAuth protocol constants, credential helpers, token
-  refresh, and the device-code login protocol (user-code request, polling,
-  authorization-code exchange, JWT account-id extraction).
-- `tests/smoke_test.py` — verifies that a plugin can register a provider and that
-  the WebUI metadata builder sees it.
-- `tests/wiring_test.py` — instantiates the provider with fake credentials and
-  verifies endpoint wiring, key handling and refresh short-circuits
-  (no network).
-- `tests/login_test.py` — exercises the device-login protocol and the web handlers
-  with a mocked network (no network).
-
-The protocol follows the implementations in
-[opencode](https://github.com/sst/opencode),
-[openclaw](https://github.com/openclaw/openclaw) and
-[hermes-agent](https://github.com/NousResearch/hermes-agent).
-
 ## Network and credential flow
 
 - The plugin only talks to OpenAI-owned hosts: `auth.openai.com` (OAuth

@@ -1,10 +1,7 @@
 name: astrbot_plugin_openai_oauth # 插件唯一识别名，以 astrbot_plugin_ 前缀开头
 display_name: OpenAI 订阅登录 # 用于展示的名字
-short_desc: 用 ChatGPT Plus/Pro 订阅额度作为模型 provider（Codex OAuth 登录） # 紧凑 UI 使用的短描述
-desc: |
-  提供一个 `OpenAI Subscribe` 模型 provider：用户通过 Codex OAuth（设备码）登录自己的 ChatGPT 账号，
-  即可在 WebUI 模型配置中选用，AI 调用消耗账号订阅额度，无需 API Key。
-  个人自用场景使用。
+short_desc: 用 ChatGPT 订阅账号跑模型，无需 API Key # 紧凑 UI 使用的短描述
+desc: 用你的 ChatGPT 订阅账号登录后，即可把订阅额度当作模型使用，无需 API Key。
 version: 0.1.0
 author: wcqqq1214
 repo: https://github.com/wcqqq1214/astrbot_plugin_openai_oauth

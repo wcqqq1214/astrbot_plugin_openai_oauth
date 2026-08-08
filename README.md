@@ -28,16 +28,6 @@
 
 4. 选择模型（例如 `gpt-5.4-mini`）并启用该 provider。
 
-## 架构
-
-- `main.py` — 注册 `OpenAI Subscribe` provider 适配器、插件 Star、设备登录 Web API（`device/start`、`device/poll`、`save_creds`）以及独立登录页（`/login`，链接登录入口，登录成功后自动写回凭据）。
-- `oauth.py` — Codex OAuth 协议常量、凭据辅助、token 刷新以及设备码登录协议（user-code 请求、轮询、授权码交换、JWT account-id 提取）。
-- `tests/smoke_test.py` — 验证插件能注册 provider，且 WebUI 元数据构建器能看到它。
-- `tests/wiring_test.py` — 用假凭据实例化 provider，验证端点接线、key 处理与刷新短路（无网络）。
-- `tests/login_test.py` — 用 mock 网络走一遍设备登录协议与 web handler（无网络）。
-
-协议参考 [opencode](https://github.com/sst/opencode)、[openclaw](https://github.com/openclaw/openclaw) 与 [hermes-agent](https://github.com/NousResearch/hermes-agent) 的实现。
-
 ## 网络与凭据流向
 
 - 插件只与 OpenAI 官方域名通信：`auth.openai.com`（OAuth 设备登录、token 刷新）与 `chatgpt.com`（`backend-api/codex` 推理与模型列表、`backend-api/wham/usage` 额度查询）。访问令牌只出现在发给这两个域的请求头/请求体中，不会发往任何第三方。
