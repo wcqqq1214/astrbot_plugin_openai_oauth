@@ -48,6 +48,16 @@
 - 值类型：`string`
 - 值：`low`、`medium`、`high`、`xhigh` 或 `max`
 
+可视化编辑器示例：
+
+![添加 reasoning_effort 键](docs/images/reasoning-effort-add-key.png)
+
+*图 1：添加 `reasoning_effort` 键，并将值类型设为 `string`。*
+
+![填写 reasoning_effort 值](docs/images/reasoning-effort-set-value.png)
+
+*图 2：填写 API 参数值，例如 `max`。*
+
 如果直接编辑底层 JSON，等价配置为：
 
 ```json

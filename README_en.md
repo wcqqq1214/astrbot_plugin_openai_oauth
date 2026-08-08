@@ -76,6 +76,16 @@ visual editor:
 - Value type: `string`
 - Value: `low`, `medium`, `high`, `xhigh`, or `max`
 
+Visual editor examples:
+
+![Adding the reasoning_effort key](docs/images/reasoning-effort-add-key.png)
+
+*Figure 1: Add the `reasoning_effort` key and set its value type to `string`.*
+
+![Entering the reasoning_effort value](docs/images/reasoning-effort-set-value.png)
+
+*Figure 2: Enter an API parameter value, such as `max`.*
+
 If you edit the underlying JSON directly, the equivalent configuration is:
 
 ```json
