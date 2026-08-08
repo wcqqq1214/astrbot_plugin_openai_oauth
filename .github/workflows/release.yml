@@ -16,8 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version_changed: ${{ steps.check.outputs.changed }}
-      new_version: ${{ steps.check.outputs.version }}
-      old_version: ${{ steps.check.outputs.old_version }}
+      new_tag: ${{ steps.check.outputs.tag }}
+      old_tag: ${{ steps.check.outputs.old_tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -32,25 +32,38 @@ jobs:
             echo "::error::could not parse version from metadata.yaml"
             exit 1
           fi
+          VERSION="${VERSION#v}"
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
+            echo "::error::metadata.yaml version is not valid SemVer: $VERSION"
+            exit 1
+          fi
+          TAG="v${VERSION}"
           echo "Current version: $VERSION"
+          echo "Release tag: $TAG"
 
           # Manual dispatch always releases the current version.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-            echo "old_version=none" >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "old_tag=none" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # Compare against the version in the previous commit.
           PREVIOUS_VERSION="$(git show HEAD~1:metadata.yaml 2>/dev/null | sed -n 's/^version:[[:space:]]*\([^ #]*\).*/\1/p')"
           PREVIOUS_VERSION="${PREVIOUS_VERSION:-none}"
+          PREVIOUS_VERSION="${PREVIOUS_VERSION#v}"
+          PREVIOUS_TAG="none"
+          if [ "$PREVIOUS_VERSION" != "none" ]; then
+            PREVIOUS_TAG="v${PREVIOUS_VERSION}"
+          fi
           echo "Previous version: $PREVIOUS_VERSION"
+          echo "Previous release tag: $PREVIOUS_TAG"
 
           if [ "$VERSION" != "$PREVIOUS_VERSION" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-            echo "old_version=$PREVIOUS_VERSION" >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "old_tag=$PREVIOUS_TAG" >> "$GITHUB_OUTPUT"
             echo "Version changed from $PREVIOUS_VERSION to $VERSION"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -69,22 +82,22 @@ jobs:
 
       - name: Package plugin
         run: |
-          VERSION="${{ needs.check-version.outputs.new_version }}"
+          TAG="${{ needs.check-version.outputs.new_tag }}"
           mkdir -p dist
-          git ls-files | grep -v '^\.github/' | zip -@ "dist/astrbot_plugin_openai_oauth-${VERSION}.zip"
+          git ls-files | grep -v '^\.github/' | zip -@ "dist/astrbot_plugin_openai_oauth-${TAG}.zip"
 
       - name: Generate release notes
         id: notes
         run: |
-          NEW_VERSION="${{ needs.check-version.outputs.new_version }}"
-          OLD_VERSION="${{ needs.check-version.outputs.old_version }}"
+          NEW_TAG="${{ needs.check-version.outputs.new_tag }}"
+          OLD_TAG="${{ needs.check-version.outputs.old_tag }}"
           REPO="${{ github.repository }}"
 
-          echo "## ${NEW_VERSION}" > release_notes.md
+          echo "## ${NEW_TAG}" > release_notes.md
           echo "" >> release_notes.md
 
-          if [ "$OLD_VERSION" != "none" ] && git rev-parse "$OLD_VERSION" >/dev/null 2>&1; then
-            git log --pretty=format:"%s|%h|%H" "$OLD_VERSION..HEAD" --no-merges > commits.txt
+          if [ "$OLD_TAG" != "none" ] && git rev-parse "$OLD_TAG" >/dev/null 2>&1; then
+            git log --pretty=format:"%s|%h|%H" "$OLD_TAG..HEAD" --no-merges > commits.txt
 
             print_category() {
               title="$1"; pattern="$2"
@@ -104,7 +117,7 @@ jobs:
             print_category "Chores" "^(chore|style|refactor|perf|test|ci|build)(\([^)]*\))?:"
 
             rm -f commits.txt
-            echo "**Full Changelog**: https://github.com/${REPO}/compare/${OLD_VERSION}...${NEW_VERSION}" >> release_notes.md
+            echo "**Full Changelog**: https://github.com/${REPO}/compare/${OLD_TAG}...${NEW_TAG}" >> release_notes.md
           else
             echo "### Initial release" >> release_notes.md
             echo "" >> release_notes.md
@@ -114,8 +127,8 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
-          tag_name: ${{ needs.check-version.outputs.new_version }}
-          name: OpenAI 订阅登录 ${{ needs.check-version.outputs.new_version }}
+          tag_name: ${{ needs.check-version.outputs.new_tag }}
+          name: ${{ needs.check-version.outputs.new_tag }}
           body_path: release_notes.md
           draft: false
           prerelease: false
