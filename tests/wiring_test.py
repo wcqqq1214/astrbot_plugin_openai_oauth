@@ -192,7 +192,59 @@ def main() -> int:
     asyncio.run(no_mgr._persist_key())  # _config_mgr 为 None 时静默跳过
     check(True, "无 _config_mgr 时静默跳过")
 
-    print("\n=== 7. _ensure_fresh_token 刷新后自动持久化 ===")
+    print(
+        "\n=== 7.5 消息转换：system 角色映射为 developer（Codex 后端不接受 system） ==="
+    )
+    conv = ProviderOpenAICodex(make_config(creds), {})
+    items = conv._convert_chat_messages_to_response_input(
+        [
+            {"role": "system", "content": "You are an assistant."},
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+            {"role": "user", "content": "bye"},
+        ]
+    )
+    check(
+        not [i for i in items if i.get("role") == "system"],
+        "input 中不含 system 角色消息",
+    )
+    developer = [
+        i.get("content")
+        for i in items
+        if i.get("type") == "message" and i.get("role") == "developer"
+    ]
+    check(
+        developer == ["You are an assistant."],
+        f"system 消息映射为 developer 且内容保留: {developer}",
+    )
+    roles = [i.get("role") for i in items if i.get("type") == "message"]
+    check(
+        roles == ["developer", "user", "assistant", "user"],
+        f"消息角色序列正确: {roles}",
+    )
+    tool_items = conv._convert_chat_messages_to_response_input(
+        [
+            {"role": "user", "content": "call a tool"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "function": {"name": "search", "arguments": '{"q":"x"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "result"},
+        ]
+    )
+    types = [i.get("type") for i in tool_items]
+    check(
+        types == ["message", "function_call", "function_call_output"],
+        f"function_call 链路转换不受影响: {types}",
+    )
+
+    print("\n=== 8. _ensure_fresh_token 刷新后自动持久化 ===")
     stored2 = {
         "id": "prov-2",
         "type": module._PROVIDER_TYPE,

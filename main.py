@@ -202,6 +202,17 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                 headers.pop("chatgpt-account-id", None)
         self._sync_client_key()
 
+    def _convert_chat_messages_to_response_input(
+        self, messages: list[dict]
+    ) -> list[dict]:
+        # The ChatGPT Codex backend rejects role:"system" items in input and
+        # only accepts the Responses API roles (user/assistant/developer).
+        response_input = super()._convert_chat_messages_to_response_input(messages)
+        for item in response_input:
+            if item.get("type") == "message" and item.get("role") == "system":
+                item["role"] = "developer"
+        return response_input
+
     async def get_models(self) -> list[str]:
         token = self.creds.get("access_token", "")
         if not token:
