@@ -1,10 +1,12 @@
-# astrbot_plugin_openai_oauth
+<h1 align="center">OpenAI 订阅登录</h1>
 
 <p align="center">
   <img src="logo.png" alt="OpenAI Subscribe" width="240">
 </p>
 
-[简体中文](README.md)
+<p align="center">
+  [简体中文](README.md)
+</p>
 
 An [AstrBot](https://astrbot.app) provider plugin: log in with your ChatGPT
 account (Plus / Pro subscription) and use its quota as a model provider —

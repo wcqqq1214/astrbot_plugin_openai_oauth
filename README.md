@@ -1,10 +1,12 @@
-# astrbot_plugin_openai_oauth
+<h1 align="center">OpenAI 订阅登录</h1>
 
 <p align="center">
   <img src="logo.png" alt="OpenAI Subscribe" width="240">
 </p>
 
-[English](README_en.md)
+<p align="center">
+  [English](README_en.md)
+</p>
 
 一个 [AstrBot](https://astrbot.app) 插件：用你的 ChatGPT 账号（Plus / Pro 订阅）登录，将账号订阅额度作为模型 provider 使用——无需 API Key。
 
