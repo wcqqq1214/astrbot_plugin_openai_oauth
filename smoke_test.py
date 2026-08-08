@@ -130,7 +130,7 @@ def main() -> int:
     print("\n=== 8. README 提供详情页直达登录链接（方案2） ===")
     login_path = "/api/v1/plugins/extensions/astrbot_plugin_openai_oauth/login"
     repo_root = os.path.dirname(__file__)
-    for fname in ("README.md", "README_EN.md"):
+    for fname in ("README.md", "README_en.md"):
         with open(os.path.join(repo_root, fname), encoding="utf-8") as fh:
             readme_src = fh.read()
         check(f"({login_path})" in readme_src, f"{fname} 含详情页直达链接")
