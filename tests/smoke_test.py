@@ -128,7 +128,10 @@ def main() -> int:
         "/astrbot_plugin_openai_oauth/login" in main_src,
         "登录页注册了 /login 路由（链接入口）",
     )
-    check("save_creds" in main_src, "登录页可自动写回凭据")
+    check(
+        "_persist_login_credentials" in main_src and "save_creds" not in main_src,
+        "credentials are written back only by the server-side device session",
+    )
 
     print("\n=== 8. README 提供详情页直达登录链接（方案2） ===")
     login_path = "/api/v1/plugins/extensions/astrbot_plugin_openai_oauth/login"
@@ -137,7 +140,10 @@ def main() -> int:
         with open(os.path.join(repo_root, fname), encoding="utf-8") as fh:
             readme_src = fh.read()
         check(f"({login_path})" in readme_src, f"{fname} 含详情页直达链接")
-        check("http://<host>" in readme_src, f"{fname} 含 <host> 兜底完整地址")
+        check(
+            "https://<host>" in readme_src,
+            f"{fname} contains the full HTTPS <host> URL",
+        )
 
     print("\n=== 9. 登录页内部接口走 v1 extensions 前缀 ===")
     # 运行实例 v4.27.2 上插件 web API 挂在 /api/v1/plugins/extensions/，

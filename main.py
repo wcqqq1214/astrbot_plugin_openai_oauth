@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import secrets
 import time
@@ -31,10 +32,12 @@ from astrbot.core.provider.sources.openai_responses_source import (
 )
 from astrbot.core.provider.sources.request_retry import retry_provider_request
 from astrbot.core.utils.network_utils import create_proxy_client
+from astrbot.core.workspace import API_KEY_USERNAME_PREFIX
 from starlette.responses import HTMLResponse
 
 from .oauth import (
     CODEX_BASE,
+    CODEX_DEVICE_LOGIN_TIMEOUT,
     CODEX_DEVICE_VERIFY_URL,
     CODEX_FALLBACK_MODELS,
     CODEX_MODELS_URL,
@@ -61,6 +64,7 @@ _PROVIDER_TYPE = "OpenAI Subscribe"
 
 # 由 OpenAI_OAuth_Plugin 注入，供 provider 把刷新的凭据写回 AstrBot 配置。
 _config_mgr: Any = None
+_allow_insecure_local_http = False
 
 
 @register(
@@ -75,10 +79,14 @@ class OpenAI_OAuth_Plugin(Star):
         context: Context,
         config: AstrBotConfig | None = None,
     ) -> None:
-        global _config_mgr
+        global _allow_insecure_local_http, _config_mgr
         super().__init__(context)
         _config_mgr = context.astrbot_config_mgr
         self.config = config if config is not None else AstrBotConfig()
+        _allow_insecure_local_http = (
+            config is not None
+            and config.get("allow_insecure_local_http", False) is True
+        )
         # 设备登录的后端接口与页面：/api/v1/plugins/extensions/<route>
         self.context.register_web_api(
             "/astrbot_plugin_openai_oauth/device/start",
@@ -98,12 +106,6 @@ class OpenAI_OAuth_Plugin(Star):
             ["GET"],
             "Codex 设备登录页面",
         )
-        self.context.register_web_api(
-            "/astrbot_plugin_openai_oauth/save_creds",
-            _handle_save_creds,
-            ["POST"],
-            "保存登录凭据到 provider 配置",
-        )
 
     @filter.command("usage")
     async def usage(self, event: AstrMessageEvent) -> None:
@@ -113,6 +115,10 @@ class OpenAI_OAuth_Plugin(Star):
             event.should_call_llm(False)
             return
         await event.send(MessageChain().message(await build_usage_message()))
+
+    async def terminate(self) -> None:
+        """Cancel all outstanding device-login work during plugin unload."""
+        _discard_all_login_sessions()
 
 
 def _register_provider_adapter_if_absent(cls: type) -> type:
@@ -628,29 +634,175 @@ async def build_usage_message() -> str:
     return format_usage(usage)
 
 
-# ---- 设备登录 Web API（个人自用，进程内存即可） ----
+# ---- Device-login Web API ----
 
-# session_id -> {status, device_auth_id, user_code, interval, creds, error, task}
+_MAX_LOGIN_SESSIONS = 8
+_MAX_LOGIN_SESSIONS_PER_USER = 2
+_LOGIN_RESULT_TTL_SECONDS = 120
+_NO_STORE_HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache"}
+_LOGIN_PAGE_HEADERS = {
+    **_NO_STORE_HEADERS,
+    "Content-Security-Policy": (
+        "default-src 'none'; connect-src 'self'; style-src 'unsafe-inline'; "
+        "script-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
+    ),
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+}
+
+# session_id -> {owner, status, device_auth_id, user_code, interval, error,
+#                task, expiry_handle, expires_at}
 _login_sessions: dict[str, dict] = {}
 
 
+def _is_loopback_host(host: str | None) -> bool:
+    normalized = str(host or "").strip().lower().rstrip(".")
+    if normalized == "localhost":
+        return True
+    if "%" in normalized:
+        normalized = normalized.split("%", 1)[0]
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _request_host() -> str:
+    raw_host = str(request.headers.get("host", "") or "").strip()
+    if raw_host.startswith("["):
+        closing = raw_host.find("]")
+        return raw_host[1:closing] if closing > 0 else ""
+    if raw_host.count(":") == 1:
+        return raw_host.rsplit(":", 1)[0]
+    return raw_host
+
+
+def _login_request_error() -> str | None:
+    owner = str(request.username or "")
+    if not owner:
+        return "登录会话身份不可用"
+    if owner.startswith(API_KEY_USERNAME_PREFIX):
+        return "此操作仅允许已登录的 WebUI 用户，API Key 不可用"
+    # PluginRequest does not expose a public scheme property. Read the ASGI
+    # request URL selected by the server/proxy middleware; never infer it from a
+    # caller-controlled forwarding header here.
+    if str(request._request.url.scheme).lower() == "https":
+        return None
+    # A local reverse proxy can make both the peer and Host appear loopback for
+    # a remote browser. HTTP therefore stays denied unless the operator opts in
+    # explicitly for an isolated local-development deployment.
+    if (
+        _allow_insecure_local_http
+        and _is_loopback_host(request.client_host)
+        and _is_loopback_host(_request_host())
+    ):
+        return None
+    return "设备登录必须通过 HTTPS 访问"
+
+
+def _login_error_response(message: str, status_code: int):
+    return json_response(
+        {"status": "error", "message": message},
+        status_code=status_code,
+        headers=_NO_STORE_HEADERS,
+    )
+
+
+def _discard_login_session(session_id: str, *, cancel_task: bool = True) -> None:
+    session = _login_sessions.pop(session_id, None)
+    if session is None:
+        return
+    expiry_handle = session.get("expiry_handle")
+    if expiry_handle is not None:
+        expiry_handle.cancel()
+    task = session.get("task")
+    if cancel_task and task is not None and not task.done():
+        task.cancel()
+
+
+def _discard_all_login_sessions() -> None:
+    for session_id in list(_login_sessions):
+        _discard_login_session(session_id)
+
+
+def _schedule_login_session_expiry(session_id: str, delay: float) -> None:
+    session = _login_sessions.get(session_id)
+    if session is None:
+        return
+    old_handle = session.get("expiry_handle")
+    if old_handle is not None:
+        old_handle.cancel()
+    session["expires_at"] = time.monotonic() + delay
+    session["expiry_handle"] = asyncio.get_running_loop().call_later(
+        delay, _discard_login_session, session_id
+    )
+
+
+def _prune_expired_login_sessions() -> None:
+    now = time.monotonic()
+    expired = [
+        session_id
+        for session_id, session in _login_sessions.items()
+        if float(session.get("expires_at", 0)) <= now
+    ]
+    for session_id in expired:
+        _discard_login_session(session_id)
+
+
 async def _handle_device_start() -> Any:
+    if message := _login_request_error():
+        return _login_error_response(message, 403)
     body = await request.json(default={}) or {}
+    if not isinstance(body, dict):
+        return _login_error_response("请求格式无效", 400)
     proxy = str(body.get("proxy", "") or "")
-    session_id = secrets.token_hex(8)
+    owner = str(request.username)
+    _prune_expired_login_sessions()
+    if len(_login_sessions) >= _MAX_LOGIN_SESSIONS:
+        return _login_error_response("设备登录会话已达上限，请稍后重试", 429)
+    owner_sessions = sum(
+        secrets.compare_digest(str(session.get("owner", "")), owner)
+        for session in _login_sessions.values()
+    )
+    if owner_sessions >= _MAX_LOGIN_SESSIONS_PER_USER:
+        return _login_error_response("你的设备登录会话已达上限，请稍后重试", 429)
+
+    # Reserve the bounded slot before the first await so concurrent starts cannot
+    # race past the quota check.
+    session_id = secrets.token_urlsafe(32)
+    session = {
+        "owner": owner,
+        "status": "starting",
+        "device_auth_id": None,
+        "user_code": None,
+        "interval": None,
+        "error": None,
+        "task": None,
+    }
+    _login_sessions[session_id] = session
+    _schedule_login_session_expiry(
+        session_id, CODEX_DEVICE_LOGIN_TIMEOUT + _LOGIN_RESULT_TTL_SECONDS
+    )
     try:
         device_auth_id, user_code, interval = await request_device_user_code(proxy)
     except DeviceAuthError as exc:
-        return json_response({"status": "error", "message": str(exc)})
-    session = {
-        "status": "pending",
-        "device_auth_id": device_auth_id,
-        "user_code": user_code,
-        "interval": interval,
-        "creds": None,
-        "error": None,
-    }
-    _login_sessions[session_id] = session
+        _discard_login_session(session_id)
+        return _login_error_response(str(exc), 400)
+    except Exception:  # noqa: BLE001 - keep network details out of the response
+        _discard_login_session(session_id)
+        logger.exception("OpenAI Codex device-code request failed.")
+        return _login_error_response("无法启动设备登录，请稍后重试", 502)
+    session = _login_sessions.get(session_id)
+    if session is None:
+        return _login_error_response("登录会话已过期", 410)
+    session.update(
+        {
+            "status": "pending",
+            "device_auth_id": device_auth_id,
+            "user_code": user_code,
+            "interval": interval,
+        }
+    )
     session["task"] = asyncio.create_task(_run_device_login(session_id, proxy))
     return json_response(
         {
@@ -659,8 +811,42 @@ async def _handle_device_start() -> Any:
             "verify_url": CODEX_DEVICE_VERIFY_URL,
             "user_code": user_code,
             "interval": interval,
-        }
+        },
+        headers=_NO_STORE_HEADERS,
     )
+
+
+async def _persist_login_credentials(creds: dict) -> None:
+    """Persist credentials produced by the server-owned device session."""
+    cfg_mgr = _config_mgr
+    if cfg_mgr is None:
+        raise RuntimeError("配置管理器不可用")
+    conf = cfg_mgr.default_conf
+    sources = conf.setdefault("provider_sources", [])
+    source = next(
+        (
+            item
+            for item in sources
+            if item.get("type") == _PROVIDER_TYPE or item.get("id") == _PROVIDER_TYPE
+        ),
+        None,
+    )
+    if source is None:
+        source = {
+            "provider": "openai",
+            "type": _PROVIDER_TYPE,
+            "provider_type": "chat_completion",
+            "key": "",
+            "api_base": CODEX_BASE,
+            "proxy": "",
+            "originator": DEFAULT_ORIGINATOR,
+            "user_agent": DEFAULT_USER_AGENT,
+            "id": _PROVIDER_TYPE,
+            "enable": True,
+        }
+        sources.append(source)
+    source["key"] = dump_credentials(creds)
+    await conf.save_config_async()
 
 
 async def _run_device_login(session_id: str, proxy: str) -> None:
@@ -677,87 +863,62 @@ async def _run_device_login(session_id: str, proxy: str) -> None:
         tokens = await exchange_authorization_code(
             authorization_code, code_verifier, proxy
         )
-        session["creds"] = build_credentials(
+        creds = build_credentials(
             tokens["access_token"],
             tokens.get("refresh_token", ""),
             tokens.get("expires_in", 3600),
         )
+        await _persist_login_credentials(creds)
         session["status"] = "success"
-        logger.info("OpenAI Codex 设备登录成功。")
+        logger.info("OpenAI Codex device login succeeded.")
+    except asyncio.CancelledError:
+        raise
     except DeviceAuthTimeout as exc:
         session["status"] = "timeout"
         session["error"] = str(exc)
     except DeviceAuthError as exc:
         session["status"] = "error"
         session["error"] = str(exc)
-    except Exception as exc:  # noqa: BLE001 - 把任何意外失败透传到页面
+    except Exception:  # noqa: BLE001 - report a generic error without credential data
         session["status"] = "error"
-        session["error"] = f"登录失败：{exc}"
-        logger.exception("OpenAI Codex 设备登录失败。")
+        session["error"] = "登录或保存失败，请重试"
+        logger.exception("OpenAI Codex device login failed.")
+    finally:
+        if _login_sessions.get(session_id) is session:
+            _schedule_login_session_expiry(session_id, _LOGIN_RESULT_TTL_SECONDS)
 
 
 async def _handle_device_poll() -> Any:
+    if message := _login_request_error():
+        return _login_error_response(message, 403)
     body = await request.json(default={}) or {}
+    if not isinstance(body, dict):
+        return _login_error_response("请求格式无效", 400)
     session_id = str(body.get("session_id", "") or "")
+    _prune_expired_login_sessions()
     session = _login_sessions.get(session_id)
-    if session is None:
-        return json_response({"status": "error", "message": "登录会话不存在或已过期"})
-    return json_response(
-        {
-            "status": session["status"],
-            "creds": session.get("creds"),
-            "error": session.get("error"),
-        }
-    )
+    owner = str(request.username)
+    if session is None or not secrets.compare_digest(
+        str(session.get("owner", "")), owner
+    ):
+        return _login_error_response("登录会话不存在或已过期", 404)
+    payload = {
+        "status": session["status"],
+        "error": session.get("error"),
+    }
+    if session["status"] in {"success", "error", "timeout"}:
+        _discard_login_session(session_id, cancel_task=False)
+    return json_response(payload, headers=_NO_STORE_HEADERS)
 
 
 async def _handle_login_page() -> HTMLResponse:
-    return HTMLResponse(_LOGIN_PAGE_HTML)
-
-
-async def _handle_save_creds() -> Any:
-    """把设备登录得到的凭据写入 `provider_sources` 里本插件的 source。
-
-    找不到对应 source 时按默认模板自动创建，让用户可以先登录、再回模型配置。
-    """
-    body = await request.json(default={}) or {}
-    creds = body.get("creds")
-    if not isinstance(creds, dict) or not creds.get("access_token"):
-        return json_response({"status": "error", "message": "凭据无效"})
-    cfg_mgr = _config_mgr
-    if cfg_mgr is None:
-        return json_response({"status": "error", "message": "配置管理器不可用"})
-    try:
-        conf = cfg_mgr.default_conf
-        sources = conf.setdefault("provider_sources", [])
-        source = next(
-            (
-                s
-                for s in sources
-                if s.get("type") == _PROVIDER_TYPE or s.get("id") == _PROVIDER_TYPE
-            ),
-            None,
+    if message := _login_request_error():
+        return HTMLResponse(
+            message,
+            status_code=403,
+            headers=_LOGIN_PAGE_HEADERS,
         )
-        if source is None:
-            source = {
-                "provider": "openai",
-                "type": _PROVIDER_TYPE,
-                "provider_type": "chat_completion",
-                "key": "",
-                "api_base": CODEX_BASE,
-                "proxy": "",
-                "originator": DEFAULT_ORIGINATOR,
-                "user_agent": DEFAULT_USER_AGENT,
-                "id": _PROVIDER_TYPE,
-                "enable": True,
-            }
-            sources.append(source)
-        source["key"] = dump_credentials(creds)
-        await conf.save_config_async()
-    except Exception as exc:  # noqa: BLE001 - 失败信息透传到页面
-        logger.exception("OpenAI Codex 保存凭据失败。")
-        return json_response({"status": "error", "message": f"保存失败：{exc}"})
-    return json_response({"status": "ok", "message": "登录凭据已写入模型配置"})
+    return HTMLResponse(_LOGIN_PAGE_HTML, headers=_LOGIN_PAGE_HEADERS)
 
 
 _LOGIN_PAGE_HTML = """<!doctype html>
@@ -772,12 +933,11 @@ _LOGIN_PAGE_HTML = """<!doctype html>
   h1 { font-size: 20px; }
   button { font-size: 14px; padding: 8px 16px; border: none; border-radius: 8px; background: #10a37f; color: #fff; cursor: pointer; }
   button:disabled { opacity: .5; cursor: default; }
-  code, textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   #steps { margin-top: 16px; }
   #steps p { margin: 8px 0; }
   .url { color: #10a37f; }
   .code { font-size: 18px; font-weight: 600; background: #f0f0f0; padding: 2px 8px; border-radius: 6px; }
-  textarea { width: 100%; height: 130px; box-sizing: border-box; font-size: 12px; margin: 8px 0; }
   #status { margin-top: 12px; color: #666; }
   #error { margin-top: 12px; color: #c00; white-space: pre-wrap; }
   .ok { color: #0a7a3d; }
@@ -794,8 +954,6 @@ _LOGIN_PAGE_HTML = """<!doctype html>
   <div id="status"></div>
   <div id="result" hidden>
     <p class="ok" id="result-text">登录成功，凭据已写入模型配置。</p>
-    <textarea id="creds" readonly></textarea>
-    <button id="copy">复制凭据</button>
   </div>
   <div id="error" hidden></div>
   <script>
@@ -827,7 +985,8 @@ _LOGIN_PAGE_HTML = """<!doctype html>
           const data = await resp.json();
           if (data.status === "success") {
             clearInterval(timer);
-            await saveCreds(data.creds);
+            $("result").hidden = false;
+            setStatus("登录成功。");
           } else if (data.status === "error" || data.status === "timeout") {
             clearInterval(timer);
             showError(data.error || "登录失败");
@@ -835,35 +994,6 @@ _LOGIN_PAGE_HTML = """<!doctype html>
         } catch (e) { /* 瞬时错误继续轮询 */ }
       }, interval * 1000);
     }
-    async function saveCreds(creds) {
-      $("creds").value = JSON.stringify(creds, null, 2);
-      $("result").hidden = false;
-      try {
-        const resp = await fetch(BASE + "/save_creds", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ creds: creds }),
-        });
-        const data = await resp.json();
-        if (data.status === "ok") {
-          $("result-text").textContent = "登录成功，凭据已写入模型配置。";
-        } else {
-          $("result-text").textContent = "登录成功，但自动写入失败：" + (data.message || "未知错误") + "。请手动复制下方凭据到 key 字段。";
-        }
-      } catch (e) {
-        $("result-text").textContent = "登录成功，但自动写入失败：" + e + "。请手动复制下方凭据到 key 字段。";
-      }
-      setStatus("登录成功。");
-    }
-    $("copy").addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText($("creds").value);
-      } catch (e) {
-        $("creds").select();
-        document.execCommand("copy");
-      }
-      $("copy").textContent = "已复制";
-    });
     function setStatus(text) {
       $("status").textContent = text;
       $("error").hidden = true;

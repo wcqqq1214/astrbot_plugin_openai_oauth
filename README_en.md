@@ -29,15 +29,29 @@ an OAuth token obtained from a device-code login, so billing draws on your
    relative link is not usable, so open this address manually:
 
    ```text
-   http://<host>/api/v1/plugins/extensions/astrbot_plugin_openai_oauth/login
+   https://<host>/api/v1/plugins/extensions/astrbot_plugin_openai_oauth/login
    ```
 
-   Replace `<host>` with the address you use to reach the WebUI (localhost,
-   LAN IP, domain or port all work). Click **开始登录**, copy the shown link
-   (open it in a new tab), enter the device code and approve. On success the
-   credentials are written into the provider's `key` field automatically — no
-   copy/paste needed. Only if that auto-save fails do you copy the shown
-   credential JSON into the `key` field manually.
+   Replace `<host>` with the LAN address or domain you use to reach the WebUI
+   (including its port when needed). Device login requires HTTPS by default,
+   including access from the same machine. When using a TLS reverse proxy,
+   configure AstrBot/ASGI's trusted proxy handling so the request scheme is set
+   correctly; the plugin does not trust a client-supplied `X-Forwarded-Proto`
+   header itself.
+
+   For an isolated local development environment only, you may explicitly
+   enable `allow_insecure_local_http` in the plugin configuration and then use
+   `http://localhost:<port>/...` or `http://127.0.0.1:<port>/...`. Even with the
+   option enabled, both the connection peer and Host must be loopback. Never
+   enable it behind a reverse proxy or on a remotely reachable deployment: a
+   local proxy can make a remote browser look like a loopback connection, and
+   plaintext HTTP cannot protect the WebUI session or OAuth flow.
+
+   Click **开始登录**, copy the shown OpenAI link (open it in a new tab), enter
+   the device code and approve. The server then writes the credentials into
+   the provider's `key` field automatically. The browser never receives or
+   displays the access or refresh token. If the server cannot save the result,
+   the page asks you to retry or check the configuration.
 
    > Device-code login must be enabled in your ChatGPT security settings
    > (“Enable device code authentication for Codex”); the page reports it if
@@ -58,11 +72,14 @@ an OAuth token obtained from a device-code login, so billing draws on your
   Codex CLI (Cloudflare allows first-party clients by this header); it is
   configurable so it can follow whatever value OpenAI accepts next, without a
   plugin release.
-- The login page and `device/start` / `device/poll` / `save_creds` all live
-  under AstrBot's `/api/v1/plugins/extensions/` and are protected by the WebUI
-  session auth — unauthenticated access returns 401. Stored credentials
+- The login page and `device/start` / `device/poll` live under AstrBot's
+  `/api/v1/plugins/extensions/`. They accept WebUI user sessions, not general
+  API keys. Device sessions are user-bound, bounded and cleaned up after
+  completion or expiry. OAuth credentials are exchanged and saved only on the
+  server and are never returned to the browser. Stored credentials
   (access_token / refresh_token) live in the provider's `key` field, persisted
-  as plaintext in the AstrBot config (`data/cmd_config.json`).
+  as plaintext in the AstrBot config (`data/cmd_config.json`); restrict read
+  access to that file and its backups.
 - This is a personal-use tool: it runs models on your own ChatGPT subscription
   quota (Codex OAuth) and offers no free-API path. Please make sure your usage
   complies with OpenAI's terms of service.

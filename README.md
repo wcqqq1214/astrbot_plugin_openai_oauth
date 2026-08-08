@@ -19,10 +19,14 @@
 3. 登录你的 ChatGPT 账号。在 WebUI 插件详情页点击 [打开登录页](/api/v1/plugins/extensions/astrbot_plugin_openai_oauth/login) 直达（地址自适应，无需改动插件）。在 GitHub 等外部页面看到本说明时该相对链接不可用，请手动打开：
 
    ```text
-   http://<host>/api/v1/plugins/extensions/astrbot_plugin_openai_oauth/login
+   https://<host>/api/v1/plugins/extensions/astrbot_plugin_openai_oauth/login
    ```
 
-   把 `<host>` 换成你访问 WebUI 的地址（localhost、局域网 IP、域名、端口均可）。点击 **开始登录**，复制显示的链接（到新标签页打开）并输入设备码完成授权。登录成功后凭据会自动写入 provider 的 `key` 字段，无需复制粘贴；只有自动写入失败时才需要把显示的凭据 JSON 手动复制到 `key` 字段。
+   把 `<host>` 换成你访问 WebUI 的局域网地址或域名（可带端口）。设备登录默认始终要求 HTTPS，包括从本机访问。使用 TLS 反向代理时，需要按 AstrBot/ASGI 的可信代理配置正确传递请求 scheme；插件不会自行信任客户端提供的 `X-Forwarded-Proto`。
+
+   只有在隔离的本机开发环境中，才可在插件配置中显式开启 `allow_insecure_local_http`，然后通过 `http://localhost:<port>/...` 或 `http://127.0.0.1:<port>/...` 访问。即使开启，该例外也同时要求连接对端和 Host 都是回环地址。不要在反向代理或任何远程可达的部署中开启：本机代理可能把远程浏览器伪装成回环连接，而明文 HTTP 无法保护 WebUI 会话或 OAuth 流程。
+
+   点击 **开始登录**，复制显示的 OpenAI 链接（到新标签页打开）并输入设备码完成授权。登录成功后，服务端会把凭据自动写入 provider 的 `key` 字段，浏览器不会接收或显示 access token / refresh token。如果自动写入失败，页面会提示重新登录或检查配置。
 
    > 需要在你的 ChatGPT 安全设置中开启设备码登录（“Enable device code authentication for Codex”）；未开启时页面会提示。
 
@@ -32,7 +36,7 @@
 
 - 插件只与 OpenAI 官方域名通信：`auth.openai.com`（OAuth 设备登录、token 刷新）与 `chatgpt.com`（`backend-api/codex` 推理与模型列表、`backend-api/wham/usage` 额度查询）。访问令牌只出现在发给这两个域的请求头/请求体中，不会发往任何第三方。
 - `proxy` 默认留空（直连），仅当你的网络无法直连 OpenAI 时才配置；配置后相关请求经该代理转发。`originator` 默认 `codex_cli_rs`，与官方 Codex CLI 一致（Cloudflare 对首方客户端白名单放行）；做成可配置是为了能跟随 OpenAI 后续接受的值，无需等待插件发版。
-- 登录页与 `device/start` / `device/poll` / `save_creds` 均挂在 AstrBot 的 `/api/v1/plugins/extensions/` 下，受 WebUI 会话鉴权保护，未登录访问返回 401。登录后的凭据（access_token / refresh_token）保存在 provider 的 `key` 字段，落盘为 AstrBot 配置（`data/cmd_config.json`）中的明文。
+- 登录页与 `device/start` / `device/poll` 均挂在 AstrBot 的 `/api/v1/plugins/extensions/` 下，只接受 WebUI 用户会话，不接受通用 API Key。设备会话与登录用户绑定、数量受限，并在完成或超时后清理。OAuth 凭据只在服务端交换和保存，不会返回浏览器。登录后的凭据（access_token / refresh_token）保存在 provider 的 `key` 字段，落盘为 AstrBot 配置（`data/cmd_config.json`）中的明文；请限制该文件及备份的读取权限。
 - 本项目是个人自用工具：用你自己的 ChatGPT 账号订阅额度（Codex OAuth）跑模型，不提供免费 API 途径。请自行确认你的使用方式符合 OpenAI 服务条款。
 
 ## License / 许可证

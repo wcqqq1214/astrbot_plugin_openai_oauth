@@ -196,10 +196,10 @@ class _FakeRequest:
     def __init__(self, json_data: dict):
         self.json_data = json_data
         self.method = "POST"
-        self.url = SimpleNamespace(path="/x")
-        self.headers = {}
+        self.url = SimpleNamespace(path="/x", scheme="https")
+        self.headers = {"host": "localhost"}
         self.cookies = {}
-        self.client = SimpleNamespace(host="test")
+        self.client = SimpleNamespace(host="127.0.0.1")
         self.query_params = SimpleNamespace(multi_items=list)
 
     async def json(self):
@@ -209,13 +209,25 @@ class _FakeRequest:
 def test_handlers() -> None:
     print("\n=== 5. Web handler：start → 后台任务 → poll ===")
     plugin_mod._login_sessions.clear()
-    req = _FakeRequest({})
-    plugin_req = PluginRequest(req)
+    old_mgr = plugin_mod._config_mgr
+    mgr = _FakeConfigMgr({"provider_sources": []})
+    plugin_mod._config_mgr = mgr
 
     async def _run():
-        with bind_request_context(plugin_req):
-            resp = await plugin_mod._handle_device_start()
-        return resp
+        with bind_request_context(PluginRequest(_FakeRequest({}), username="astrbot")):
+            start_resp = await plugin_mod._handle_device_start()
+        start_data = json.loads(start_resp.body)
+        session_id = start_data["session_id"]
+        for _ in range(10):
+            await asyncio.sleep(0)
+            session = plugin_mod._login_sessions.get(session_id)
+            if session and session["status"] == "success":
+                break
+        with bind_request_context(
+            PluginRequest(_FakeRequest({"session_id": session_id}), username="astrbot")
+        ):
+            poll_resp = await plugin_mod._handle_device_poll()
+        return start_resp, poll_resp
 
     with (
         mock.patch.object(
@@ -240,7 +252,10 @@ def test_handlers() -> None:
             ),
         ),
     ):
-        start_resp = asyncio.run(_run())
+        try:
+            start_resp, poll_resp = asyncio.run(_run())
+        finally:
+            plugin_mod._config_mgr = old_mgr
     start_data = json.loads(start_resp.body)
     check(start_data["status"] == "pending", "start 立即返回 pending")
     check(start_data["verify_url"] == oauth.CODEX_DEVICE_VERIFY_URL, "返回验证 URL")
@@ -248,31 +263,22 @@ def test_handlers() -> None:
     session_id = start_data["session_id"]
     check(bool(session_id), "返回 session_id")
 
-    async def _poll():
-        req2 = _FakeRequest({"session_id": session_id})
-        with bind_request_context(PluginRequest(req2)):
-            return await plugin_mod._handle_device_poll()
-
-    # 让后台任务跑完（协议函数都被打桩，无真实等待）
-    async def _settle():
-        for _ in range(10):
-            await asyncio.sleep(0)
-            session = plugin_mod._login_sessions.get(session_id)
-            if session and session["status"] == "success":
-                break
-
-    asyncio.run(_settle())
-    poll_data = json.loads(asyncio.run(_poll()).body)
+    poll_data = json.loads(poll_resp.body)
     check(poll_data["status"] == "success", "后台任务完成后 poll 返回 success")
-    check(poll_data["creds"]["access_token"] == "at-ok", "凭据含 access_token")
-    check(poll_data["creds"]["refresh_token"] == "rt-ok", "凭据含 refresh_token")
-    check(poll_data["creds"]["account_id"] == "", "无账号 id 时为空串")
+    check("creds" not in poll_data, "poll does not return browser credentials")
+    stored = json.loads(mgr.default_conf["provider_sources"][0]["key"])
+    check(stored["access_token"] == "at-ok", "server persists access_token")
+    check(stored["refresh_token"] == "rt-ok", "server persists refresh_token")
+    check(
+        session_id not in plugin_mod._login_sessions,
+        "terminal poll consumes the session once",
+    )
 
     # 未启用：start 应返回 error
     plugin_mod._login_sessions.clear()
 
     async def _start_error():
-        with bind_request_context(PluginRequest(_FakeRequest({}))):
+        with bind_request_context(PluginRequest(_FakeRequest({}), username="astrbot")):
             return await plugin_mod._handle_device_start()
 
     with mock.patch.object(
@@ -290,7 +296,12 @@ def test_handlers() -> None:
 
 def test_login_page() -> None:
     print("\n=== 6. 登录页 HTML 可服务 ===")
-    resp = asyncio.run(plugin_mod._handle_login_page())
+
+    async def _load_page():
+        with bind_request_context(PluginRequest(_FakeRequest({}), username="astrbot")):
+            return await plugin_mod._handle_login_page()
+
+    resp = asyncio.run(_load_page())
     html = resp.body.decode()
     check(
         resp.status_code == 200 and html.startswith("<!doctype html>"), "返回 HTML 页面"
@@ -315,11 +326,10 @@ class _FakeConfigMgr:
         self.default_conf = _FakeConf(conf)
 
 
-def test_save_creds() -> None:
-    print("\n=== 7. save_creds：更新已有 source / 自动创建 / 校验 ===")
+def test_persist_login_credentials() -> None:
+    print("\n=== 7. Server-side session persistence: update/create source ===")
     old_mgr = plugin_mod._config_mgr
     try:
-        # 7a: 已有 source 时更新 key
         conf = {
             "provider_sources": [
                 {
@@ -331,35 +341,22 @@ def test_save_creds() -> None:
         }
         mgr = _FakeConfigMgr(conf)
         plugin_mod._config_mgr = mgr
-
-        async def _update():
-            req = _FakeRequest(
-                {"creds": {"access_token": "at1", "refresh_token": "rt1"}}
+        asyncio.run(
+            plugin_mod._persist_login_credentials(
+                {"access_token": "at1", "refresh_token": "rt1"}
             )
-            with bind_request_context(PluginRequest(req)):
-                return await plugin_mod._handle_save_creds()
-
-        data = json.loads(asyncio.run(_update()).body)
-        check(data["status"] == "ok", "已有 source 时 save_creds 返回 ok")
+        )
         key = json.loads(conf["provider_sources"][0]["key"])
         check(key["access_token"] == "at1", "凭据写入已有 source 的 key")
         check(len(conf["provider_sources"]) == 1, "不新增重复 source")
         check(mgr.default_conf.saved == 1, "配置已保存")
 
-        # 7b: 无 source 时自动创建
         conf2 = {
             "provider_sources": [{"id": "deepseek", "type": "deepseek", "key": []}]
         }
         mgr2 = _FakeConfigMgr(conf2)
         plugin_mod._config_mgr = mgr2
-
-        async def _create():
-            req = _FakeRequest({"creds": {"access_token": "at2"}})
-            with bind_request_context(PluginRequest(req)):
-                return await plugin_mod._handle_save_creds()
-
-        data2 = json.loads(asyncio.run(_create()).body)
-        check(data2["status"] == "ok", "无 source 时自动创建返回 ok")
+        asyncio.run(plugin_mod._persist_login_credentials({"access_token": "at2"}))
         created = [
             s
             for s in conf2["provider_sources"]
@@ -374,15 +371,10 @@ def test_save_creds() -> None:
             "创建的 source 带 key",
         )
         check(mgr2.default_conf.saved == 1, "创建后已保存")
-
-        # 7c: 无效凭据
-        async def _invalid():
-            req = _FakeRequest({"creds": {}})
-            with bind_request_context(PluginRequest(req)):
-                return await plugin_mod._handle_save_creds()
-
-        data3 = json.loads(asyncio.run(_invalid()).body)
-        check(data3["status"] == "error", "空凭据返回 error")
+        check(
+            not hasattr(plugin_mod, "_handle_save_creds"),
+            "client credential-save endpoint is removed",
+        )
     finally:
         plugin_mod._config_mgr = old_mgr
 
@@ -673,9 +665,10 @@ def test_usage_retry() -> None:
                 ],
             }
 
-        with mock.patch.object(
-            plugin_mod, "load_credentials", return_value=creds
-        ), mock.patch.object(plugin_mod, "fetch_rate_limits", side_effect=_flaky):
+        with (
+            mock.patch.object(plugin_mod, "load_credentials", return_value=creds),
+            mock.patch.object(plugin_mod, "fetch_rate_limits", side_effect=_flaky),
+        ):
             msg = asyncio.run(plugin_mod.build_usage_message())
         check(attempts["n"] == 3, "瞬时超时自动重试到第 3 次")
         check("剩余 65%" in msg, "重试成功后返回额度文本")
@@ -684,10 +677,11 @@ def test_usage_retry() -> None:
         async def _always_timeout(at, acc, proxy):
             raise TimeoutError()
 
-        with mock.patch.object(
-            plugin_mod, "load_credentials", return_value=creds
-        ), mock.patch.object(
-            plugin_mod, "fetch_rate_limits", side_effect=_always_timeout
+        with (
+            mock.patch.object(plugin_mod, "load_credentials", return_value=creds),
+            mock.patch.object(
+                plugin_mod, "fetch_rate_limits", side_effect=_always_timeout
+            ),
         ):
             msg = asyncio.run(plugin_mod.build_usage_message())
         check(msg == "额度查询失败：TimeoutError", "持续超时报错信息非空")
@@ -702,7 +696,7 @@ def main() -> int:
     test_jwt()
     test_handlers()
     test_login_page()
-    test_save_creds()
+    test_persist_login_credentials()
     test_persist_key()
     test_usage_fetch()
     test_usage_format()

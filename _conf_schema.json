@@ -1,0 +1,8 @@
+{
+  "allow_insecure_local_http": {
+    "description": "允许仅限本机的明文 HTTP 设备登录（不安全，默认关闭）",
+    "type": "bool",
+    "default": false,
+    "hint": "仅用于没有本机反向代理的隔离开发环境；生产或任何远程访问必须保持关闭并使用 HTTPS"
+  }
+}
