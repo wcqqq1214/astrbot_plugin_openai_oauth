@@ -61,6 +61,28 @@ The protocol follows the implementations in
 [openclaw](https://github.com/openclaw/openclaw) and
 [hermes-agent](https://github.com/NousResearch/hermes-agent).
 
+## Network and credential flow
+
+- The plugin only talks to OpenAI-owned hosts: `auth.openai.com` (OAuth
+  device login, token refresh) and `chatgpt.com` (`backend-api/codex` for
+  inference and the model catalog, `backend-api/wham/usage` for quota). The
+  access token appears only in requests to these two hosts and is never sent
+  anywhere else.
+- `proxy` is empty by default (direct connection); configure it only when your
+  network cannot reach OpenAI directly — requests are then forwarded through
+  that proxy. `originator` defaults to `codex_cli_rs`, matching the official
+  Codex CLI (Cloudflare allows first-party clients by this header); it is
+  configurable so it can follow whatever value OpenAI accepts next, without a
+  plugin release.
+- The login page and `device/start` / `device/poll` / `save_creds` all live
+  under AstrBot's `/api/v1/plugins/extensions/` and are protected by the WebUI
+  session auth — unauthenticated access returns 401. Stored credentials
+  (access_token / refresh_token) live in the provider's `key` field, persisted
+  as plaintext in the AstrBot config (`data/cmd_config.json`).
+- This is a personal-use tool: it runs models on your own ChatGPT subscription
+  quota (Codex OAuth) and offers no free-API path. Please make sure your usage
+  complies with OpenAI's terms of service.
+
 ## License
 
 AGPL-3.0.

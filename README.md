@@ -32,6 +32,13 @@
 
 协议参考 [opencode](https://github.com/sst/opencode)、[openclaw](https://github.com/openclaw/openclaw) 与 [hermes-agent](https://github.com/NousResearch/hermes-agent) 的实现。
 
+## 网络与凭据流向
+
+- 插件只与 OpenAI 官方域名通信：`auth.openai.com`（OAuth 设备登录、token 刷新）与 `chatgpt.com`（`backend-api/codex` 推理与模型列表、`backend-api/wham/usage` 额度查询）。访问令牌只出现在发给这两个域的请求头/请求体中，不会发往任何第三方。
+- `proxy` 默认留空（直连），仅当你的网络无法直连 OpenAI 时才配置；配置后相关请求经该代理转发。`originator` 默认 `codex_cli_rs`，与官方 Codex CLI 一致（Cloudflare 对首方客户端白名单放行）；做成可配置是为了能跟随 OpenAI 后续接受的值，无需等待插件发版。
+- 登录页与 `device/start` / `device/poll` / `save_creds` 均挂在 AstrBot 的 `/api/v1/plugins/extensions/` 下，受 WebUI 会话鉴权保护，未登录访问返回 401。登录后的凭据（access_token / refresh_token）保存在 provider 的 `key` 字段，落盘为 AstrBot 配置（`data/cmd_config.json`）中的明文。
+- 本项目是个人自用工具：用你自己的 ChatGPT 账号订阅额度（Codex OAuth）跑模型，不提供免费 API 途径。请自行确认你的使用方式符合 OpenAI 服务条款。
+
 ## License / 许可证
 
 AGPL-3.0。
