@@ -32,6 +32,27 @@
 
 4. 选择模型（例如 `gpt-5.4-mini`）并启用该 provider。
 
+### 设置模型思考强度（可选）
+
+在 WebUI 的模型配置中，打开 `OpenAI Subscribe` 下具体模型的编辑窗口，找到
+`自定义请求体参数（custom_extra_body）`，添加：
+
+```json
+{
+  "reasoning_effort": "high"
+}
+```
+
+插件会把它转换为 Codex Responses API 的
+`{"reasoning": {"effort": "high"}}`。可按模型能力使用
+`none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` 或 `ultra`。
+`max`/`ultra` 不是所有模型或后端都支持；插件不会预先拦截这些值，最终以接口返回为准。
+
+对支持它们的 Codex 模型，把示例中的值改成 `max` 或 `ultra` 即可。这里的
+`ultra` 仅作为 `reasoning.effort` 转发；本插件不会额外开启 Codex Multi-agent
+beta。如果后端要求额外的 Multi-agent 参数，当前插件尚未实现该扩展。
+`max_tokens` 则是输出长度上限，不是思考强度。
+
 ## 网络与凭据流向
 
 - 插件只与 OpenAI 官方域名通信：`auth.openai.com`（OAuth 设备登录、token 刷新）与 `chatgpt.com`（`backend-api/codex` 推理与模型列表、`backend-api/wham/usage` 额度查询）。访问令牌只出现在发给这两个域的请求头/请求体中，不会发往任何第三方。

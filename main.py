@@ -22,7 +22,7 @@ from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star, register
 from astrbot.api.web import json_response, request
 from astrbot.core.exceptions import EmptyModelOutputError
-from astrbot.core.provider.entities import LLMResponse
+from astrbot.core.provider.entities import LLMResponse, TokenUsage
 from astrbot.core.provider.register import (
     provider_cls_map,
     register_provider_adapter,
@@ -374,7 +374,11 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                         yield await self._parse_response(event_response, tools)
                         return
                 final = self._assemble_streamed_response(
-                    response_id, text_parts, reasoning_parts, function_calls
+                    response_id,
+                    text_parts,
+                    reasoning_parts,
+                    function_calls,
+                    usage=self._extract_response_usage(event_response),
                 )
                 if final is not None:
                     yield final
@@ -394,9 +398,11 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         text_parts: list[str],
         reasoning_parts: list[str],
         function_calls: list[dict],
+        usage: TokenUsage | None = None,
     ) -> LLMResponse | None:
         """Build a final LLMResponse from streamed deltas like ``_parse_response``."""
         llm_response = LLMResponse("assistant", id=response_id)
+        llm_response.usage = usage if usage is not None else TokenUsage()
         completion_text = "".join(text_parts)
         if completion_text:
             llm_response.result_chain = MessageChain().message(completion_text)
@@ -423,6 +429,27 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         if not has_text and not has_reasoning and not llm_response.tools_call_args:
             return None
         return llm_response
+
+    def _extract_response_usage(self, response: Any) -> TokenUsage | None:
+        """Extract usage from a terminal Responses event.
+
+        Codex may send the completed response with an empty ``output`` list while
+        the actual text arrived through delta events. In that case the base
+        Responses parser is intentionally skipped, so preserve the usage here.
+        """
+        usage = self._field(response, "usage")
+        if usage is None:
+            return None
+
+        input_details = self._field(usage, "input_tokens_details")
+        cached_tokens = self._field(input_details, "cached_tokens", 0) or 0
+        input_tokens = self._field(usage, "input_tokens", 0) or 0
+        output_tokens = self._field(usage, "output_tokens", 0) or 0
+        return TokenUsage(
+            input_other=max(input_tokens - cached_tokens, 0),
+            input_cached=cached_tokens,
+            output=output_tokens,
+        )
 
     async def get_models(self) -> list[str]:
         token = self.creds.get("access_token", "")

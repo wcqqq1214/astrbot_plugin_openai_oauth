@@ -59,6 +59,30 @@ an OAuth token obtained from a device-code login, so billing draws on your
 
 4. Pick a model (e.g. `gpt-5.4-mini`) and enable the provider.
 
+### Optional reasoning-effort setting
+
+In the WebUI model configuration, edit the specific model under
+`OpenAI Subscribe`, find `custom_extra_body`, and add:
+
+```json
+{
+  "reasoning_effort": "high"
+}
+```
+
+The plugin converts this to the Codex Responses API shape
+`{"reasoning": {"effort": "high"}}`. Depending on the model, use
+`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`.
+`max` and `ultra` are not supported by every model or backend; the plugin does
+not pre-validate these values, so the backend remains the final authority.
+
+For a Codex model that supports them, replace the example value with `max` or
+`ultra`. Here `ultra` is only forwarded as `reasoning.effort`; this plugin does
+not additionally enable the Codex Multi-agent beta. If the backend requires
+extra Multi-agent parameters, that extension is not implemented here.
+`max_tokens` controls the output length limit; it is separate from reasoning
+effort.
+
 ## Network and credential flow
 
 - The plugin only talks to OpenAI-owned hosts: `auth.openai.com` (OAuth

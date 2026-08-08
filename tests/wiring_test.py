@@ -42,8 +42,8 @@ def check(cond: bool, msg: str) -> None:
         FAILED.append(msg)
 
 
-def make_config(creds: dict) -> dict:
-    return {
+def make_config(creds: dict, **overrides) -> dict:
+    config = {
         "type": module._PROVIDER_TYPE,
         "key": json.dumps(creds),
         "model": "gpt-5.4-mini",
@@ -51,6 +51,8 @@ def make_config(creds: dict) -> dict:
         "originator": oauth.DEFAULT_ORIGINATOR,
         "user_agent": oauth.DEFAULT_USER_AGENT,
     }
+    config.update(overrides)
+    return config
 
 
 def main() -> int:
@@ -243,6 +245,95 @@ def main() -> int:
         types == ["message", "function_call", "function_call_output"],
         f"function_call 链路转换不受影响: {types}",
     )
+
+    print("\n=== 7.6 Stream terminal event: preserve usage ===")
+
+    class _FakeStream:
+        def __init__(self, events: list[dict]) -> None:
+            self.events = events
+
+        def __aiter__(self):
+            async def iterate():
+                for event in self.events:
+                    yield event
+
+            return iterate()
+
+    async def collect_stream(provider, events: list[dict]):
+        create = mock.AsyncMock(return_value=_FakeStream(events))
+        with mock.patch.object(
+            provider.client.responses,
+            "create",
+            new=create,
+        ):
+            responses = [
+                response
+                async for response in provider._query_stream(
+                    {"model": "gpt-5.4-mini", "input": []},
+                    None,
+                    request_max_retries=1,
+                )
+            ]
+        return responses, create
+
+    usage_responses, _ = asyncio.run(
+        collect_stream(
+            conv,
+            [
+                {"type": "response.output_text.delta", "delta": "hello"},
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "id": "resp-usage",
+                        "status": "completed",
+                        "output": [],
+                        "usage": {
+                            "input_tokens": 123,
+                            "input_tokens_details": {"cached_tokens": 23},
+                            "output_tokens": 45,
+                        },
+                    },
+                },
+            ],
+        )
+    )
+    final_usage = usage_responses[-1].usage
+    check(final_usage is not None, "stream final response preserves usage")
+    check(
+        final_usage is not None
+        and final_usage.input_other == 100
+        and final_usage.input_cached == 23
+        and final_usage.output == 45,
+        "stream final response has correct input-other/cached-input/output tokens",
+    )
+
+    for effort in ("max", "ultra"):
+        reasoning_provider = ProviderOpenAICodex(
+            make_config(creds, custom_extra_body={"reasoning_effort": effort}),
+            {},
+        )
+        _, reasoning_create = asyncio.run(
+            collect_stream(
+                reasoning_provider,
+                [
+                    {"type": "response.output_text.delta", "delta": "ok"},
+                    {
+                        "type": "response.completed",
+                        "response": {
+                            "id": f"resp-reasoning-{effort}",
+                            "status": "completed",
+                            "output": [],
+                        },
+                    },
+                ],
+            )
+        )
+        reasoning_extra_body = reasoning_create.call_args.kwargs["extra_body"]
+        check(
+            reasoning_extra_body.get("reasoning") == {"effort": effort}
+            and "reasoning_effort" not in reasoning_extra_body,
+            f"reasoning_effort={effort} maps to Codex Responses reasoning.effort",
+        )
 
     print("\n=== 8. _ensure_fresh_token 刷新后自动持久化 ===")
     stored2 = {
