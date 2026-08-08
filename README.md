@@ -37,7 +37,11 @@
 
    > 需要在你的 ChatGPT 安全设置中开启设备码登录（“Enable device code authentication for Codex”）；未开启时页面会提示。
 
-4. 选择模型（例如 `gpt-5.4-mini`）并启用该 provider。
+   ![在 ChatGPT 安全设置中启用 Codex 设备码授权](docs/images/enable-device-code-auth-codex.png)
+
+   *图：在 ChatGPT 的 **Security and login** 设置中开启 **Enable device code authorization for Codex**。*
+
+4. 选择模型，并启用该 provider。
 
 ### 设置模型思考强度（可选）
 
@@ -78,9 +82,7 @@
 | Extra High | `xhigh` |
 | Max | `max` |
 
-API 参数应填写右列的值，不要直接填写 WebUI 显示名称。更多可用值以
-[OpenAI GPT-5.6 模型文档](https://developers.openai.com/api/docs/models) 为准。
-`max_tokens` 则是输出长度上限，不是思考强度。
+API 参数应填写右列的值，不要直接填写 WebUI 显示名称。
 
 ## 网络与凭据流向
 

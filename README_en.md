@@ -64,7 +64,11 @@ an OAuth token obtained from a device-code login, so billing draws on your
    > (“Enable device code authentication for Codex”); the page reports it if
    > not.
 
-4. Pick a model (e.g. `gpt-5.4-mini`) and enable the provider.
+   ![Enable Codex device-code authorization in ChatGPT settings](docs/images/enable-device-code-auth-codex.png)
+
+   *Figure: Enable **Enable device code authorization for Codex** under ChatGPT's **Security and login** settings.*
+
+4. Pick a model and enable the provider.
 
 ### Optional reasoning-effort setting
 
@@ -108,10 +112,7 @@ been verified to return successfully:
 | Max | `max` |
 
 Enter the value from the right column as the API parameter; do not enter the
-WebUI label directly. See the [OpenAI GPT-5.6 model documentation](https://developers.openai.com/api/docs/models)
-for the authoritative list of supported values.
-`max_tokens` controls the output length limit; it is separate from reasoning
-effort.
+WebUI label directly.
 
 ## Network and credential flow
 
