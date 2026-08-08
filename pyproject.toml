@@ -20,4 +20,4 @@ dev = [
 
 [tool.ruff.lint.per-file-ignores]
 # Test files must set up sys.path/os.chdir before importing astrbot.
-"*_test.py" = ["E402"]
+"tests/*_test.py" = ["E402"]

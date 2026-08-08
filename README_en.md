@@ -54,12 +54,12 @@ an OAuth token obtained from a device-code login, so billing draws on your
 - `oauth.py` — Codex OAuth protocol constants, credential helpers, token
   refresh, and the device-code login protocol (user-code request, polling,
   authorization-code exchange, JWT account-id extraction).
-- `smoke_test.py` — verifies that a plugin can register a provider and that
+- `tests/smoke_test.py` — verifies that a plugin can register a provider and that
   the WebUI metadata builder sees it.
-- `wiring_test.py` — instantiates the provider with fake credentials and
+- `tests/wiring_test.py` — instantiates the provider with fake credentials and
   verifies endpoint wiring, key handling and refresh short-circuits
   (no network).
-- `login_test.py` — exercises the device-login protocol and the web handlers
+- `tests/login_test.py` — exercises the device-login protocol and the web handlers
   with a mocked network (no network).
 
 The protocol follows the implementations in

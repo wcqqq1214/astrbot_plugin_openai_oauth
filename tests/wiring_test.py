@@ -2,8 +2,9 @@
 断言 api_base / client key / custom_headers / get_keys / set_key /
 无 token 时 get_models 回退 / 无需刷新时 _ensure_fresh_token 短路。
 
-从仓库根运行：
-    .venv/bin/python /Users/wcqqq1214/Project/astrbot_plugin_openai_oauth/wiring_test.py
+从仓库根运行（需 AstrBot 仓库 venv，见 AGENTS.md）：
+    /Users/wcqqq1214/Project/AstrBot/.venv/bin/python \
+        /Users/wcqqq1214/Project/astrbot_plugin_openai_oauth/tests/wiring_test.py
 """
 
 from __future__ import annotations
@@ -14,8 +15,10 @@ import os
 import sys
 from unittest import mock
 
-# 解析 AstrBot 仓库根（本文件位于 Project/astrbot_plugin_openai_oauth/ 下）
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "AstrBot"))
+# 解析 AstrBot 仓库根（本文件位于 Project/astrbot_plugin_openai_oauth/tests/ 下）
+REPO_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "AstrBot")
+)
 sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)  # 使 `data` 命名空间包可解析
 

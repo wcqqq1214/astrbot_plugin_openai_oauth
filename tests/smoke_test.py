@@ -1,8 +1,9 @@
 """最小冒烟验证：插件能否通过真实 `data.plugins.` 命名空间注册 provider，
 且 WebUI 元数据构建（config_service 读取的 provider_registry）能看到它。
 
-从仓库根运行：
-    .venv/bin/python /Users/wcqqq1214/Project/astrbot_plugin_openai_oauth/smoke_test.py
+从仓库根运行（需 AstrBot 仓库 venv，见 AGENTS.md）：
+    /Users/wcqqq1214/Project/AstrBot/.venv/bin/python \
+        /Users/wcqqq1214/Project/astrbot_plugin_openai_oauth/tests/smoke_test.py
 """
 
 from __future__ import annotations
@@ -10,8 +11,10 @@ from __future__ import annotations
 import os
 import sys
 
-# 解析 AstrBot 仓库根（本文件位于 Project/astrbot_plugin_openai_oauth/ 下）
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "AstrBot"))
+# 解析 AstrBot 仓库根（本文件位于 Project/astrbot_plugin_openai_oauth/tests/ 下）
+REPO_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "AstrBot")
+)
 sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)  # 使 `data` 命名空间包可解析
 
@@ -117,7 +120,7 @@ def main() -> int:
     )
 
     print("\n=== 7. 独立登录页随插件分发（链接登录入口） ===")
-    main_py = os.path.abspath(os.path.join(os.path.dirname(__file__), "main.py"))
+    main_py = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "main.py"))
     with open(main_py, encoding="utf-8") as fh:
         main_src = fh.read()
     check("_LOGIN_PAGE_HTML" in main_src, "main.py 内含独立登录页模板")
@@ -129,7 +132,7 @@ def main() -> int:
 
     print("\n=== 8. README 提供详情页直达登录链接（方案2） ===")
     login_path = "/api/v1/plugins/extensions/astrbot_plugin_openai_oauth/login"
-    repo_root = os.path.dirname(__file__)
+    repo_root = os.path.join(os.path.dirname(__file__), "..")
     for fname in ("README.md", "README_en.md"):
         with open(os.path.join(repo_root, fname), encoding="utf-8") as fh:
             readme_src = fh.read()

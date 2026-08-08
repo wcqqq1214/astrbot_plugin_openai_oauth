@@ -32,9 +32,9 @@
 
 - `main.py` — 注册 `OpenAI Subscribe` provider 适配器、插件 Star、设备登录 Web API（`device/start`、`device/poll`、`save_creds`）以及独立登录页（`/login`，链接登录入口，登录成功后自动写回凭据）。
 - `oauth.py` — Codex OAuth 协议常量、凭据辅助、token 刷新以及设备码登录协议（user-code 请求、轮询、授权码交换、JWT account-id 提取）。
-- `smoke_test.py` — 验证插件能注册 provider，且 WebUI 元数据构建器能看到它。
-- `wiring_test.py` — 用假凭据实例化 provider，验证端点接线、key 处理与刷新短路（无网络）。
-- `login_test.py` — 用 mock 网络走一遍设备登录协议与 web handler（无网络）。
+- `tests/smoke_test.py` — 验证插件能注册 provider，且 WebUI 元数据构建器能看到它。
+- `tests/wiring_test.py` — 用假凭据实例化 provider，验证端点接线、key 处理与刷新短路（无网络）。
+- `tests/login_test.py` — 用 mock 网络走一遍设备登录协议与 web handler（无网络）。
 
 协议参考 [opencode](https://github.com/sst/opencode)、[openclaw](https://github.com/openclaw/openclaw) 与 [hermes-agent](https://github.com/NousResearch/hermes-agent) 的实现。
 

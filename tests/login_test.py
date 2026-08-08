@@ -1,8 +1,9 @@
 """无网络设备登录验证：mock 掉 create_proxy_client，验证协议函数与
 Web handler（start/poll/后台任务）的完整流转，以及 JWT account_id 提取。
 
-从仓库根运行：
-    .venv/bin/python /Users/wcqqq1214/Project/astrbot_plugin_openai_oauth/login_test.py
+从仓库根运行（需 AstrBot 仓库 venv，见 AGENTS.md）：
+    /Users/wcqqq1214/Project/AstrBot/.venv/bin/python \
+        /Users/wcqqq1214/Project/astrbot_plugin_openai_oauth/tests/login_test.py
 """
 
 from __future__ import annotations
@@ -18,8 +19,10 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest import mock
 
-# 解析 AstrBot 仓库根（本文件位于 Project/astrbot_plugin_openai_oauth/ 下）
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "AstrBot"))
+# 解析 AstrBot 仓库根（本文件位于 Project/astrbot_plugin_openai_oauth/tests/ 下）
+REPO_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "AstrBot")
+)
 sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)  # 使 `data` 命名空间包可解析
 
