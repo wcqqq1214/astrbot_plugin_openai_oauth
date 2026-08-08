@@ -7,17 +7,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any
 
+import astrbot.core.message.components as Comp
 from astrbot import logger
 from astrbot.api import AstrBotConfig
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star, register
 from astrbot.api.web import json_response, request
+from astrbot.core.exceptions import EmptyModelOutputError
 from astrbot.core.provider.entities import LLMResponse
 from astrbot.core.provider.register import (
     provider_cls_map,
@@ -26,6 +29,7 @@ from astrbot.core.provider.register import (
 from astrbot.core.provider.sources.openai_responses_source import (
     ProviderOpenAIResponses,
 )
+from astrbot.core.provider.sources.request_retry import retry_provider_request
 from astrbot.core.utils.network_utils import create_proxy_client
 from starlette.responses import HTMLResponse
 
@@ -212,6 +216,207 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
             if item.get("type") == "message" and item.get("role") == "system":
                 item["role"] = "developer"
         return response_input
+
+    async def _query_stream(
+        self,
+        payloads: dict,
+        tools,
+        *,
+        request_max_retries: int | None = None,
+    ) -> AsyncGenerator[LLMResponse, None]:
+        """Stream from the Codex backend, which completes with an empty response
+        object: the content only arrives as deltas. Assemble the final response
+        from them instead of parsing the terminal event."""
+        if tools:
+            response_tools = []
+            for tool in tools.openai_schema():
+                function = tool.get("function", {})
+                response_tools.append({"type": "function", **function})
+            if response_tools:
+                payloads["tools"] = response_tools
+                payloads["tool_choice"] = payloads.get("tool_choice", "auto")
+
+        extra_body: dict[str, Any] = {}
+        custom_extra_body = self.provider_config.get("custom_extra_body", {})
+        if isinstance(custom_extra_body, dict):
+            extra_body.update(custom_extra_body)
+
+        for key in list(payloads):
+            if key not in self.default_params:
+                extra_body[key] = payloads.pop(key)
+
+        max_tokens = extra_body.pop("max_tokens", None)
+        if max_tokens is not None and "max_output_tokens" not in extra_body:
+            extra_body["max_output_tokens"] = max_tokens
+        reasoning_effort = extra_body.pop("reasoning_effort", None)
+        if reasoning_effort is not None and "reasoning" not in extra_body:
+            extra_body["reasoning"] = {"effort": reasoning_effort}
+        extra_body.pop("previous_response_id", None)
+        extra_body.pop("conversation", None)
+        extra_body.pop("store", None)
+        payloads.pop("previous_response_id", None)
+        payloads.pop("conversation", None)
+        payloads["store"] = False
+
+        stream = await retry_provider_request(
+            "OpenAI Responses",
+            lambda: self.client.responses.create(
+                **payloads,
+                stream=True,
+                extra_body=extra_body,
+            ),
+            max_attempts=request_max_retries,
+        )
+
+        response_id: str | None = None
+        text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        function_calls: list[dict] = []
+
+        async for event in stream:
+            event_type = self._field(event, "type", "")
+            event_response = self._field(event, "response")
+            if event_response is not None:
+                response_id = self._field(event_response, "id", response_id)
+
+            if event_type == "error":
+                code = self._field(event, "code", "stream_error")
+                message = self._field(event, "message", "Responses stream failed")
+                raise RuntimeError(
+                    f"Responses API stream failed: {code}: {message}. "
+                    f"response_id={response_id}"
+                )
+
+            if event_type in {"response.output_text.delta", "response.refusal.delta"}:
+                delta = self._field(event, "delta", "")
+                if delta:
+                    text_parts.append(str(delta))
+                    yield LLMResponse(
+                        "assistant",
+                        result_chain=MessageChain(chain=[Comp.Plain(str(delta))]),
+                        is_chunk=True,
+                        id=response_id,
+                    )
+                continue
+
+            if event_type in {
+                "response.reasoning_text.delta",
+                "response.reasoning_summary_text.delta",
+            }:
+                delta = self._field(event, "delta", "")
+                if delta:
+                    reasoning_parts.append(str(delta))
+                    yield LLMResponse(
+                        "assistant",
+                        reasoning_content=str(delta),
+                        is_chunk=True,
+                        id=response_id,
+                    )
+                continue
+
+            if event_type == "response.output_item.added":
+                item = self._field(event, "item")
+                if self._field(item, "type") == "function_call":
+                    arguments = self._field(item, "arguments", "")
+                    if isinstance(arguments, dict):
+                        arguments = json.dumps(arguments, ensure_ascii=False)
+                    function_calls.append(
+                        {
+                            "call_id": str(self._field(item, "call_id", "") or ""),
+                            "name": str(self._field(item, "name", "") or ""),
+                            "arguments": str(arguments or ""),
+                        }
+                    )
+                continue
+
+            if event_type == "response.function_call_arguments.delta":
+                if function_calls:
+                    function_calls[-1]["arguments"] += str(
+                        self._field(event, "delta", "") or ""
+                    )
+                continue
+
+            if event_type in {
+                "response.completed",
+                "response.incomplete",
+                "response.failed",
+            }:
+                if event_response is not None:
+                    status = self._field(event_response, "status")
+                    if status == "failed":
+                        error = self._field(event_response, "error")
+                        code = self._field(error, "code", "unknown_error")
+                        message = self._field(
+                            error, "message", "Responses API request failed"
+                        )
+                        raise RuntimeError(
+                            f"Responses API request failed: {code}: {message}. "
+                            f"response_id={response_id}"
+                        )
+                    if (
+                        self._field(
+                            self._field(event_response, "incomplete_details"),
+                            "reason",
+                        )
+                        == "content_filter"
+                    ):
+                        raise RuntimeError(
+                            "Responses API output was rejected by the provider "
+                            f"content filter. response_id={response_id}"
+                        )
+                    if self._field(event_response, "output"):
+                        yield await self._parse_response(event_response, tools)
+                        return
+                final = self._assemble_streamed_response(
+                    response_id, text_parts, reasoning_parts, function_calls
+                )
+                if final is not None:
+                    yield final
+                    return
+                raise EmptyModelOutputError(
+                    f"Responses stream returned no usable output. "
+                    f"response_id={response_id}"
+                )
+
+        raise EmptyModelOutputError(
+            f"Responses stream ended without a terminal event. response_id={response_id}"
+        )
+
+    def _assemble_streamed_response(
+        self,
+        response_id: str | None,
+        text_parts: list[str],
+        reasoning_parts: list[str],
+        function_calls: list[dict],
+    ) -> LLMResponse | None:
+        """Build a final LLMResponse from streamed deltas like ``_parse_response``."""
+        llm_response = LLMResponse("assistant", id=response_id)
+        completion_text = "".join(text_parts)
+        if completion_text:
+            llm_response.result_chain = MessageChain().message(completion_text)
+        if reasoning_parts:
+            llm_response.reasoning_content = "\n".join(reasoning_parts)
+        for call in function_calls:
+            arguments = call["arguments"]
+            if isinstance(arguments, str):
+                try:
+                    parsed = json.loads(arguments)
+                except json.JSONDecodeError:
+                    parsed = {}
+            elif arguments is None:
+                parsed = {}
+            else:
+                parsed = arguments
+            llm_response.tools_call_args.append(parsed)
+            llm_response.tools_call_name.append(call["name"])
+            llm_response.tools_call_ids.append(call["call_id"])
+        if llm_response.tools_call_args:
+            llm_response.role = "tool"
+        has_text = bool((llm_response.completion_text or "").strip())
+        has_reasoning = bool((llm_response.reasoning_content or "").strip())
+        if not has_text and not has_reasoning and not llm_response.tools_call_args:
+            return None
+        return llm_response
 
     async def get_models(self) -> list[str]:
         token = self.creds.get("access_token", "")
