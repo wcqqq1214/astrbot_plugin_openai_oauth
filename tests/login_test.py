@@ -539,7 +539,8 @@ def test_usage_format() -> None:
         }
     )
     check(
-        "5小时窗口" in msg and "已用 35%" in msg and "剩余 65%" in msg, "5 小时窗口渲染"
+        "5小时窗口" in msg and "剩余 65%" in msg and "已用" not in msg,
+        "5 小时窗口渲染（不再显示已用比例）",
     )
     check("重置 8月8日 15:30" in msg, "reset_at → 准确本地时间")
     check("7天窗口" in msg and "剩余 88%" in msg, "7 天窗口渲染")
@@ -547,7 +548,7 @@ def test_usage_format() -> None:
         re.search(r"\d{1,2}月\d{1,2}日 \d{2}:\d{2}", msg),
         "reset_after 推算出的准确时间",
     )
-    check("状态：可用。" in msg, "可用状态")
+    check("状态：可用" not in msg, "正常状态不再渲染状态行")
 
     reached = plugin_mod.format_usage(
         {

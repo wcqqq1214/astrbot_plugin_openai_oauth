@@ -360,19 +360,16 @@ def format_usage(usage: dict) -> str:
     if not windows:
         lines.append("当前账号暂无可用额度窗口。")
     for window in windows:
-        used = window.get("used_percent", 0.0)
-        remaining = max(0.0, 100.0 - float(used))
+        remaining = max(0.0, 100.0 - float(window.get("used_percent", 0.0)))
         lines.append(
             f"· {_window_label(window.get('label_seconds'))}："
-            f"已用 {used:.0f}%，剩余 {remaining:.0f}%"
+            f"剩余 {remaining:.0f}%"
             f"{_format_reset_at(window.get('reset_at'), window.get('reset_after_seconds'))}"
         )
     if usage.get("limit_reached"):
         lines.append("状态：已达额度上限，等待窗口重置。")
     elif not usage.get("allowed"):
         lines.append("状态：当前不可用。")
-    else:
-        lines.append("状态：可用。")
     return "\n".join(lines)
 
 
