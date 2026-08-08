@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  [English](README_en.md)
+  <a href="README_en.md">English</a>
 </p>
 
 一个 [AstrBot](https://astrbot.app) 插件：用你的 ChatGPT 账号（Plus / Pro 订阅）登录，将账号订阅额度作为模型 provider 使用——无需 API Key。

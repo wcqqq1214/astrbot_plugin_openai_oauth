@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  [简体中文](README.md)
+  <a href="README.md">简体中文</a>
 </p>
 
 An [AstrBot](https://astrbot.app) provider plugin: log in with your ChatGPT
