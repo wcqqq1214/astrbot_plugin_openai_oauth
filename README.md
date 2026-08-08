@@ -46,7 +46,7 @@
 
 - 键名：`reasoning_effort`
 - 值类型：`string`
-- 值：`max` 或 `ultra`
+- 值：`low`、`medium`、`high`、`xhigh` 或 `max`
 
 如果直接编辑底层 JSON，等价配置为：
 
@@ -57,13 +57,19 @@
 ```
 
 插件会把它转换为 Codex Responses API 的
-`{"reasoning": {"effort": "max"}}`。可按模型能力使用
-`none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` 或 `ultra`。
-`max`/`ultra` 不是所有模型或后端都支持；插件不会预先拦截这些值，最终以接口返回为准。
+`{"reasoning": {"effort": "max"}}`。对于 GPT-5.6 系列
+（`gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`），已验证以下等级均可正常返回：
 
-对支持它们的 Codex 模型，把示例中的值改成 `max` 或 `ultra` 即可。这里的
-`ultra` 仅作为 `reasoning.effort` 转发；本插件不会额外开启 Codex Multi-agent
-beta。如果后端要求额外的 Multi-agent 参数，当前插件尚未实现该扩展。
+| WebUI 显示名称 | API 的 `reasoning_effort` 值 |
+| --- | --- |
+| Light | `low` |
+| Medium | `medium` |
+| High | `high` |
+| Extra High | `xhigh` |
+| Max | `max` |
+
+API 参数应填写右列的值，不要直接填写 WebUI 显示名称。更多可用值以
+[OpenAI GPT-5.6 模型文档](https://developers.openai.com/api/docs/models) 为准。
 `max_tokens` 则是输出长度上限，不是思考强度。
 
 ## 网络与凭据流向

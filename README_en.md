@@ -74,7 +74,7 @@ visual editor:
 
 - Key: `reasoning_effort`
 - Value type: `string`
-- Value: `max` or `ultra`
+- Value: `low`, `medium`, `high`, `xhigh`, or `max`
 
 If you edit the underlying JSON directly, the equivalent configuration is:
 
@@ -85,15 +85,21 @@ If you edit the underlying JSON directly, the equivalent configuration is:
 ```
 
 The plugin converts this to the Codex Responses API shape
-`{"reasoning": {"effort": "max"}}`. Depending on the model, use
-`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`.
-`max` and `ultra` are not supported by every model or backend; the plugin does
-not pre-validate these values, so the backend remains the final authority.
+`{"reasoning": {"effort": "max"}}`. For the GPT-5.6 family
+(`gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol`), the following levels have
+been verified to return successfully:
 
-For a Codex model that supports them, replace the example value with `max` or
-`ultra`. Here `ultra` is only forwarded as `reasoning.effort`; this plugin does
-not additionally enable the Codex Multi-agent beta. If the backend requires
-extra Multi-agent parameters, that extension is not implemented here.
+| WebUI label | API `reasoning_effort` value |
+| --- | --- |
+| Light | `low` |
+| Medium | `medium` |
+| High | `high` |
+| Extra High | `xhigh` |
+| Max | `max` |
+
+Enter the value from the right column as the API parameter; do not enter the
+WebUI label directly. See the [OpenAI GPT-5.6 model documentation](https://developers.openai.com/api/docs/models)
+for the authoritative list of supported values.
 `max_tokens` controls the output length limit; it is separate from reasoning
 effort.
 
