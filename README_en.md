@@ -66,7 +66,7 @@ an OAuth token obtained from a device-code login, so billing draws on your
 
    ![Enable Codex device-code authorization in ChatGPT settings](docs/images/enable-device-code-auth-codex.png)
 
-   *Figure: Enable **Enable device code authorization for Codex** under ChatGPT's **Security and login** settings.*
+   *Figure: Turn on **Enable device code authorization for Codex** under ChatGPT's **Security and login** settings.*
 
 4. Pick a model and enable the provider.
 
