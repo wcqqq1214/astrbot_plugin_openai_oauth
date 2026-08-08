@@ -610,16 +610,21 @@ async def build_usage_message() -> str:
         return "尚未登录。"
     proxy = str((source or {}).get("proxy", "") or "")
     try:
-        usage = await fetch_rate_limits(
-            creds.get("access_token", ""),
-            creds.get("account_id", ""),
-            proxy,
+        usage = await retry_provider_request(
+            "OpenAI Codex",
+            lambda: fetch_rate_limits(
+                creds.get("access_token", ""),
+                creds.get("account_id", ""),
+                proxy,
+            ),
+            max_attempts=3,
         )
     except CredentialExpiredError:
         return "凭据已失效，请在插件详情页重新登录。"
     except Exception as exc:  # noqa: BLE001 - 查询失败信息透传给用户
-        logger.error(f"OpenAI Codex 额度查询失败: {exc}")
-        return f"额度查询失败：{exc}"
+        logger.error(f"OpenAI Codex 额度查询失败: {exc!r}")
+        # 部分异常（如 TimeoutError）str 为空，回退到类型名避免透传空白信息。
+        return f"额度查询失败：{str(exc) or type(exc).__name__}"
     return format_usage(usage)
 
 

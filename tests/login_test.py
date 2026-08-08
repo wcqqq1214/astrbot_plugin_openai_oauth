@@ -634,6 +634,67 @@ def test_usage_command() -> None:
         plugin_mod._config_mgr = old_mgr
 
 
+def test_usage_retry() -> None:
+    print("\n=== 12. /usage 查询：瞬时失败自动重试 / 持续失败信息非空 ===")
+    old_mgr = plugin_mod._config_mgr
+    try:
+        conf = {
+            "provider_sources": [
+                {
+                    "type": plugin_mod._PROVIDER_TYPE,
+                    "id": plugin_mod._PROVIDER_TYPE,
+                    "key": oauth.dump_credentials(
+                        {"access_token": "at", "account_id": "acc"}
+                    ),
+                    "proxy": "",
+                }
+            ]
+        }
+        plugin_mod._config_mgr = _FakeConfigMgr(conf)
+        creds = {"access_token": "at", "account_id": "acc"}
+
+        # 瞬时超时：前两次失败后重试成功
+        attempts = {"n": 0}
+
+        async def _flaky(at, acc, proxy):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise TimeoutError()
+            return {
+                "allowed": True,
+                "limit_reached": False,
+                "windows": [
+                    {
+                        "label_seconds": 18000,
+                        "used_percent": 35.0,
+                        "reset_after_seconds": None,
+                        "reset_at": None,
+                    }
+                ],
+            }
+
+        with mock.patch.object(
+            plugin_mod, "load_credentials", return_value=creds
+        ), mock.patch.object(plugin_mod, "fetch_rate_limits", side_effect=_flaky):
+            msg = asyncio.run(plugin_mod.build_usage_message())
+        check(attempts["n"] == 3, "瞬时超时自动重试到第 3 次")
+        check("剩余 65%" in msg, "重试成功后返回额度文本")
+
+        # 持续超时：重试耗尽后返回非空错误信息（TimeoutError 的 str 为空）
+        async def _always_timeout(at, acc, proxy):
+            raise TimeoutError()
+
+        with mock.patch.object(
+            plugin_mod, "load_credentials", return_value=creds
+        ), mock.patch.object(
+            plugin_mod, "fetch_rate_limits", side_effect=_always_timeout
+        ):
+            msg = asyncio.run(plugin_mod.build_usage_message())
+        check(msg == "额度查询失败：TimeoutError", "持续超时报错信息非空")
+    finally:
+        plugin_mod._config_mgr = old_mgr
+
+
 def main() -> int:
     test_usercode()
     test_poll()
@@ -646,6 +707,7 @@ def main() -> int:
     test_usage_fetch()
     test_usage_format()
     test_usage_command()
+    test_usage_retry()
     print()
     if FAILED:
         print(f"=== 登录验证失败：{len(FAILED)} 项 ===")
