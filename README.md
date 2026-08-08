@@ -1,8 +1,8 @@
-<p align="center">
-  <img src="logo.png" alt="OpenAI Subscribe" width="120">
-</p>
-
 # astrbot_plugin_openai_oauth
+
+<p align="center">
+  <img src="logo.png" alt="OpenAI Subscribe" width="240">
+</p>
 
 [English](README_en.md)
 
