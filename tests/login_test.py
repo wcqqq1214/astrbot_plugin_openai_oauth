@@ -31,6 +31,8 @@ import importlib
 plugin_mod = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.main")
 oauth = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.oauth")
 from astrbot.api.web import PluginRequest, bind_request_context
+from astrbot.core.star.filter.permission import PermissionType, PermissionTypeFilter
+from astrbot.core.star.register.star_handler import star_handlers_registry
 
 FAILED = []
 
@@ -193,13 +195,20 @@ def test_jwt() -> None:
 
 
 class _FakeRequest:
-    def __init__(self, json_data: dict):
+    def __init__(
+        self,
+        json_data: dict,
+        *,
+        scheme: str = "https",
+        client_host: str = "127.0.0.1",
+        host: str = "localhost",
+    ):
         self.json_data = json_data
         self.method = "POST"
-        self.url = SimpleNamespace(path="/x", scheme="https")
-        self.headers = {"host": "localhost"}
+        self.url = SimpleNamespace(path="/x", scheme=scheme)
+        self.headers = {"host": host}
         self.cookies = {}
-        self.client = SimpleNamespace(host="127.0.0.1")
+        self.client = SimpleNamespace(host=client_host)
         self.query_params = SimpleNamespace(multi_items=list)
 
     async def json(self):
@@ -214,7 +223,17 @@ def test_handlers() -> None:
     plugin_mod._config_mgr = mgr
 
     async def _run():
-        with bind_request_context(PluginRequest(_FakeRequest({}), username="astrbot")):
+        with bind_request_context(
+            PluginRequest(
+                _FakeRequest(
+                    {},
+                    scheme="http",
+                    client_host="198.51.100.8",
+                    host="astrbot.example",
+                ),
+                username="astrbot",
+            )
+        ):
             start_resp = await plugin_mod._handle_device_start()
         start_data = json.loads(start_resp.body)
         session_id = start_data["session_id"]
@@ -294,22 +313,33 @@ def test_handlers() -> None:
     )
 
 
-def test_login_page() -> None:
-    print("\n=== 6. 登录页 HTML 可服务 ===")
+def test_plugin_page_assets() -> None:
+    print("\n=== 6. Native Plugin Page assets use the scoped bridge ===")
+    page_root = os.path.join(os.path.dirname(__file__), "..", "pages", "login")
+    with open(os.path.join(page_root, "index.html"), encoding="utf-8") as source:
+        html = source.read()
+    with open(os.path.join(page_root, "app.js"), encoding="utf-8") as source:
+        app = source.read()
 
-    async def _load_page():
-        with bind_request_context(PluginRequest(_FakeRequest({}), username="astrbot")):
-            return await plugin_mod._handle_login_page()
-
-    resp = asyncio.run(_load_page())
-    html = resp.body.decode()
+    check("./app.js" in html, "Plugin Page loads an external app.js")
+    check("/api/plugin/page/bridge-sdk.js" in html, "Plugin Page loads the bridge SDK")
+    check("window.AstrBotPluginPage" in app, "Page uses AstrBotPluginPage")
+    check("await bridge.ready()" in app, "Page waits for bridge.ready()")
     check(
-        resp.status_code == 200 and html.startswith("<!doctype html>"), "返回 HTML 页面"
+        'bridge.apiPost("device/start", {})' in app,
+        "Page starts through scoped apiPost",
     )
+    check('bridge.apiPost("device/poll"' in app, "Page polls through scoped apiPost")
     check(
-        "/device/start" in html and "/device/poll" in html, "页面调用 start/poll 接口"
+        "location.protocol" in app and "http:" in app and "HTTPS" in app,
+        "Page warns on plain HTTP",
     )
-    check("开始登录" in html, "页面含登录按钮")
+    check("fetch(" not in app, "Page does not bypass the bridge with fetch")
+    check(
+        "localStorage" not in app and "document.cookie" not in app,
+        "Page does not read browser credentials",
+    )
+    check("Authorization" not in app, "Page does not handle Dashboard JWTs")
 
 
 class _FakeConf(dict):
@@ -567,6 +597,171 @@ class _FakeEvent:
         self.sent.append(message)
 
 
+class _FakeLoginEvent:
+    def __init__(self, *, private: bool = True) -> None:
+        self.call_llm = True
+        self.sent: list = []
+        self.private = private
+        self.unified_msg_origin = "test:FriendMessage:admin-1"
+
+    def should_call_llm(self, call_llm: bool) -> None:
+        self.call_llm = call_llm
+
+    def is_private_chat(self) -> bool:
+        return self.private
+
+    async def send(self, message) -> None:
+        self.sent.append(message)
+
+
+def _sent_text(event: _FakeLoginEvent) -> str:
+    parts = []
+    for message in event.sent:
+        chain = getattr(message, "chain", None) or []
+        parts.extend(getattr(item, "text", str(item)) for item in chain)
+    return "\n".join(parts)
+
+
+def test_openai_login_command() -> None:
+    print("\n=== 12. /openai_login admin private-command fallback ===")
+    handler = next(
+        metadata
+        for metadata in star_handlers_registry
+        if metadata.handler_name == "openai_login"
+        and metadata.handler_module_path == plugin_mod.__name__
+    )
+    check(
+        any(
+            isinstance(filter_, PermissionTypeFilter)
+            and filter_.permission_type == PermissionType.ADMIN
+            for filter_ in handler.event_filters
+        ),
+        "/openai_login is wired with the ADMIN permission filter",
+    )
+
+    old_mgr = plugin_mod._config_mgr
+    plugin_mod._config_mgr = _FakeConfigMgr(
+        {"provider_sources": [{"type": plugin_mod._PROVIDER_TYPE, "proxy": ""}]}
+    )
+
+    async def run_success():
+        event = _FakeLoginEvent()
+        with (
+            mock.patch.object(
+                plugin_mod,
+                "request_device_user_code",
+                new=mock.AsyncMock(return_value=("device", "CODE", 0)),
+            ),
+            mock.patch.object(
+                plugin_mod,
+                "poll_device_authorization",
+                new=mock.AsyncMock(return_value=("authorization", "verifier")),
+            ),
+            mock.patch.object(
+                plugin_mod,
+                "exchange_authorization_code",
+                new=mock.AsyncMock(
+                    return_value={
+                        "access_token": "at-command",
+                        "refresh_token": "rt-command",
+                        "expires_in": 3600,
+                    }
+                ),
+            ),
+        ):
+            await plugin_mod.OpenAI_OAuth_Plugin.openai_login(None, event)
+            for _ in range(10):
+                await asyncio.sleep(0)
+        return event
+
+    try:
+        event = asyncio.run(run_success())
+        sent = _sent_text(event)
+        check(event.call_llm is False, "command disables the default LLM path")
+        check(
+            "CODE" in sent and oauth.CODEX_DEVICE_VERIFY_URL in sent,
+            "command sends URL and device code",
+        )
+        check(
+            "登录成功" in sent or "succeeded" in sent,
+            "command reports server-side success",
+        )
+        check(
+            "at-command" not in sent and "rt-command" not in sent,
+            "command never sends tokens",
+        )
+
+        async def run_group():
+            event = _FakeLoginEvent(private=False)
+            with mock.patch.object(
+                plugin_mod,
+                "request_device_user_code",
+                new=mock.AsyncMock(),
+            ) as request_code:
+                await plugin_mod.OpenAI_OAuth_Plugin.openai_login(None, event)
+            return event, request_code
+
+        group_event, request_code = asyncio.run(run_group())
+        check(not request_code.await_count, "group command does not start device auth")
+        check(
+            "私聊" in _sent_text(group_event) or "private" in _sent_text(group_event),
+            "group command explains the private-session restriction",
+        )
+    finally:
+        cleanup = getattr(plugin_mod, "_cancel_all_command_login_tasks", None)
+        if cleanup is not None:
+            cleanup()
+        plugin_mod._config_mgr = old_mgr
+
+
+def test_openai_login_terminate() -> None:
+    print("\n=== 13. Plugin termination cancels command polling ===")
+    old_mgr = plugin_mod._config_mgr
+    plugin_mod._config_mgr = _FakeConfigMgr({"provider_sources": []})
+
+    async def run():
+        polling = asyncio.Event()
+
+        async def wait_for_authorization(*_args):
+            polling.set()
+            await asyncio.Event().wait()
+
+        event = _FakeLoginEvent()
+        with (
+            mock.patch.object(
+                plugin_mod,
+                "request_device_user_code",
+                new=mock.AsyncMock(return_value=("device", "CODE", 5)),
+            ),
+            mock.patch.object(
+                plugin_mod,
+                "poll_device_authorization",
+                new=wait_for_authorization,
+            ),
+        ):
+            await plugin_mod.OpenAI_OAuth_Plugin.openai_login(None, event)
+            await polling.wait()
+            tasks = list(plugin_mod._command_login_tasks.values())
+            await plugin_mod.OpenAI_OAuth_Plugin.terminate(None)
+        return tasks
+
+    try:
+        tasks = asyncio.run(run())
+        check(
+            bool(tasks) and all(task.cancelled() for task in tasks),
+            "terminate cancels command polling",
+        )
+        check(
+            not plugin_mod._command_login_tasks,
+            "terminate clears command task tracking",
+        )
+    finally:
+        cleanup = getattr(plugin_mod, "_cancel_all_command_login_tasks", None)
+        if cleanup is not None:
+            cleanup()
+        plugin_mod._config_mgr = old_mgr
+
+
 def test_usage_command() -> None:
     print("\n=== 11. /usage 命令：未登录拦截 / 正常查询 ===")
     old_mgr = plugin_mod._config_mgr
@@ -695,12 +890,14 @@ def main() -> int:
     test_exchange()
     test_jwt()
     test_handlers()
-    test_login_page()
+    test_plugin_page_assets()
     test_persist_login_credentials()
     test_persist_key()
     test_usage_fetch()
     test_usage_format()
     test_usage_command()
+    test_openai_login_command()
+    test_openai_login_terminate()
     test_usage_retry()
     print()
     if FAILED:

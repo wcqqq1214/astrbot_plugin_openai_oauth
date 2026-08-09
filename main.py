@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import json
 import secrets
 import time
@@ -33,7 +32,6 @@ from astrbot.core.provider.sources.openai_responses_source import (
 from astrbot.core.provider.sources.request_retry import retry_provider_request
 from astrbot.core.utils.network_utils import create_proxy_client
 from astrbot.core.workspace import API_KEY_USERNAME_PREFIX
-from starlette.responses import HTMLResponse
 
 from .oauth import (
     CODEX_BASE,
@@ -64,7 +62,7 @@ _PROVIDER_TYPE = "OpenAI Subscribe"
 
 # 由 OpenAI_OAuth_Plugin 注入，供 provider 把刷新的凭据写回 AstrBot 配置。
 _config_mgr: Any = None
-_allow_insecure_local_http = False
+_command_login_tasks: dict[str, asyncio.Task[Any]] = {}
 
 
 @register(
@@ -79,15 +77,12 @@ class OpenAI_OAuth_Plugin(Star):
         context: Context,
         config: AstrBotConfig | None = None,
     ) -> None:
-        global _allow_insecure_local_http, _config_mgr
+        global _config_mgr
         super().__init__(context)
         _config_mgr = context.astrbot_config_mgr
         self.config = config if config is not None else AstrBotConfig()
-        _allow_insecure_local_http = (
-            config is not None
-            and config.get("allow_insecure_local_http", False) is True
-        )
-        # 设备登录的后端接口与页面：/api/v1/plugins/extensions/<route>
+        # Device-login APIs are exposed under the Dashboard's authenticated
+        # plugin extension bridge.
         self.context.register_web_api(
             "/astrbot_plugin_openai_oauth/device/start",
             _handle_device_start,
@@ -100,12 +95,6 @@ class OpenAI_OAuth_Plugin(Star):
             ["POST"],
             "查询 Codex 设备登录状态",
         )
-        self.context.register_web_api(
-            "/astrbot_plugin_openai_oauth/login",
-            _handle_login_page,
-            ["GET"],
-            "Codex 设备登录页面",
-        )
 
     @filter.command("usage")
     async def usage(self, event: AstrMessageEvent) -> None:
@@ -116,9 +105,83 @@ class OpenAI_OAuth_Plugin(Star):
             return
         await event.send(MessageChain().message(await build_usage_message()))
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("openai_login")
+    async def openai_login(self, event: AstrMessageEvent) -> None:
+        """Start the administrator-only private-chat device login fallback."""
+        event.should_call_llm(False)
+        if not _is_private_login_event(event):
+            await event.send(
+                MessageChain().message(
+                    "为保护设备码，/openai_login 仅允许在管理员私聊中使用。"
+                )
+            )
+            return
+
+        owner = _command_login_owner(event)
+        existing_task = _command_login_tasks.get(owner)
+        if existing_task is not None and not existing_task.done():
+            await event.send(
+                MessageChain().message(
+                    "当前私聊已有一个 OpenAI 登录流程，请先完成或等待它结束。"
+                )
+            )
+            return
+
+        current_task = asyncio.current_task()
+        if current_task is not None:
+            _command_login_tasks[owner] = current_task
+        source = _get_source()
+        proxy = str((source or {}).get("proxy", "") or "")
+        try:
+            try:
+                device_auth_id, user_code, interval = await request_device_user_code(
+                    proxy
+                )
+            except DeviceAuthError as exc:
+                await event.send(MessageChain().message(f"无法启动设备登录：{exc}"))
+                return
+            except Exception:  # noqa: BLE001 - keep network details out of chat
+                logger.exception("OpenAI Codex admin device-code request failed.")
+                await event.send(
+                    MessageChain().message("无法启动设备登录，请稍后重试。")
+                )
+                return
+
+            await event.send(
+                MessageChain().message(
+                    "请在当前私聊中打开以下 OpenAI 验证网址并输入设备码：\n"
+                    f"{CODEX_DEVICE_VERIFY_URL}\n"
+                    f"设备码：{user_code}\n"
+                    "授权完成后，AstrBot 会在服务端自动交换并保存凭据；令牌不会发送到聊天。"
+                )
+            )
+            task = asyncio.create_task(
+                _run_command_device_login(
+                    event,
+                    device_auth_id,
+                    user_code,
+                    interval,
+                    proxy,
+                )
+            )
+            _command_login_tasks[owner] = task
+            task.add_done_callback(
+                lambda done: _release_command_login_task(owner, done)
+            )
+        finally:
+            if (
+                current_task is not None
+                and _command_login_tasks.get(owner) is current_task
+            ):
+                _command_login_tasks.pop(owner, None)
+
     async def terminate(self) -> None:
         """Cancel all outstanding device-login work during plugin unload."""
         _discard_all_login_sessions()
+        tasks = _cancel_all_command_login_tasks()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def _register_provider_adapter_if_absent(cls: type) -> type:
@@ -635,6 +698,35 @@ def _is_logged_in() -> bool:
     return bool(load_credentials(source.get("key")).get("access_token"))
 
 
+def _is_private_login_event(event: AstrMessageEvent) -> bool:
+    """Return whether the event is a direct message, failing closed if unknown."""
+    checker = getattr(event, "is_private_chat", None)
+    return callable(checker) and bool(checker())
+
+
+def _command_login_owner(event: AstrMessageEvent) -> str:
+    """Build a non-secret owner key for one private command session."""
+    try:
+        owner = str(event.unified_msg_origin or "").strip()
+    except (AttributeError, TypeError):
+        owner = ""
+    return owner or f"event:{id(event)}"
+
+
+def _release_command_login_task(owner: str, task: asyncio.Task[Any]) -> None:
+    if _command_login_tasks.get(owner) is task:
+        _command_login_tasks.pop(owner, None)
+
+
+def _cancel_all_command_login_tasks() -> list[asyncio.Task[Any]]:
+    tasks = list(set(_command_login_tasks.values()))
+    _command_login_tasks.clear()
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    return tasks
+
+
 async def build_usage_message() -> str:
     """读取 provider 配置里的凭据并查询额度，返回要发送的文本。"""
     source = _get_source()
@@ -668,41 +760,10 @@ _MAX_LOGIN_SESSIONS = 8
 _MAX_LOGIN_SESSIONS_PER_USER = 2
 _LOGIN_RESULT_TTL_SECONDS = 120
 _NO_STORE_HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache"}
-_LOGIN_PAGE_HEADERS = {
-    **_NO_STORE_HEADERS,
-    "Content-Security-Policy": (
-        "default-src 'none'; connect-src 'self'; style-src 'unsafe-inline'; "
-        "script-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
-    ),
-    "Referrer-Policy": "no-referrer",
-    "X-Frame-Options": "DENY",
-}
 
 # session_id -> {owner, status, device_auth_id, user_code, interval, error,
 #                task, expiry_handle, expires_at}
 _login_sessions: dict[str, dict] = {}
-
-
-def _is_loopback_host(host: str | None) -> bool:
-    normalized = str(host or "").strip().lower().rstrip(".")
-    if normalized == "localhost":
-        return True
-    if "%" in normalized:
-        normalized = normalized.split("%", 1)[0]
-    try:
-        return ipaddress.ip_address(normalized).is_loopback
-    except ValueError:
-        return False
-
-
-def _request_host() -> str:
-    raw_host = str(request.headers.get("host", "") or "").strip()
-    if raw_host.startswith("["):
-        closing = raw_host.find("]")
-        return raw_host[1:closing] if closing > 0 else ""
-    if raw_host.count(":") == 1:
-        return raw_host.rsplit(":", 1)[0]
-    return raw_host
 
 
 def _login_request_error() -> str | None:
@@ -711,21 +772,7 @@ def _login_request_error() -> str | None:
         return "登录会话身份不可用"
     if owner.startswith(API_KEY_USERNAME_PREFIX):
         return "此操作仅允许已登录的 WebUI 用户，API Key 不可用"
-    # PluginRequest does not expose a public scheme property. Read the ASGI
-    # request URL selected by the server/proxy middleware; never infer it from a
-    # caller-controlled forwarding header here.
-    if str(request._request.url.scheme).lower() == "https":
-        return None
-    # A local reverse proxy can make both the peer and Host appear loopback for
-    # a remote browser. HTTP therefore stays denied unless the operator opts in
-    # explicitly for an isolated local-development deployment.
-    if (
-        _allow_insecure_local_http
-        and _is_loopback_host(request.client_host)
-        and _is_loopback_host(_request_host())
-    ):
-        return None
-    return "设备登录必须通过 HTTPS 访问"
+    return None
 
 
 def _login_error_response(message: str, status_code: int):
@@ -916,6 +963,49 @@ async def _run_device_login(session_id: str, proxy: str) -> None:
             _schedule_login_session_expiry(session_id, _LOGIN_RESULT_TTL_SECONDS)
 
 
+async def _run_command_device_login(
+    event: AstrMessageEvent,
+    device_auth_id: str,
+    user_code: str,
+    interval: int,
+    proxy: str,
+) -> None:
+    """Complete a private-command login without exposing credential material."""
+    try:
+        authorization_code, code_verifier = await poll_device_authorization(
+            device_auth_id,
+            user_code,
+            interval,
+            proxy,
+        )
+        tokens = await exchange_authorization_code(
+            authorization_code,
+            code_verifier,
+            proxy,
+        )
+        creds = build_credentials(
+            tokens["access_token"],
+            tokens.get("refresh_token", ""),
+            tokens.get("expires_in", 3600),
+        )
+        await _persist_login_credentials(creds)
+    except asyncio.CancelledError:
+        raise
+    except DeviceAuthTimeout:
+        await event.send(
+            MessageChain().message("设备码已过期，请重新发送 /openai_login。")
+        )
+    except DeviceAuthError as exc:
+        await event.send(MessageChain().message(f"OpenAI 登录失败：{exc}"))
+    except Exception:  # noqa: BLE001 - never send provider or credential details
+        logger.exception("OpenAI Codex admin device login failed.")
+        await event.send(MessageChain().message("OpenAI 登录或保存失败，请重试。"))
+    else:
+        await event.send(
+            MessageChain().message("OpenAI 登录成功，凭据已由 AstrBot 服务端保存。")
+        )
+
+
 async def _handle_device_poll() -> Any:
     if message := _login_request_error():
         return _login_error_response(message, 403)
@@ -937,102 +1027,3 @@ async def _handle_device_poll() -> Any:
     if session["status"] in {"success", "error", "timeout"}:
         _discard_login_session(session_id, cancel_task=False)
     return json_response(payload, headers=_NO_STORE_HEADERS)
-
-
-async def _handle_login_page() -> HTMLResponse:
-    if message := _login_request_error():
-        return HTMLResponse(
-            message,
-            status_code=403,
-            headers=_LOGIN_PAGE_HEADERS,
-        )
-    return HTMLResponse(_LOGIN_PAGE_HTML, headers=_LOGIN_PAGE_HEADERS)
-
-
-_LOGIN_PAGE_HTML = """<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenAI 订阅登录 (Codex)</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 620px; margin: 40px auto; padding: 0 16px; line-height: 1.6; }
-  h1 { font-size: 20px; }
-  button { font-size: 14px; padding: 8px 16px; border: none; border-radius: 8px; background: #10a37f; color: #fff; cursor: pointer; }
-  button:disabled { opacity: .5; cursor: default; }
-  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  #steps { margin-top: 16px; }
-  #steps p { margin: 8px 0; }
-  .url { color: #10a37f; }
-  .code { font-size: 18px; font-weight: 600; background: #f0f0f0; padding: 2px 8px; border-radius: 6px; }
-  #status { margin-top: 12px; color: #666; }
-  #error { margin-top: 12px; color: #c00; white-space: pre-wrap; }
-  .ok { color: #0a7a3d; }
-</style>
-</head>
-<body>
-  <h1>OpenAI 订阅登录 (Codex OAuth)</h1>
-  <p>用你的 ChatGPT 账号授权，生成 provider 的凭据。</p>
-  <button id="start">开始登录</button>
-  <div id="steps" hidden>
-    <p>1. 打开链接：<a id="url" class="url" target="_blank" rel="noopener"></a></p>
-    <p>2. 输入设备码：<span class="code" id="code"></span></p>
-  </div>
-  <div id="status"></div>
-  <div id="result" hidden>
-    <p class="ok" id="result-text">登录成功，凭据已写入模型配置。</p>
-  </div>
-  <div id="error" hidden></div>
-  <script>
-    const BASE = "/api/v1/plugins/extensions/astrbot_plugin_openai_oauth";
-    const $ = (id) => document.getElementById(id);
-    const startBtn = $("start");
-    startBtn.addEventListener("click", async () => {
-      startBtn.disabled = true;
-      try {
-        const resp = await fetch(BASE + "/device/start", { method: "POST" });
-        const data = await resp.json();
-        if (data.status === "error") { showError(data.message || "启动失败"); return; }
-        $("steps").hidden = false;
-        $("url").textContent = data.verify_url;
-        $("url").href = data.verify_url;
-        $("code").textContent = data.user_code;
-        setStatus("等待授权：请在打开的页面完成登录……");
-        poll(data.session_id, Math.max(2, Number(data.interval) || 5));
-      } catch (e) { showError(String(e)); }
-    });
-    function poll(sessionId, interval) {
-      const timer = setInterval(async () => {
-        try {
-          const resp = await fetch(BASE + "/device/poll", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ session_id: sessionId }),
-          });
-          const data = await resp.json();
-          if (data.status === "success") {
-            clearInterval(timer);
-            $("result").hidden = false;
-            setStatus("登录成功。");
-          } else if (data.status === "error" || data.status === "timeout") {
-            clearInterval(timer);
-            showError(data.error || "登录失败");
-          }
-        } catch (e) { /* 瞬时错误继续轮询 */ }
-      }, interval * 1000);
-    }
-    function setStatus(text) {
-      $("status").textContent = text;
-      $("error").hidden = true;
-    }
-    function showError(text) {
-      $("status").textContent = "";
-      $("error").hidden = false;
-      $("error").textContent = text;
-      startBtn.disabled = false;
-    }
-  </script>
-</body>
-</html>
-"""

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenAI 订阅登录</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script src="/api/plugin/page/bridge-sdk.js"></script>
+  </head>
+  <body>
+    <main class="card">
+      <h1 id="title">OpenAI 订阅登录</h1>
+      <p id="intro">使用 ChatGPT 设备码完成授权，凭据会由 AstrBot 服务端保存。</p>
+
+      <div id="transport-warning" class="warning" role="alert" hidden>
+        <strong>当前 Dashboard 使用明文 HTTP。</strong>
+        <span>Dashboard 会话可能被网络窃听；建议为整个 Dashboard 使用 HTTPS、VPN 或 SSH 隧道。</span>
+      </div>
+
+      <button id="start" type="button">开始登录</button>
+
+      <section id="instructions" hidden>
+        <h2 id="instructions-title">完成授权</h2>
+        <p><span id="open-label">打开验证网址：</span><a id="verify-url" target="_blank" rel="noopener noreferrer"></a></p>
+        <p><span id="code-label">输入设备码：</span><code id="user-code"></code></p>
+      </section>
+
+      <p id="status" class="status" role="status"></p>
+      <p id="error" class="error" role="alert" hidden></p>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

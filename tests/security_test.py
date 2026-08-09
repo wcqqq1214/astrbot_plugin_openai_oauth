@@ -106,70 +106,40 @@ class LoginBoundaryTests(unittest.TestCase):
             plugin._login_sessions.clear()
         plugin._config_mgr = None
 
-    def test_plain_http_is_rejected_by_default_and_https_is_allowed(self) -> None:
+    def test_authenticated_public_http_start_is_allowed(self) -> None:
         async def run():
-            remote_request = _plugin_request(scheme="http", method="GET")
+            remote_request = _plugin_request(scheme="http")
             remote_request.headers["x-forwarded-proto"] = "https"
-            with bind_request_context(remote_request):
-                remote = await plugin._handle_login_page()
-            with bind_request_context(
-                _plugin_request(
-                    scheme="http",
-                    client_host="127.0.0.1",
-                    host="astrbot.example",
-                    method="GET",
-                )
+            with (
+                mock.patch.object(
+                    plugin,
+                    "request_device_user_code",
+                    new=mock.AsyncMock(return_value=("device", "CODE", 5)),
+                ),
+                mock.patch.object(plugin, "_run_device_login", new=mock.AsyncMock()),
+                bind_request_context(remote_request),
             ):
-                untrusted_proxy = await plugin._handle_login_page()
-            with bind_request_context(
-                _plugin_request(
-                    scheme="http",
-                    client_host="127.0.0.1",
-                    host="localhost:6185",
-                    method="GET",
-                )
-            ):
-                ambiguous_local = await plugin._handle_login_page()
-            with bind_request_context(_plugin_request(method="GET")):
-                secure = await plugin._handle_login_page()
-            return remote, untrusted_proxy, ambiguous_local, secure
+                return await plugin._handle_device_start()
 
-        remote, untrusted_proxy, ambiguous_local, secure = asyncio.run(run())
-        self.assertEqual(remote.status_code, 403)
-        self.assertEqual(untrusted_proxy.status_code, 403)
-        self.assertEqual(ambiguous_local.status_code, 403)
-        self.assertEqual(secure.status_code, 200)
-        self.assertEqual(secure.headers["cache-control"], "no-store")
+        response = asyncio.run(run())
+        self.assertEqual(response.status_code, 200)
 
-    def test_insecure_http_opt_in_still_requires_loopback_peer_and_host(self) -> None:
-        async def load_page(*, client_host: str, host: str):
-            with bind_request_context(
-                _plugin_request(
-                    scheme="http",
-                    client_host=client_host,
-                    host=host,
-                    method="GET",
-                )
-            ):
-                return await plugin._handle_login_page()
-
+    def test_missing_identity_is_rejected(self) -> None:
         async def run():
-            with mock.patch.object(
-                plugin, "_allow_insecure_local_http", True, create=True
+            with (
+                mock.patch.object(
+                    plugin,
+                    "request_device_user_code",
+                    new=mock.AsyncMock(return_value=("device", "CODE", 5)),
+                ) as request_code,
+                bind_request_context(_plugin_request(username=None)),
             ):
-                local = await load_page(client_host="127.0.0.1", host="localhost:6185")
-                remote_peer = await load_page(
-                    client_host="198.51.100.8", host="localhost:6185"
-                )
-                external_host = await load_page(
-                    client_host="127.0.0.1", host="astrbot.example"
-                )
-                return local, remote_peer, external_host
+                response = await plugin._handle_device_start()
+            return response, request_code
 
-        local, remote_peer, external_host = asyncio.run(run())
-        self.assertEqual(local.status_code, 200)
-        self.assertEqual(remote_peer.status_code, 403)
-        self.assertEqual(external_host.status_code, 403)
+        response, request_code = asyncio.run(run())
+        self.assertEqual(response.status_code, 403)
+        request_code.assert_not_awaited()
 
     def test_api_key_cannot_enter_the_login_boundary(self) -> None:
         async def run():
@@ -184,6 +154,23 @@ class LoginBoundaryTests(unittest.TestCase):
             response = asyncio.run(run())
         self.assertEqual(response.status_code, 403)
         request_code.assert_not_awaited()
+
+    def test_standalone_login_route_is_not_registered(self) -> None:
+        context = _FakeContext()
+        original_manager = plugin._config_mgr
+        try:
+            plugin.OpenAI_OAuth_Plugin(context, config={})
+        finally:
+            plugin._config_mgr = original_manager
+        routes = [route[0] for route in context.routes]
+        self.assertNotIn("/astrbot_plugin_openai_oauth/login", routes)
+        self.assertEqual(
+            routes,
+            [
+                "/astrbot_plugin_openai_oauth/device/start",
+                "/astrbot_plugin_openai_oauth/device/poll",
+            ],
+        )
 
     def test_login_sessions_are_bounded_and_bound_to_their_owner(self) -> None:
         async def wait_forever(*_args):
@@ -329,41 +316,18 @@ class LoginBoundaryTests(unittest.TestCase):
         self.assertEqual(json.loads(source["key"])["access_token"], "fake-access")
         self.assertEqual(fake_manager.default_conf.saved, 1)
         self.assertFalse(hasattr(plugin, "_handle_save_creds"))
-        self.assertNotIn("data.creds", plugin._LOGIN_PAGE_HTML)
-        self.assertNotIn("<textarea", plugin._LOGIN_PAGE_HTML)
 
 
 class StaticSecurityTests(unittest.TestCase):
-    def test_insecure_http_plugin_setting_defaults_off(self) -> None:
+    def test_http_runtime_switch_is_removed_from_schema_and_module(self) -> None:
         schema_path = os.path.join(PLUGIN_ROOT, "_conf_schema.json")
         with open(schema_path, encoding="utf-8") as source:
             schema = json.load(source)
-        self.assertIs(schema["allow_insecure_local_http"]["default"], False)
-
-        original_manager = plugin._config_mgr
-        original_setting = plugin._allow_insecure_local_http
-        try:
-            plugin.OpenAI_OAuth_Plugin(
-                _FakeContext(), config={"allow_insecure_local_http": True}
-            )
-            self.assertIs(plugin._allow_insecure_local_http, True)
-            plugin.OpenAI_OAuth_Plugin(_FakeContext(), config={})
-            self.assertIs(plugin._allow_insecure_local_http, False)
-            plugin.OpenAI_OAuth_Plugin(
-                _FakeContext(), config={"allow_insecure_local_http": "true"}
-            )
-            self.assertIs(plugin._allow_insecure_local_http, False)
-        finally:
-            plugin._config_mgr = original_manager
-            plugin._allow_insecure_local_http = original_setting
-
-    def test_remote_login_documentation_requires_https(self) -> None:
-        for filename in ("README.md", "README_en.md"):
-            with open(os.path.join(PLUGIN_ROOT, filename), encoding="utf-8") as source:
-                content = source.read()
-            self.assertNotIn("http://<host>", content)
-            self.assertIn("https://<host>", content)
-            self.assertIn("allow_insecure_local_http", content)
+        self.assertEqual(schema, {})
+        self.assertFalse(hasattr(plugin, "_allow_insecure_local_http"))
+        main_path = os.path.join(PLUGIN_ROOT, "main.py")
+        with open(main_path, encoding="utf-8") as source:
+            self.assertNotIn("allow_insecure_local_http", source.read())
 
     def test_release_actions_are_pinned_to_full_commit_shas(self) -> None:
         workflow = os.path.join(PLUGIN_ROOT, ".github", "workflows", "release.yml")

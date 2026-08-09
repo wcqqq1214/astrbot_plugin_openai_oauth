@@ -29,36 +29,26 @@ an OAuth token obtained from a device-code login, so billing draws on your
    `data/plugins/`).
 2. In the WebUI model configuration, add a provider of type
    **OpenAI Subscribe**.
-3. Log in with your ChatGPT account. On the WebUI plugin detail page, click
-   [open the login page](/api/v1/plugins/extensions/astrbot_plugin_openai_oauth/login)
-   to go straight there — the link adapts to your host automatically, no
-   plugin change needed. When reading this README on GitHub or elsewhere the
-   relative link is not usable, so open this address manually:
+3. Log in with your ChatGPT account. On the WebUI plugin detail page, open the
+   native AstrBot **Plugin Page** named `login` and click **Start login**. Copy
+   the OpenAI verification URL shown there, enter the device code, and approve.
+   The page calls the plugin through the Dashboard bridge; do not open a raw
+   `/api/v1/plugins/extensions/...` URL. The iframe never reads the Dashboard
+   JWT, cookies, or OAuth tokens. The server writes the credentials into the
+   provider's `key` field automatically.
 
-   ```text
-   https://<host>/api/v1/plugins/extensions/astrbot_plugin_openai_oauth/login
-   ```
+   If the WebUI is unavailable, send `/openai_login` in an administrator's
+   **private/direct chat**. The ADMIN-only command promptly sends the OpenAI
+   verification URL and one-time device code, then polls, exchanges, and saves
+   credentials on the AstrBot server. Tokens are never sent to chat, and group
+   chats do not start the flow.
 
-   Replace `<host>` with the LAN address or domain you use to reach the WebUI
-   (including its port when needed). Device login requires HTTPS by default,
-   including access from the same machine. When using a TLS reverse proxy,
-   configure AstrBot/ASGI's trusted proxy handling so the request scheme is set
-   correctly; the plugin does not trust a client-supplied `X-Forwarded-Proto`
-   header itself.
-
-   For an isolated local development environment only, you may explicitly
-   enable `allow_insecure_local_http` in the plugin configuration and then use
-   `http://localhost:<port>/...` or `http://127.0.0.1:<port>/...`. Even with the
-   option enabled, both the connection peer and Host must be loopback. Never
-   enable it behind a reverse proxy or on a remotely reachable deployment: a
-   local proxy can make a remote browser look like a loopback connection, and
-   plaintext HTTP cannot protect the WebUI session or OAuth flow.
-
-   Click **开始登录**, copy the shown OpenAI link (open it in a new tab), enter
-   the device code and approve. The server then writes the credentials into
-   the provider's `key` field automatically. The browser never receives or
-   displays the access or refresh token. If the server cannot save the result,
-   the page asks you to retry or check the configuration.
+   HTTPS, a VPN, or an SSH tunnel is strongly recommended for the entire public
+   Dashboard because plain HTTP exposes the Dashboard session. HTTPS is not a
+   plugin-level requirement for this device-code flow: once AstrBot has
+   authenticated the Dashboard user, a public-IP HTTP Plugin Page can call
+   `device/start` and `device/poll`; the page shows a prominent risk warning.
+   Prefer securing the whole Dashboard rather than relying on plain HTTP.
 
    > Device-code login must be enabled in your ChatGPT security settings
    > (“Enable device code authentication for Codex”); the page reports it if
@@ -127,11 +117,12 @@ WebUI label directly.
   Codex CLI (Cloudflare allows first-party clients by this header); it is
   configurable so it can follow whatever value OpenAI accepts next, without a
   plugin release.
-- The login page and `device/start` / `device/poll` live under AstrBot's
-  `/api/v1/plugins/extensions/`. They accept WebUI user sessions, not general
-  API keys. Device sessions are user-bound, bounded and cleaned up after
-  completion or expiry. OAuth credentials are exchanged and saved only on the
-  server and are never returned to the browser. Stored credentials
+- The native Plugin Page calls `device/start` / `device/poll` through AstrBot's
+  authenticated Dashboard bridge. These APIs accept WebUI user sessions, not
+  general API keys. Device sessions are user-bound, bounded and cleaned up
+  after completion or expiry. The ADMIN-only private `/openai_login` fallback
+  uses the same server-side flow. OAuth credentials are exchanged and saved only
+  on the server and are never returned to the browser. Stored credentials
   (access_token / refresh_token) live in the provider's `key` field, persisted
   as plaintext in the AstrBot config (`data/cmd_config.json`); restrict read
   access to that file and its backups.

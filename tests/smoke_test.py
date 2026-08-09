@@ -120,40 +120,50 @@ def main() -> int:
         "provider metadata points to the newly imported class after reload",
     )
 
-    print("\n=== 7. 独立登录页随插件分发（链接登录入口） ===")
+    print("\n=== 7. Native Plugin Page and server-side persistence ===")
     main_py = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "main.py"))
     with open(main_py, encoding="utf-8") as fh:
         main_src = fh.read()
-    check("_LOGIN_PAGE_HTML" in main_src, "main.py 内含独立登录页模板")
-    check(
-        "/astrbot_plugin_openai_oauth/login" in main_src,
-        "登录页注册了 /login 路由（链接入口）",
-    )
     check(
         "_persist_login_credentials" in main_src and "save_creds" not in main_src,
         "credentials are written back only by the server-side device session",
     )
+    check("_LOGIN_PAGE_HTML" not in main_src, "standalone login HTML is removed")
+    check(
+        "/astrbot_plugin_openai_oauth/login" not in main_src,
+        "standalone /login route is removed",
+    )
 
-    print("\n=== 8. README 提供详情页直达登录链接（方案2） ===")
-    login_path = "/api/v1/plugins/extensions/astrbot_plugin_openai_oauth/login"
+    page_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "pages", "login")
+    )
+    with open(os.path.join(page_root, "index.html"), encoding="utf-8") as fh:
+        page_html = fh.read()
+    with open(os.path.join(page_root, "app.js"), encoding="utf-8") as fh:
+        page_app = fh.read()
+    check("./app.js" in page_html, "Plugin Page has an external app.js")
+    check("window.AstrBotPluginPage" in page_app, "Plugin Page uses the AstrBot bridge")
+    check("await bridge.ready()" in page_app, "Plugin Page waits for bridge readiness")
+    check(
+        'bridge.apiPost("device/start", {})' in page_app,
+        "Plugin Page uses scoped device/start",
+    )
+    check(
+        'bridge.apiPost("device/poll"' in page_app,
+        "Plugin Page uses scoped device/poll",
+    )
+
+    print("\n=== 8. README documents the Plugin Page workflow ===")
     repo_root = os.path.join(os.path.dirname(__file__), "..")
     for fname in ("README.md", "README_en.md"):
         with open(os.path.join(repo_root, fname), encoding="utf-8") as fh:
             readme_src = fh.read()
-        check(f"({login_path})" in readme_src, f"{fname} 含详情页直达链接")
         check(
-            "https://<host>" in readme_src,
-            f"{fname} contains the full HTTPS <host> URL",
+            "Plugin Page" in readme_src or "插件 Page" in readme_src,
+            f"{fname} names the Plugin Page",
         )
-
-    print("\n=== 9. 登录页内部接口走 v1 extensions 前缀 ===")
-    # 运行实例 v4.27.2 上插件 web API 挂在 /api/v1/plugins/extensions/，
-    # 无 v1 前缀会撞上全局 /api 中间件返回 404。
-    check(
-        'const BASE = "/api/v1/plugins/extensions/astrbot_plugin_openai_oauth"'
-        in main_src,
-        "登录页 BASE 指向 v1 extensions 前缀",
-    )
+        check("openai_login" in readme_src, f"{fname} documents the command fallback")
+        check("HTTPS" in readme_src, f"{fname} recommends HTTPS")
 
     print()
     if FAILED:
