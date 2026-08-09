@@ -1,5 +1,17 @@
 # Changelog
 
+## [v1.1.0] - 2026-08-09
+
+### Added
+
+- Cloud and Docker-compatible device login through AstrBot's native Plugin Page.
+- Administrator private-chat fallback for starting device login.
+
+### Changed
+
+- Documented authorized `HTTP_PROXY` and `HTTPS_PROXY` requirements for cloud deployments.
+- Clarified unsupported-region diagnostics and proxy precedence for device login.
+
 ## [v1.0.0] - 2026-08-08
 
 ### Added
