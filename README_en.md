@@ -27,15 +27,14 @@ an OAuth token obtained from a device-code login, so billing draws on your
 
 1. Install the plugin from the AstrBot plugin market (or clone it into
    `data/plugins/`).
-2. In the WebUI model configuration, add a provider of type
-   **OpenAI Subscribe**.
-3. Log in with your ChatGPT account. On the WebUI plugin detail page, open the
+2. Log in with your ChatGPT account. On the WebUI plugin detail page, open the
    native AstrBot **Plugin Page** named `login` and click **Start login**. Copy
    the OpenAI verification URL shown there, enter the device code, and approve.
    The page calls the plugin through the Dashboard bridge; do not open a raw
    `/api/v1/plugins/extensions/...` URL. The iframe never reads the Dashboard
-   JWT, cookies, or OAuth tokens. The server writes the credentials into the
-   provider's `key` field automatically.
+   JWT, cookies, or OAuth tokens. After login succeeds, the server automatically
+   adds a provider of type **OpenAI Subscribe** in the WebUI model configuration
+   and writes the credentials into the provider's `key` field.
 
    If the WebUI is unavailable, send `/openai_login` in an administrator's
    **private/direct chat**. The ADMIN-only command promptly sends the OpenAI
@@ -58,7 +57,7 @@ an OAuth token obtained from a device-code login, so billing draws on your
 
    *Figure: Turn on **Enable device code authorization for Codex** under ChatGPT's **Security and login** settings.*
 
-4. Pick a model and enable the provider.
+3. Pick a model and enable the provider.
 
 ### Optional reasoning-effort setting
 

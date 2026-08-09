@@ -22,8 +22,7 @@
 ## 使用方法
 
 1. 从 AstrBot 插件市场安装（或克隆到 `data/plugins/`）。
-2. 在 WebUI 模型配置中添加一个类型为 **OpenAI Subscribe** 的 provider。
-3. 登录你的 ChatGPT 账号。在 WebUI 插件详情页打开 AstrBot 原生 **Plugin Page**（登录页），点击 **开始登录**，复制页面显示的 OpenAI 验证网址并输入设备码完成授权。页面通过 Dashboard bridge 调用插件接口，不需要手动打开任何 `/api/v1/plugins/extensions/...` 地址；浏览器不会接触 Dashboard JWT、Cookie 或 access token / refresh token。登录成功后，服务端会把凭据自动写入 provider 的 `key` 字段。
+2. 登录你的 ChatGPT 账号。在 WebUI 插件详情页打开 AstrBot 原生 **Plugin Page**（登录页），点击 **开始登录**，复制页面显示的 OpenAI 验证网址并输入设备码完成授权。页面通过 Dashboard bridge 调用插件接口，不需要手动打开任何 `/api/v1/plugins/extensions/...` 地址；浏览器不会接触 Dashboard JWT、Cookie 或 access token / refresh token。登录成功后，服务端会在 WebUI 模型配置中自动添加一个类型为 **OpenAI Subscribe** 的 provider，并将凭据写入 provider 的 `key` 字段。
 
    如果无法使用 WebUI，也可以在管理员的**私聊**中发送 `/openai_login`。该命令仅允许管理员使用，会及时发送 OpenAI 验证网址和一次性设备码，然后由 AstrBot 服务端后台轮询、交换并保存凭据；令牌不会发送到聊天。群聊中不会启动设备码流程。
 
@@ -35,7 +34,7 @@
 
    *图：在 ChatGPT 的 **Security and login** 设置中开启 **Enable device code authorization for Codex**。*
 
-4. 选择模型，并启用该 provider。
+3. 选择模型，并启用该 provider。
 
 ### 设置模型思考强度（可选）
 
