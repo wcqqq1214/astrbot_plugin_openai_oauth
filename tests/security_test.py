@@ -317,6 +317,46 @@ class LoginBoundaryTests(unittest.TestCase):
         self.assertEqual(fake_manager.default_conf.saved, 1)
         self.assertFalse(hasattr(plugin, "_handle_save_creds"))
 
+    def test_exchange_failure_does_not_persist_partial_credentials(self) -> None:
+        fake_manager = _FakeConfigManager()
+        plugin._config_mgr = fake_manager
+
+        async def run():
+            with (
+                mock.patch.object(
+                    plugin,
+                    "request_device_user_code",
+                    new=mock.AsyncMock(return_value=("device", "CODE", 1)),
+                ),
+                mock.patch.object(
+                    plugin,
+                    "poll_device_authorization",
+                    new=mock.AsyncMock(return_value=("auth-code", "verifier")),
+                ),
+                mock.patch.object(
+                    plugin,
+                    "exchange_authorization_code",
+                    new=mock.AsyncMock(side_effect=RuntimeError("network failed")),
+                ),
+            ):
+                with bind_request_context(_plugin_request(username="owner-a")):
+                    start = await plugin._handle_device_start()
+                session_id = _payload(start)["session_id"]
+                for _ in range(20):
+                    session = plugin._login_sessions.get(session_id)
+                    if session and session.get("status") != "pending":
+                        break
+                    await asyncio.sleep(0)
+                with bind_request_context(
+                    _plugin_request({"session_id": session_id}, username="owner-a")
+                ):
+                    return await plugin._handle_device_poll()
+
+        response = asyncio.run(run())
+        self.assertEqual(_payload(response)["status"], "error")
+        self.assertEqual(fake_manager.default_conf["provider_sources"], [])
+        self.assertEqual(fake_manager.default_conf.saved, 0)
+
 
 class StaticSecurityTests(unittest.TestCase):
     def test_http_runtime_switch_is_removed_from_schema_and_module(self) -> None:

@@ -10,7 +10,7 @@
 
 1. 使用 AstrBot 原生 Plugin Page 作为主要登录入口，通过 Dashboard 提供的 bridge 调用插件扩展 API。
 2. 设备码申请、轮询、令牌交换和持久化都继续在 AstrBot 服务端完成；浏览器只接收验证网址、一次性用户码、会话 ID 和状态。
-3. 设备登录接口继续要求已认证的 Dashboard 管理员身份，并拒绝 API Key 身份；保留会话所有者绑定、过期时间、并发限额和一次性消费。
+3. 设备登录接口继续要求已认证的 Dashboard 会话，并拒绝 API Key 身份；AstrBot v4.27.2 的 Dashboard 只有一个配置账号且 JWT 不区分普通/管理员角色。保留会话所有者绑定、过期时间、并发限额和一次性消费；若未来宿主暴露角色信息，再显式要求管理员角色。
 4. 不再按 `http`/`https` 协议拒绝请求。若 Dashboard 使用公网 HTTP，在页面中展示明确安全警告并推荐 HTTPS、VPN 或 SSH 隧道，但不阻断登录。
 5. 增加仅管理员可用的私聊命令作为无 WebUI/旧浏览器环境下的兜底入口，例如 `/openai_login`。命令发出验证网址和用户码，服务端后台轮询并保存凭据。
 6. 原来的独立 `/login` 页面不再作为推荐入口。浏览器直接导航不会自动携带 Dashboard 存在 `localStorage` 中的 Bearer JWT，而生产模式的安全 Cookie 在 HTTP 下也不会发送，因此会在进入插件处理器之前得到 `Missing API key`。
@@ -91,7 +91,6 @@ AstrBot v4.27.2 已提供 Plugin Pages：插件可以在 `pages/<page_name>/inde
 3. 域名 + HTTPS 反向代理。
 4. Dashboard Plugin Page 主流程。
 5. 管理员私聊命令兜底流程。
-6. 未登录用户、API Key 身份和普通用户被拒绝。
+6. 未登录用户和 API Key 身份被拒绝；若宿主版本提供可验证的 Dashboard 角色，普通角色也应被拒绝。
 7. 会话串用、过期、重复轮询、并发上限和插件卸载时任务取消。
 8. OpenAI 超时、拒绝授权、网络中断和令牌交换失败时不写入半成品凭据。
-

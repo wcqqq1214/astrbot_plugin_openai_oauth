@@ -924,24 +924,42 @@ async def _persist_login_credentials(creds: dict) -> None:
     await conf.save_config_async()
 
 
+async def _complete_device_login(
+    *,
+    device_auth_id: str,
+    user_code: str,
+    interval: int,
+    proxy: str,
+) -> dict:
+    """Poll, exchange, and build credentials for one device challenge."""
+    authorization_code, code_verifier = await poll_device_authorization(
+        device_auth_id,
+        user_code,
+        interval,
+        proxy,
+    )
+    tokens = await exchange_authorization_code(
+        authorization_code,
+        code_verifier,
+        proxy,
+    )
+    return build_credentials(
+        tokens["access_token"],
+        tokens.get("refresh_token", ""),
+        tokens.get("expires_in", 3600),
+    )
+
+
 async def _run_device_login(session_id: str, proxy: str) -> None:
     session = _login_sessions.get(session_id)
     if session is None:
         return
     try:
-        authorization_code, code_verifier = await poll_device_authorization(
-            session["device_auth_id"],
-            session["user_code"],
-            session["interval"],
-            proxy,
-        )
-        tokens = await exchange_authorization_code(
-            authorization_code, code_verifier, proxy
-        )
-        creds = build_credentials(
-            tokens["access_token"],
-            tokens.get("refresh_token", ""),
-            tokens.get("expires_in", 3600),
+        creds = await _complete_device_login(
+            device_auth_id=session["device_auth_id"],
+            user_code=session["user_code"],
+            interval=session["interval"],
+            proxy=proxy,
         )
         await _persist_login_credentials(creds)
         session["status"] = "success"
@@ -972,21 +990,11 @@ async def _run_command_device_login(
 ) -> None:
     """Complete a private-command login without exposing credential material."""
     try:
-        authorization_code, code_verifier = await poll_device_authorization(
-            device_auth_id,
-            user_code,
-            interval,
-            proxy,
-        )
-        tokens = await exchange_authorization_code(
-            authorization_code,
-            code_verifier,
-            proxy,
-        )
-        creds = build_credentials(
-            tokens["access_token"],
-            tokens.get("refresh_token", ""),
-            tokens.get("expires_in", 3600),
+        creds = await _complete_device_login(
+            device_auth_id=device_auth_id,
+            user_code=user_code,
+            interval=interval,
+            proxy=proxy,
         )
         await _persist_login_credentials(creds)
     except asyncio.CancelledError:

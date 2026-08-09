@@ -59,16 +59,47 @@ section {
   margin-top: 24px;
 }
 
-a {
-  overflow-wrap: anywhere;
+.field {
+  margin: 16px 0;
 }
 
-code {
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: color-mix(in srgb, currentColor 12%, transparent);
-  font-size: 1.15rem;
+.field label {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.copy-row {
+  display: flex;
+  gap: 8px;
+}
+
+.copy-row input {
+  box-sizing: border-box;
+  min-width: 0;
+  flex: 1;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  color: inherit;
+  font: inherit;
+}
+
+.copy-row .device-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.1rem;
   font-weight: 700;
+}
+
+button.secondary {
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  background: transparent;
+  color: inherit;
+}
+
+.copy-status {
+  min-height: 1.5em;
+  color: #6b7280;
 }
 
 .status {
@@ -78,4 +109,11 @@ code {
 .error {
   color: #dc2626;
   white-space: pre-wrap;
+}
+
+@media (max-width: 520px) {
+  .copy-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }

@@ -330,6 +330,15 @@ def test_plugin_page_assets() -> None:
         "Page starts through scoped apiPost",
     )
     check('bridge.apiPost("device/poll"' in app, "Page polls through scoped apiPost")
+    check('target="_blank"' not in html, "Page does not rely on blocked iframe popups")
+    check(
+        'id="copy-url"' in html and 'id="copy-code"' in html,
+        "Page provides copy controls for the verification URL and code",
+    )
+    check(
+        "maxConsecutivePollFailures" in app and "schedulePoll" in app,
+        "Page retries transient bridge failures",
+    )
     check(
         "location.protocol" in app and "http:" in app and "HTTPS" in app,
         "Page warns on plain HTTP",

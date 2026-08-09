@@ -21,8 +21,21 @@
 
       <section id="instructions" hidden>
         <h2 id="instructions-title">完成授权</h2>
-        <p><span id="open-label">打开验证网址：</span><a id="verify-url" target="_blank" rel="noopener noreferrer"></a></p>
-        <p><span id="code-label">输入设备码：</span><code id="user-code"></code></p>
+        <div class="field">
+          <label id="open-label" for="verify-url">复制验证网址并在新标签页打开：</label>
+          <div class="copy-row">
+            <input id="verify-url" type="text" readonly />
+            <button id="copy-url" class="secondary" type="button">复制网址</button>
+          </div>
+        </div>
+        <div class="field">
+          <label id="code-label" for="user-code">输入设备码：</label>
+          <div class="copy-row">
+            <input id="user-code" class="device-code" type="text" readonly />
+            <button id="copy-code" class="secondary" type="button">复制设备码</button>
+          </div>
+        </div>
+        <p id="copy-status" class="copy-status" role="status"></p>
       </section>
 
       <p id="status" class="status" role="status"></p>
