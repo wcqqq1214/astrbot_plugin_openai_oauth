@@ -112,10 +112,20 @@ WebUI label directly.
   anywhere else.
 - `proxy` is empty by default (direct connection); configure it only when your
   network cannot reach OpenAI directly — requests are then forwarded through
-  that proxy. `originator` defaults to `codex_cli_rs`, matching the official
-  Codex CLI (Cloudflare allows first-party clients by this header); it is
-  configurable so it can follow whatever value OpenAI accepts next, without a
-  plugin release.
+  that proxy. For cloud or Docker deployments that use an authorized outbound
+  proxy, you must set both standard `HTTP_PROXY` and `HTTPS_PROXY` environment
+  variables on the **AstrBot container** and leave the plugin's own `proxy`
+  setting empty; a non-empty plugin proxy takes precedence over the environment
+  variables. OpenAI endpoints use HTTPS, so `HTTP_PROXY` alone does not proxy
+  those requests. This plugin does not provide proxy nodes, subscriptions,
+  routing rules, or traffic-shaping tutorials.
+  `originator` defaults to `codex_cli_rs`, matching the official Codex CLI
+  (Cloudflare allows first-party clients by this header); it is configurable so
+  it can follow whatever value OpenAI accepts next, without a plugin release.
+- A login response with `unsupported_country_region_territory` is OpenAI's
+  determination of deployment-egress availability, not a plugin error. Use a
+  deployment network that meets OpenAI service-availability and account
+  requirements; the plugin does not and cannot bypass such restrictions.
 - The native Plugin Page calls `device/start` / `device/poll` through AstrBot's
   authenticated Dashboard bridge. These APIs accept WebUI user sessions, not
   general API keys. Device sessions are user-bound, bounded and cleaned up

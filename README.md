@@ -80,7 +80,8 @@ API 参数应填写右列的值，不要直接填写 WebUI 显示名称。
 ## 网络与凭据流向
 
 - 插件只与 OpenAI 官方域名通信：`auth.openai.com`（OAuth 设备登录、token 刷新）与 `chatgpt.com`（`backend-api/codex` 推理与模型列表、`backend-api/wham/usage` 额度查询）。访问令牌只出现在发给这两个域的请求头/请求体中，不会发往任何第三方。
-- `proxy` 默认留空（直连），仅当你的网络无法直连 OpenAI 时才配置；配置后相关请求经该代理转发。`originator` 默认 `codex_cli_rs`，与官方 Codex CLI 一致（Cloudflare 对首方客户端白名单放行）；做成可配置是为了能跟随 OpenAI 后续接受的值，无需等待插件发版。
+- `proxy` 默认留空（直连），仅当你的网络无法直连 OpenAI 时才配置；配置后相关请求经该代理转发。对于使用已获授权出站代理的云服务器或 Docker 部署，需在 **AstrBot 容器**中同时设置标准环境变量 `HTTP_PROXY` 与 `HTTPS_PROXY`，并保持插件自身的 `proxy` 为空；非空的插件 `proxy` 会优先于环境变量。OpenAI 端点使用 HTTPS，只设置 `HTTP_PROXY` 不会代理这些 HTTPS 请求。本插件不提供代理节点、订阅、分流规则或限速配置教程。`originator` 默认 `codex_cli_rs`，与官方 Codex CLI 一致（Cloudflare 对首方客户端白名单放行）；做成可配置是为了能跟随 OpenAI 后续接受的值，无需等待插件发版。
+- 若登录请求返回 `unsupported_country_region_territory`，这是 OpenAI 对部署出口网络和服务可用性的判定，并非插件错误。请使用符合 OpenAI 服务可用性及账号要求的部署网络；插件不会也不能绕过此类限制。
 - Plugin Page 通过 AstrBot Dashboard bridge 调用 `device/start` / `device/poll`，只接受已认证的 WebUI 用户会话，不接受通用 API Key。设备会话与登录用户绑定、数量受限，并在完成或超时后清理。OAuth 凭据只在服务端交换和保存，不会返回浏览器。管理员私聊 `/openai_login` 使用同一套服务端设备码流程。登录后的凭据（access_token / refresh_token）保存在 provider 的 `key` 字段，落盘为 AstrBot 配置（`data/cmd_config.json`）中的明文；请限制该文件及备份的读取权限。
 - 本项目是个人自用工具：用你自己的 ChatGPT 账号订阅额度（Codex OAuth）跑模型，不提供免费 API 途径。请自行确认你的使用方式符合 OpenAI 服务条款。
 
