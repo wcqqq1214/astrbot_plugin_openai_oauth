@@ -40,7 +40,7 @@ jobs:
 
       - name: Install AstrBot test environment
         working-directory: AstrBot
-        run: uv sync --frozen
+        run: uv sync
 
       - name: Run plugin integration regressions
         run: |
