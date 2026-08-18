@@ -105,8 +105,10 @@ async def refresh_access_token(creds: dict, proxy: str | None = None) -> dict:
         )
         resp.raise_for_status()
         data = resp.json()
-    except Exception as e:
-        logger.error(f"OpenAI Codex token refresh request failed: {e}")
+    except Exception as exc:
+        logger.error(
+            "OpenAI Codex token refresh request failed: %s", type(exc).__name__
+        )
         raise
     finally:
         await client.aclose()
@@ -143,6 +145,37 @@ def extract_model_ids(data: Any) -> list[str]:
     return ids
 
 
+async def fetch_models(
+    access_token: str,
+    account_id: str = "",
+    proxy: str | None = None,
+    originator: str = DEFAULT_ORIGINATOR,
+    user_agent: str = DEFAULT_USER_AGENT,
+) -> list[str]:
+    """Fetch and normalize the live Codex model catalog."""
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "originator": originator,
+        "User-Agent": user_agent,
+        "Accept": "application/json",
+    }
+    if account_id:
+        headers["chatgpt-account-id"] = account_id
+    client = create_proxy_client("OpenAI Codex", proxy)
+    try:
+        resp = await client.get(
+            f"{CODEX_MODELS_URL}?client_version=1.0.0",
+            headers=headers,
+            timeout=10,
+        )
+        if resp.status_code in (401, 403):
+            raise CredentialExpiredError()
+        resp.raise_for_status()
+        return extract_model_ids(resp.json())
+    finally:
+        await client.aclose()
+
+
 class DeviceAuthError(Exception):
     """设备登录流程的硬性失败（未启用、被拒绝等）。"""
 
@@ -153,6 +186,45 @@ class DeviceAuthTimeout(DeviceAuthError):
 
 class CredentialExpiredError(Exception):
     """访问令牌已失效（HTTP 401/403），需要重新登录。"""
+
+
+def _status_code(error: BaseException) -> int | None:
+    for attr in ("status_code", "status", "code"):
+        value = getattr(error, attr, None)
+        if isinstance(value, int):
+            return value
+    response = getattr(error, "response", None)
+    value = getattr(response, "status_code", None)
+    return value if isinstance(value, int) else None
+
+
+def _error_details(error: BaseException) -> tuple[str, str]:
+    code = getattr(error, "code", "")
+    message = ""
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        nested = body.get("error")
+        payload = nested if isinstance(nested, dict) else body
+        code = payload.get("code", code)
+        message = payload.get("message", "")
+    if not message:
+        message = str(error)
+    return str(code or "").lower(), str(message or "").lower()
+
+
+def classify_codex_error(error: BaseException) -> str:
+    """Classify an upstream failure without exposing its raw payload."""
+    status_code = _status_code(error)
+    code, message = _error_details(error)
+    if status_code in {401, 403} or code in {"invalid_grant", "invalid_token"}:
+        return "credential"
+    if status_code == 429:
+        if "usage_limit_reached" in code or "usage_limit_reached" in message:
+            return "usage_limit"
+        return "rate_limit"
+    if status_code in {408, 409, 500, 502, 503, 504, 529}:
+        return "temporary"
+    return "other"
 
 
 async def request_device_user_code(proxy: str | None = None) -> tuple[str, str, int]:
@@ -252,6 +324,7 @@ async def fetch_rate_limits(
     access_token: str,
     account_id: str = "",
     proxy: str | None = None,
+    user_agent: str = DEFAULT_USER_AGENT,
 ) -> dict:
     """查询 ChatGPT 订阅剩余额度（GET /wham/usage）。
 
@@ -263,7 +336,7 @@ async def fetch_rate_limits(
     """
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "User-Agent": DEFAULT_USER_AGENT,
+        "User-Agent": user_agent,
         "Accept": "application/json",
     }
     if account_id:
@@ -359,6 +432,7 @@ def build_credentials(
 ) -> dict:
     """把登录/刷新结果组装成 provider key 字段使用的凭据 JSON。"""
     return {
+        "schema_version": 1,
         "access_token": access_token,
         "refresh_token": refresh_token,
         "expires": int(time.time()) + int(expires_in),

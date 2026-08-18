@@ -24,6 +24,8 @@
 1. 从 AstrBot 插件市场安装（或克隆到 `data/plugins/`）。
 2. 登录你的 ChatGPT 账号。在 WebUI 插件详情页打开 AstrBot 原生 **Plugin Page**（登录页），点击 **开始登录**，复制页面显示的 OpenAI 验证网址并输入设备码完成授权。页面通过 Dashboard bridge 调用插件接口，不需要手动打开任何 `/api/v1/plugins/extensions/...` 地址；浏览器不会接触 Dashboard JWT、Cookie 或 access token / refresh token。登录成功后，服务端会在 WebUI 模型配置中自动添加一个类型为 **OpenAI Subscribe** 的 provider，并将凭据写入 provider 的 `key` 字段。
 
+   登录页会显示脱敏状态（未登录、可用、刷新中、需要重新登录、额度冷却或暂时异常），可以显式点击 **查询额度**，也可以在设备码授权期间点击 **取消登录**。页面加载只读取本地状态，不会自动发起额度请求。当前设计为一个 provider source 对应一个 ChatGPT 账号；达到订阅额度后会显示冷却和已知重置时间，不会自动轮换其他账号。
+
    如果无法使用 WebUI，也可以在管理员的**私聊**中发送 `/openai_login`。该命令仅允许管理员使用，会及时发送 OpenAI 验证网址和一次性设备码，然后由 AstrBot 服务端后台轮询、交换并保存凭据；令牌不会发送到聊天。群聊中不会启动设备码流程。
 
    HTTPS/VPN/SSH 隧道仍然强烈建议用于整个公网 Dashboard，因为明文 HTTP 会暴露 Dashboard 会话。HTTPS 不是本插件设备码流程的强制条件：只要 AstrBot Dashboard 已经完成身份认证，公网 IP + HTTP 的 Plugin Page 也可以调用 `device/start` 和 `device/poll`；页面会显示风险警告。请优先为整个 Dashboard 配置 HTTPS 或安全隧道。
@@ -80,9 +82,10 @@ API 参数应填写右列的值，不要直接填写 WebUI 显示名称。
 ## 网络与凭据流向
 
 - 插件只与 OpenAI 官方域名通信：`auth.openai.com`（OAuth 设备登录、token 刷新）与 `chatgpt.com`（`backend-api/codex` 推理与模型列表、`backend-api/wham/usage` 额度查询）。访问令牌只出现在发给这两个域的请求头/请求体中，不会发往任何第三方。
-- `proxy` 默认留空（直连），仅当你的网络无法直连 OpenAI 时才配置；配置后相关请求经该代理转发。对于使用已获授权出站代理的云服务器或 Docker 部署，需在 **AstrBot 容器**中同时设置标准环境变量 `HTTP_PROXY` 与 `HTTPS_PROXY`，并保持插件自身的 `proxy` 为空；非空的插件 `proxy` 会优先于环境变量。OpenAI 端点使用 HTTPS，只设置 `HTTP_PROXY` 不会代理这些 HTTPS 请求。本插件不提供代理节点、订阅、分流规则或限速配置教程。`originator` 默认 `codex_cli_rs`，与官方 Codex CLI 一致（Cloudflare 对首方客户端白名单放行）；做成可配置是为了能跟随 OpenAI 后续接受的值，无需等待插件发版。
+- `proxy` 默认留空（直连），仅当你的网络无法直连 OpenAI 时才配置；配置后设备码登录、token 刷新、模型列表、额度查询和推理请求都经该代理转发。对于使用已获授权出站代理的云服务器或 Docker 部署，需在 **AstrBot 容器**中同时设置标准环境变量 `HTTP_PROXY` 与 `HTTPS_PROXY`，并保持插件自身的 `proxy` 为空；非空的插件 `proxy` 会优先于环境变量。OpenAI 端点使用 HTTPS，只设置 `HTTP_PROXY` 不会代理这些 HTTPS 请求。本插件不提供代理节点、订阅、分流规则或限速配置教程。`originator` 默认 `codex_cli_rs`，与官方 Codex CLI 一致（Cloudflare 对首方客户端白名单放行）；做成可配置是为了能跟随 OpenAI 后续接受的值，无需等待插件发版。
 - 若登录请求返回 `unsupported_country_region_territory`，这是 OpenAI 对部署出口网络和服务可用性的判定，并非插件错误。请使用符合 OpenAI 服务可用性及账号要求的部署网络；插件不会也不能绕过此类限制。
-- Plugin Page 通过 AstrBot Dashboard bridge 调用 `device/start` / `device/poll`，只接受已认证的 WebUI 用户会话，不接受通用 API Key。设备会话与登录用户绑定、数量受限，并在完成或超时后清理。OAuth 凭据只在服务端交换和保存，不会返回浏览器。管理员私聊 `/openai_login` 使用同一套服务端设备码流程。登录后的凭据（access_token / refresh_token）保存在 provider 的 `key` 字段，落盘为 AstrBot 配置（`data/cmd_config.json`）中的明文；请限制该文件及备份的读取权限。
+- Plugin Page 通过 AstrBot Dashboard bridge 调用 `device/start`、`device/poll`、`device/cancel`、`account/status` 和 `account/usage`，只接受已认证的 WebUI 用户会话，不接受通用 API Key。设备会话与登录用户绑定、数量受限，并在取消、完成或超时后清理。OAuth 凭据只在服务端交换和保存，不会返回浏览器；状态接口不会返回 token、refresh token 或完整 account ID。管理员私聊 `/openai_login` 使用同一套服务端设备码流程。登录后的凭据（access_token / refresh_token）保存在 provider 的 `key` 字段，落盘为 AstrBot 配置（`data/cmd_config.json`）中的明文；请限制该文件及备份的读取权限。
+- 本插件是原生单账号 OpenAI OAuth 集成：不会下载、启动或管理 CLIProxyAPI，也不提供本地 OpenAI-compatible 网关或自动账号轮换。
 - 本项目是个人自用工具：用你自己的 ChatGPT 账号订阅额度（Codex OAuth）跑模型，不提供免费 API 途径。请自行确认你的使用方式符合 OpenAI 服务条款。
 
 ## License / 许可证

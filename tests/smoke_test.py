@@ -152,6 +152,18 @@ def main() -> int:
         'bridge.apiPost("device/poll"' in page_app,
         "Plugin Page uses scoped device/poll",
     )
+    check(
+        'bridge.apiPost("device/cancel"' in page_app,
+        "Plugin Page uses scoped device/cancel",
+    )
+    check(
+        'bridge.apiPost("account/status"' in page_app,
+        "Plugin Page uses scoped account/status",
+    )
+    check(
+        'bridge.apiPost("account/usage"' in page_app,
+        "Plugin Page uses scoped account/usage",
+    )
 
     print("\n=== 8. README documents the Plugin Page workflow ===")
     repo_root = os.path.join(os.path.dirname(__file__), "..")

@@ -11,6 +11,7 @@ import json
 import secrets
 import time
 from collections.abc import AsyncGenerator
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
@@ -30,26 +31,34 @@ from astrbot.core.provider.sources.openai_responses_source import (
     ProviderOpenAIResponses,
 )
 from astrbot.core.provider.sources.request_retry import retry_provider_request
-from astrbot.core.utils.network_utils import create_proxy_client
 from astrbot.core.workspace import API_KEY_USERNAME_PREFIX
 
+from .credential_store import (
+    CredentialCooldownError,
+    CredentialCoordinator,
+    CredentialError,
+    CredentialSchemaError,
+    CredentialSnapshot,
+    CredentialsNotConfiguredError,
+    CredentialSourceError,
+    ReauthenticationRequiredError,
+    parse_credentials,
+)
 from .oauth import (
     CODEX_BASE,
     CODEX_DEVICE_LOGIN_TIMEOUT,
     CODEX_DEVICE_VERIFY_URL,
     CODEX_FALLBACK_MODELS,
-    CODEX_MODELS_URL,
     DEFAULT_ORIGINATOR,
     DEFAULT_USER_AGENT,
     CredentialExpiredError,
     DeviceAuthError,
     DeviceAuthTimeout,
     build_credentials,
-    dump_credentials,
+    classify_codex_error,
     exchange_authorization_code,
-    extract_model_ids,
+    fetch_models,
     fetch_rate_limits,
-    load_credentials,
     poll_device_authorization,
     refresh_access_token,
     request_device_user_code,
@@ -60,9 +69,78 @@ _REFRESH_SKEW_SECONDS = 120
 # WebUI 模型配置里展示的 provider 类型名（也是配置里的 type/id）。
 _PROVIDER_TYPE = "OpenAI Subscribe"
 
-# 由 OpenAI_OAuth_Plugin 注入，供 provider 把刷新的凭据写回 AstrBot 配置。
+# Injected by OpenAI_OAuth_Plugin so provider instances can resolve current
+# source-scoped credentials from AstrBot configuration.
 _config_mgr: Any = None
+_credential_coordinator: CredentialCoordinator | None = None
+_COORDINATOR_ATTR = "_astrbot_openai_oauth_credential_coordinator"
 _command_login_tasks: dict[str, asyncio.Task[Any]] = {}
+
+
+def _build_default_source_config() -> dict[str, Any]:
+    return {
+        "provider": "openai",
+        "type": _PROVIDER_TYPE,
+        "provider_type": "chat_completion",
+        "key": "",
+        "api_base": CODEX_BASE,
+        "proxy": "",
+        "originator": DEFAULT_ORIGINATOR,
+        "user_agent": DEFAULT_USER_AGENT,
+        "id": _PROVIDER_TYPE,
+        "enable": True,
+    }
+
+
+def _default_provider_template() -> dict[str, Any]:
+    source = _build_default_source_config()
+    return {
+        key: source[key]
+        for key in (
+            "provider",
+            "provider_type",
+            "key",
+            "model",
+            "proxy",
+            "originator",
+            "user_agent",
+        )
+        if key in source
+    } | {"model": "gpt-5.4-mini"}
+
+
+def _get_credential_coordinator() -> CredentialCoordinator:
+    global _credential_coordinator
+    cfg_mgr = _config_mgr
+    if cfg_mgr is None:
+        raise CredentialError("The AstrBot configuration manager is unavailable.")
+
+    existing = getattr(cfg_mgr, _COORDINATOR_ATTR, None)
+    if isinstance(existing, CredentialCoordinator):
+        existing.update_refresh_credentials(refresh_access_token)
+        _credential_coordinator = existing
+        return existing
+    if (
+        _credential_coordinator is not None
+        and _credential_coordinator.config_manager is cfg_mgr
+    ):
+        _credential_coordinator.update_refresh_credentials(refresh_access_token)
+        return _credential_coordinator
+
+    coordinator = CredentialCoordinator(
+        cfg_mgr,
+        provider_type=_PROVIDER_TYPE,
+        default_source_id=_PROVIDER_TYPE,
+        default_source_factory=_build_default_source_config,
+        refresh_credentials=refresh_access_token,
+        refresh_skew_seconds=_REFRESH_SKEW_SECONDS,
+    )
+    try:
+        setattr(cfg_mgr, _COORDINATOR_ATTR, coordinator)
+    except (AttributeError, TypeError):
+        pass
+    _credential_coordinator = coordinator
+    return coordinator
 
 
 @register(
@@ -80,9 +158,8 @@ class OpenAI_OAuth_Plugin(Star):
         global _config_mgr
         super().__init__(context)
         _config_mgr = context.astrbot_config_mgr
+        _get_credential_coordinator()
         self.config = config if config is not None else AstrBotConfig()
-        # Device-login APIs are exposed under the Dashboard's authenticated
-        # plugin extension bridge.
         self.context.register_web_api(
             "/astrbot_plugin_openai_oauth/device/start",
             _handle_device_start,
@@ -94,6 +171,24 @@ class OpenAI_OAuth_Plugin(Star):
             _handle_device_poll,
             ["POST"],
             "查询 Codex 设备登录状态",
+        )
+        self.context.register_web_api(
+            "/astrbot_plugin_openai_oauth/device/cancel",
+            _handle_device_cancel,
+            ["POST"],
+            "取消 Codex 设备登录",
+        )
+        self.context.register_web_api(
+            "/astrbot_plugin_openai_oauth/account/status",
+            _handle_account_status,
+            ["POST"],
+            "查询 OpenAI 登录状态",
+        )
+        self.context.register_web_api(
+            "/astrbot_plugin_openai_oauth/account/usage",
+            _handle_account_usage,
+            ["POST"],
+            "查询 OpenAI 订阅额度",
         )
 
     @filter.command("usage")
@@ -131,8 +226,10 @@ class OpenAI_OAuth_Plugin(Star):
         current_task = asyncio.current_task()
         if current_task is not None:
             _command_login_tasks[owner] = current_task
-        source = _get_source()
-        proxy = str((source or {}).get("proxy", "") or "")
+        try:
+            proxy = _get_credential_coordinator().source_settings()["proxy"]
+        except CredentialSourceError:
+            proxy = ""
         try:
             try:
                 device_auth_id, user_code, interval = await request_device_user_code(
@@ -141,8 +238,11 @@ class OpenAI_OAuth_Plugin(Star):
             except DeviceAuthError as exc:
                 await event.send(MessageChain().message(f"无法启动设备登录：{exc}"))
                 return
-            except Exception:  # noqa: BLE001 - keep network details out of chat
-                logger.exception("OpenAI Codex admin device-code request failed.")
+            except Exception as exc:  # noqa: BLE001 - keep network details out of chat
+                logger.error(
+                    "OpenAI Codex admin device-code request failed: %s",
+                    type(exc).__name__,
+                )
                 await event.send(
                     MessageChain().message("无法启动设备登录，请稍后重试。")
                 )
@@ -196,19 +296,7 @@ def _register_provider_adapter_if_absent(cls: type) -> type:
             _PROVIDER_TYPE,
             "OpenAI 订阅登录 (Codex OAuth) Provider",
             provider_display_name="OpenAI Subscribe",
-            default_config_tmpl={
-                # provider 字段被前端 getProviderIcon 读取，映射到 OpenAI 官方图标。
-                # provider_type 被前端按 tab 过滤（chat_completion），缺失会导致
-                # 模型配置下拉里看不到这个 provider。
-                "provider": "openai",
-                "provider_type": "chat_completion",
-                # key 存放凭据 JSON：{access_token, refresh_token, expires, account_id}
-                "key": "",
-                "model": "gpt-5.4-mini",
-                "proxy": "",
-                "originator": DEFAULT_ORIGINATOR,
-                "user_agent": DEFAULT_USER_AGENT,
-            },
+            default_config_tmpl=_default_provider_template(),
         )(cls)
     provider_cls_map[_PROVIDER_TYPE].cls_type = cls
     return cls
@@ -224,57 +312,66 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
 
     def __init__(self, provider_config: dict, provider_settings: dict) -> None:
         raw_key = provider_config.get("key")
-        self.creds = load_credentials(raw_key)
-        if not self.creds and raw_key:
-            # 允许直接粘贴裸 access_token（缺少 account_id 时模型列表等接口不可用）
-            self.creds = {"access_token": str(raw_key)}
+        try:
+            bootstrap_creds = parse_credentials(raw_key)
+        except CredentialSchemaError:
+            bootstrap_creds = {}
+        self._bootstrap_access_token = str(
+            bootstrap_creds.get("access_token", "") or ""
+        )
+        self._source_id = str(
+            provider_config.get("provider_source_id") or _PROVIDER_TYPE
+        )
         self._originator = str(provider_config.get("originator", DEFAULT_ORIGINATOR))
         self._user_agent = str(provider_config.get("user_agent", DEFAULT_USER_AGENT))
-        provider_config["api_base"] = CODEX_BASE
-
-        if not isinstance(provider_config.get("custom_headers"), dict):
-            provider_config["custom_headers"] = {}
-        account_id = self.creds.get("account_id", "")
-        if account_id:
-            provider_config["custom_headers"]["chatgpt-account-id"] = account_id
-        provider_config["custom_headers"].setdefault("originator", self._originator)
-        provider_config["custom_headers"].setdefault(
-            "OpenAI-Beta", "responses=experimental"
+        raw_headers = provider_config.get("custom_headers")
+        self._static_headers = (
+            {
+                str(key): str(value)
+                for key, value in raw_headers.items()
+                if isinstance(key, str)
+            }
+            if isinstance(raw_headers, dict)
+            else {}
         )
+        for header_name in list(self._static_headers):
+            if header_name.lower() == "chatgpt-account-id":
+                self._static_headers.pop(header_name)
+        self._static_headers.setdefault("originator", self._originator)
+        self._static_headers.setdefault("OpenAI-Beta", "responses=experimental")
+        self._static_headers.setdefault("User-Agent", self._user_agent)
+        provider_config["api_base"] = CODEX_BASE
+        provider_config["key"] = "openai-oauth-request-scoped"
+        provider_config["custom_headers"] = dict(self._static_headers)
 
         super().__init__(provider_config, provider_settings)
-        # 基类用原始 key 值构建了 client，这里用解析出的 access_token 修正。
-        self._sync_client_key()
-        self._refresh_lock = asyncio.Lock()
+        self.api_keys = [self._bootstrap_access_token]
+        self.chosen_api_key = self._bootstrap_access_token
         self.set_model(provider_config.get("model", "gpt-5.4-mini"))
 
-    def _sync_client_key(self) -> None:
-        token = self.creds.get("access_token", "")
-        self.api_keys = [token]
-        self.chosen_api_key = token
-        self.client.api_key = token
-
     def get_keys(self) -> list[str]:
-        return [self.creds.get("access_token", "")]
+        return [self._bootstrap_access_token]
 
     def get_current_key(self) -> str:
-        return self.creds.get("access_token", "")
+        return self._bootstrap_access_token
 
     def set_key(self, key: str) -> None:
-        creds = load_credentials(key)
-        if "access_token" not in creds and key:
-            creds = {"access_token": key}
-        self.creds = creds
-        # AsyncOpenAI 构造时持有同一个 custom_headers dict，这里就地更新
-        # chatgpt-account-id，client.default_headers 下次访问时即生效。
-        headers = self.provider_config.get("custom_headers")
-        if isinstance(headers, dict):
-            account_id = creds.get("account_id", "")
-            if account_id:
-                headers["chatgpt-account-id"] = account_id
-            else:
-                headers.pop("chatgpt-account-id", None)
-        self._sync_client_key()
+        try:
+            creds = parse_credentials(key)
+        except CredentialSchemaError:
+            creds = {}
+        self._bootstrap_access_token = str(creds.get("access_token", "") or "")
+        self.api_keys = [self._bootstrap_access_token]
+        self.chosen_api_key = self._bootstrap_access_token
+
+    def _request_client(self, snapshot: CredentialSnapshot) -> Any:
+        headers = dict(self._static_headers)
+        if snapshot.account_id:
+            headers["chatgpt-account-id"] = snapshot.account_id
+        return self.client.with_options(
+            api_key=snapshot.access_token,
+            set_default_headers=headers,
+        )
 
     def _convert_chat_messages_to_response_input(
         self, messages: list[dict]
@@ -289,6 +386,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
 
     async def _query_stream(
         self,
+        request_client: Any,
         payloads: dict,
         tools,
         *,
@@ -330,11 +428,12 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
 
         stream = await retry_provider_request(
             "OpenAI Responses",
-            lambda: self.client.responses.create(
+            lambda: request_client.responses.create(
                 **payloads,
                 stream=True,
                 extra_body=extra_body,
             ),
+            retry_rate_limits=False,
             max_attempts=request_max_retries,
         )
 
@@ -351,10 +450,8 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
 
             if event_type == "error":
                 code = self._field(event, "code", "stream_error")
-                message = self._field(event, "message", "Responses stream failed")
                 raise RuntimeError(
-                    f"Responses API stream failed: {code}: {message}. "
-                    f"response_id={response_id}"
+                    f"Responses API stream failed: {code}. response_id={response_id}"
                 )
 
             if event_type in {"response.output_text.delta", "response.refusal.delta"}:
@@ -416,11 +513,8 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                     if status == "failed":
                         error = self._field(event_response, "error")
                         code = self._field(error, "code", "unknown_error")
-                        message = self._field(
-                            error, "message", "Responses API request failed"
-                        )
                         raise RuntimeError(
-                            f"Responses API request failed: {code}: {message}. "
+                            f"Responses API request failed: {code}. "
                             f"response_id={response_id}"
                         )
                     if (
@@ -516,101 +610,208 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         )
 
     async def get_models(self) -> list[str]:
-        token = self.creds.get("access_token", "")
-        if not token:
-            return list(CODEX_FALLBACK_MODELS)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "chatgpt-account-id": self.creds.get("account_id", ""),
-            "originator": self._originator,
-            "User-Agent": self._user_agent,
-            "accept": "application/json",
-        }
         try:
-            client = create_proxy_client(
-                "OpenAI Codex",
-                self.provider_config.get("proxy", ""),
-            )
-            async with client:
-                resp = await client.get(
-                    f"{CODEX_MODELS_URL}?client_version=1.0.0",
-                    headers=headers,
-                    timeout=10,
+            coordinator = _get_credential_coordinator()
+            snapshot = await coordinator.get_snapshot(self._source_id)
+            try:
+                models = await fetch_models(
+                    snapshot.access_token,
+                    snapshot.account_id,
+                    self._request_proxy(),
+                    self._originator,
+                    self._user_agent,
                 )
-                resp.raise_for_status()
-                data = resp.json()
-            models = extract_model_ids(data)
+            except CredentialExpiredError:
+                snapshot = await coordinator.get_snapshot(
+                    self._source_id,
+                    force_refresh=True,
+                    check_cooldown=False,
+                )
+                models = await fetch_models(
+                    snapshot.access_token,
+                    snapshot.account_id,
+                    self._request_proxy(),
+                    self._originator,
+                    self._user_agent,
+                )
             if models:
                 return models
-            logger.warning("OpenAI Codex /models returned no ids; using fallback.")
-        except Exception as e:  # noqa: BLE001 - network/catalog failure falls back to the offline list
-            logger.error(f"Failed to fetch OpenAI Codex model list: {e}")
+            logger.warning("OpenAI Codex model catalog contained no model IDs.")
+        except (CredentialError, CredentialExpiredError):
+            return list(CODEX_FALLBACK_MODELS)
+        except Exception as exc:  # noqa: BLE001 - catalog failure uses offline fallback
+            logger.error("OpenAI Codex model catalog failed: %s", type(exc).__name__)
         return list(CODEX_FALLBACK_MODELS)
 
-    async def _ensure_fresh_token(self) -> None:
-        if not self.creds.get("refresh_token"):
-            return
-        if self.creds.get("expires", 0) > time.time() + _REFRESH_SKEW_SECONDS:
-            return
-        async with self._refresh_lock:
-            # 等锁期间可能已被刷新，双重检查。
-            if self.creds.get("expires", 0) > time.time() + _REFRESH_SKEW_SECONDS:
-                return
-            try:
-                self.creds = await refresh_access_token(
-                    self.creds,
-                    self.provider_config.get("proxy", ""),
-                )
-                self.provider_config["key"] = dump_credentials(self.creds)
-                self._sync_client_key()
-                await self._persist_key()
-                logger.info("OpenAI Codex token refreshed.")
-            except Exception as e:  # noqa: BLE001 - a failed refresh must not break the request
-                logger.error(f"OpenAI Codex token refresh failed: {e}")
-
-    async def _persist_key(self) -> None:
-        """把当前凭据写回配置里的 provider source key，重启后免重新登录。
-
-        合并配置里 id 是模型 id，key 属于 `provider_sources` 里的 source 配置
-        （按 provider_source_id / type 匹配），不能写进 `provider` 模型列表。
-        """
-        cfg_mgr = _config_mgr
-        if cfg_mgr is None:
-            return
-        source_id = self.provider_config.get("provider_source_id") or _PROVIDER_TYPE
+    def _request_proxy(self) -> str:
         try:
-            conf = cfg_mgr.default_conf
-            for source in conf.get("provider_sources", []):
-                if (
-                    source.get("id") == source_id
-                    or source.get("type") == _PROVIDER_TYPE
-                ):
-                    source["key"] = dump_credentials(self.creds)
-                    await conf.save_config_async()
-                    return
-            logger.warning(
-                f"OpenAI Codex source {source_id!r} not found in config; "
-                "refreshed token not persisted."
-            )
-        except Exception as e:  # noqa: BLE001 - a failed persist must not break the request
-            logger.error(f"OpenAI Codex failed to persist refreshed token: {e}")
+            return _get_credential_coordinator().source_settings(self._source_id)[
+                "proxy"
+            ]
+        except CredentialSourceError:
+            return str(self.provider_config.get("proxy", "") or "")
 
-    async def text_chat(self, *args, **kwargs) -> LLMResponse:
-        await self._ensure_fresh_token()
-        # Codex 后端只接受 stream=true，非流式路径也改走流式并聚合出完整响应。
+    async def _fetch_usage_for_snapshot(
+        self,
+        snapshot: CredentialSnapshot,
+    ) -> dict[str, Any]:
+        return await retry_provider_request(
+            "OpenAI Codex",
+            lambda: fetch_rate_limits(
+                snapshot.access_token,
+                snapshot.account_id,
+                self._request_proxy(),
+                self._user_agent,
+            ),
+            retry_rate_limits=False,
+            max_attempts=2,
+        )
+
+    async def _subscription_cooldown_error(
+        self,
+        snapshot: CredentialSnapshot,
+    ) -> CredentialCooldownError:
+        coordinator = _get_credential_coordinator()
+        cooldown_until: int | None = None
+        try:
+            usage = await coordinator.get_usage(
+                self._source_id,
+                self._fetch_usage_for_snapshot,
+            )
+            cooldown_until = _cooldown_until_from_usage(usage)
+        except Exception as exc:  # noqa: BLE001 - a failed usage lookup is non-fatal
+            logger.warning(
+                "OpenAI Codex quota lookup after rate limit failed: %s",
+                type(exc).__name__,
+            )
+        if cooldown_until is None:
+            cooldown_until = int(time.time()) + 300
+        persisted = await coordinator.mark_cooling(
+            self._source_id,
+            cooldown_until,
+            expected_access_token=snapshot.access_token,
+        )
+        return CredentialCooldownError(
+            persisted.cooldown_until,
+            persisted.cooldown_reason,
+        )
+
+    async def _stream_with_current_credentials(
+        self,
+        payloads: dict[str, Any],
+        tools: Any,
+        *,
+        request_max_retries: int | None,
+    ) -> AsyncGenerator[LLMResponse, None]:
+        coordinator = _get_credential_coordinator()
+        retry_after_credential_error = True
+        emitted_chunk = False
+        base_payloads = deepcopy(payloads)
+
+        while True:
+            snapshot = await coordinator.get_snapshot(self._source_id)
+            request_client = self._request_client(snapshot)
+            try:
+                async for response in self._query_stream(
+                    request_client,
+                    deepcopy(base_payloads),
+                    tools,
+                    request_max_retries=request_max_retries,
+                ):
+                    emitted_chunk = True
+                    yield response
+                return
+            except Exception as exc:
+                error_kind = classify_codex_error(exc)
+                if error_kind == "usage_limit":
+                    cooldown_error = await self._subscription_cooldown_error(snapshot)
+                    raise cooldown_error from exc
+                if (
+                    error_kind == "credential"
+                    and retry_after_credential_error
+                    and not emitted_chunk
+                ):
+                    retry_after_credential_error = False
+                    await coordinator.get_snapshot(
+                        self._source_id,
+                        force_refresh=True,
+                        check_cooldown=False,
+                    )
+                    continue
+                raise
+
+    async def text_chat(
+        self,
+        prompt=None,
+        session_id=None,
+        image_urls=None,
+        audio_urls=None,
+        func_tool=None,
+        contexts=None,
+        system_prompt=None,
+        tool_calls_result=None,
+        model=None,
+        extra_user_content_parts=None,
+        tool_choice="auto",
+        request_max_retries: int | None = None,
+        **kwargs,
+    ) -> LLMResponse:
         final_response = None
-        async for chunk in super().text_chat_stream(*args, **kwargs):
+        async for chunk in self.text_chat_stream(
+            prompt=prompt,
+            session_id=session_id,
+            image_urls=image_urls,
+            audio_urls=audio_urls,
+            func_tool=func_tool,
+            contexts=contexts,
+            system_prompt=system_prompt,
+            tool_calls_result=tool_calls_result,
+            model=model,
+            extra_user_content_parts=extra_user_content_parts,
+            tool_choice=tool_choice,
+            request_max_retries=request_max_retries,
+            **kwargs,
+        ):
             if not chunk.is_chunk:
                 final_response = chunk
         if final_response is None:
-            raise RuntimeError("OpenAI Codex 未返回完整响应。")
+            raise RuntimeError("OpenAI Codex returned no complete response.")
         return final_response
 
     async def text_chat_stream(
-        self, *args, **kwargs
+        self,
+        prompt=None,
+        session_id=None,
+        image_urls=None,
+        audio_urls=None,
+        func_tool=None,
+        contexts=None,
+        system_prompt=None,
+        tool_calls_result=None,
+        model=None,
+        extra_user_content_parts=None,
+        tool_choice="auto",
+        request_max_retries: int | None = None,
+        **kwargs,
     ) -> AsyncGenerator[LLMResponse, None]:
-        await self._ensure_fresh_token()
-        async for item in super().text_chat_stream(*args, **kwargs):
+        payloads, _ = await self._prepare_chat_payload(
+            prompt,
+            image_urls,
+            audio_urls,
+            contexts,
+            system_prompt,
+            tool_calls_result,
+            model=model,
+            extra_user_content_parts=extra_user_content_parts,
+            **kwargs,
+        )
+        if func_tool and not func_tool.empty():
+            payloads["tool_choice"] = tool_choice
+        async for item in self._stream_with_current_credentials(
+            payloads,
+            func_tool,
+            request_max_retries=request_max_retries,
+        ):
             yield item
 
 
@@ -675,27 +876,13 @@ def format_usage(usage: dict) -> str:
     return "\n".join(lines)
 
 
-def _get_source() -> dict | None:
-    """从 AstrBot 配置里找本插件的 provider source。"""
-    cfg_mgr = _config_mgr
-    if cfg_mgr is None:
-        return None
-    return next(
-        (
-            s
-            for s in cfg_mgr.default_conf.get("provider_sources", [])
-            if s.get("type") == _PROVIDER_TYPE or s.get("id") == _PROVIDER_TYPE
-        ),
-        None,
-    )
-
-
 def _is_logged_in() -> bool:
-    """是否已登录：provider source 里存有 access_token。"""
-    source = _get_source()
-    if not source:
+    """Return whether the default source has a credential record."""
+    try:
+        status = _get_credential_coordinator().status()
+    except CredentialError:
         return False
-    return bool(load_credentials(source.get("key")).get("access_token"))
+    return status.state not in {"not_logged_in", "invalid"}
 
 
 def _is_private_login_event(event: AstrMessageEvent) -> bool:
@@ -727,30 +914,71 @@ def _cancel_all_command_login_tasks() -> list[asyncio.Task[Any]]:
     return tasks
 
 
-async def build_usage_message() -> str:
-    """读取 provider 配置里的凭据并查询额度，返回要发送的文本。"""
-    source = _get_source()
-    creds = load_credentials(source.get("key")) if source else {}
-    if not creds.get("access_token"):
-        # 正常路径已被 /usage 指令的登录门槛挡住，这里仅作兜底。
-        return "尚未登录。"
-    proxy = str((source or {}).get("proxy", "") or "")
-    try:
-        usage = await retry_provider_request(
+def _cooldown_until_from_usage(usage: dict[str, Any]) -> int | None:
+    reset_times: list[int] = []
+    now = time.time()
+    for window in usage.get("windows") or []:
+        reset_at = window.get("reset_at")
+        if isinstance(reset_at, (int, float)):
+            reset_times.append(int(reset_at))
+            continue
+        reset_after = window.get("reset_after_seconds")
+        if isinstance(reset_after, (int, float)) and reset_after >= 0:
+            reset_times.append(int(now + reset_after))
+    return max(reset_times, default=None)
+
+
+def _format_cooldown(cooldown_until: int | None) -> str:
+    return f"OpenAI 订阅额度当前处于冷却状态{_format_reset_at(cooldown_until, None)}。"
+
+
+async def _fetch_source_usage(source_id: str = _PROVIDER_TYPE) -> dict[str, Any]:
+    coordinator = _get_credential_coordinator()
+
+    async def fetch_usage(snapshot: CredentialSnapshot) -> dict:
+        settings = coordinator.source_settings(snapshot.source_id)
+        return await retry_provider_request(
             "OpenAI Codex",
             lambda: fetch_rate_limits(
-                creds.get("access_token", ""),
-                creds.get("account_id", ""),
-                proxy,
+                snapshot.access_token,
+                snapshot.account_id,
+                settings["proxy"],
+                settings["user_agent"] or DEFAULT_USER_AGENT,
             ),
+            retry_rate_limits=False,
             max_attempts=3,
         )
+
+    usage = await coordinator.get_usage(source_id, fetch_usage)
+    if usage.get("limit_reached") or not usage.get("allowed", True):
+        cooldown_until = _cooldown_until_from_usage(usage)
+        if cooldown_until is not None:
+            await coordinator.mark_cooling(
+                source_id,
+                cooldown_until,
+                expected_access_token=None,
+            )
+    return usage
+
+
+async def build_usage_message() -> str:
+    """Fetch the default source's quota through the credential coordinator."""
+    try:
+        usage = await _fetch_source_usage()
+    except CredentialCooldownError as exc:
+        return _format_cooldown(exc.cooldown_until)
+    except (CredentialsNotConfiguredError, ReauthenticationRequiredError):
+        return "凭据已失效，请在插件详情页重新登录。"
+    except CredentialSchemaError:
+        return "凭据配置格式不受支持，请升级插件后重新登录。"
     except CredentialExpiredError:
         return "凭据已失效，请在插件详情页重新登录。"
-    except Exception as exc:  # noqa: BLE001 - 查询失败信息透传给用户
-        logger.error(f"OpenAI Codex 额度查询失败: {exc!r}")
-        # 部分异常（如 TimeoutError）str 为空，回退到类型名避免透传空白信息。
-        return f"额度查询失败：{str(exc) or type(exc).__name__}"
+    except CredentialError:
+        return "无法读取 OpenAI 凭据，请在插件详情页重新登录。"
+    except Exception as exc:  # noqa: BLE001 - do not expose provider responses
+        logger.error("OpenAI Codex usage request failed: %s", type(exc).__name__)
+        return "额度查询失败，请稍后重试。"
+
     return format_usage(usage)
 
 
@@ -830,9 +1058,31 @@ async def _handle_device_start() -> Any:
     body = await request.json(default={}) or {}
     if not isinstance(body, dict):
         return _login_error_response("请求格式无效", 400)
-    proxy = str(body.get("proxy", "") or "")
+    try:
+        proxy = _get_credential_coordinator().source_settings()["proxy"]
+    except CredentialSourceError:
+        proxy = ""
     owner = str(request.username)
     _prune_expired_login_sessions()
+    for existing_id, existing in _login_sessions.items():
+        if existing.get("source_id") != _PROVIDER_TYPE or existing.get(
+            "status"
+        ) not in {"starting", "pending"}:
+            continue
+        if secrets.compare_digest(str(existing.get("owner", "")), owner):
+            if existing.get("status") != "pending":
+                return _login_error_response("设备登录正在启动，请稍后重试", 409)
+            return json_response(
+                {
+                    "status": "pending",
+                    "session_id": existing_id,
+                    "verify_url": CODEX_DEVICE_VERIFY_URL,
+                    "user_code": existing["user_code"],
+                    "interval": existing["interval"],
+                },
+                headers=_NO_STORE_HEADERS,
+            )
+        return _login_error_response("另一位用户正在登录该 OpenAI source", 409)
     if len(_login_sessions) >= _MAX_LOGIN_SESSIONS:
         return _login_error_response("设备登录会话已达上限，请稍后重试", 429)
     owner_sessions = sum(
@@ -847,6 +1097,7 @@ async def _handle_device_start() -> Any:
     session_id = secrets.token_urlsafe(32)
     session = {
         "owner": owner,
+        "source_id": _PROVIDER_TYPE,
         "status": "starting",
         "device_auth_id": None,
         "user_code": None,
@@ -863,9 +1114,12 @@ async def _handle_device_start() -> Any:
     except DeviceAuthError as exc:
         _discard_login_session(session_id)
         return _login_error_response(str(exc), 400)
-    except Exception:  # noqa: BLE001 - keep network details out of the response
+    except Exception as exc:  # noqa: BLE001 - keep network details out of the response
         _discard_login_session(session_id)
-        logger.exception("OpenAI Codex device-code request failed.")
+        logger.error(
+            "OpenAI Codex device-code request failed: %s",
+            type(exc).__name__,
+        )
         return _login_error_response("无法启动设备登录，请稍后重试", 502)
     session = _login_sessions.get(session_id)
     if session is None:
@@ -891,37 +1145,9 @@ async def _handle_device_start() -> Any:
     )
 
 
-async def _persist_login_credentials(creds: dict) -> None:
+async def _persist_login_credentials(creds: dict[str, Any]) -> None:
     """Persist credentials produced by the server-owned device session."""
-    cfg_mgr = _config_mgr
-    if cfg_mgr is None:
-        raise RuntimeError("配置管理器不可用")
-    conf = cfg_mgr.default_conf
-    sources = conf.setdefault("provider_sources", [])
-    source = next(
-        (
-            item
-            for item in sources
-            if item.get("type") == _PROVIDER_TYPE or item.get("id") == _PROVIDER_TYPE
-        ),
-        None,
-    )
-    if source is None:
-        source = {
-            "provider": "openai",
-            "type": _PROVIDER_TYPE,
-            "provider_type": "chat_completion",
-            "key": "",
-            "api_base": CODEX_BASE,
-            "proxy": "",
-            "originator": DEFAULT_ORIGINATOR,
-            "user_agent": DEFAULT_USER_AGENT,
-            "id": _PROVIDER_TYPE,
-            "enable": True,
-        }
-        sources.append(source)
-    source["key"] = dump_credentials(creds)
-    await conf.save_config_async()
+    await _get_credential_coordinator().replace_credentials(_PROVIDER_TYPE, creds)
 
 
 async def _complete_device_login(
@@ -972,10 +1198,10 @@ async def _run_device_login(session_id: str, proxy: str) -> None:
     except DeviceAuthError as exc:
         session["status"] = "error"
         session["error"] = str(exc)
-    except Exception:  # noqa: BLE001 - report a generic error without credential data
+    except Exception as exc:  # noqa: BLE001 - report a generic error without credential data
         session["status"] = "error"
         session["error"] = "登录或保存失败，请重试"
-        logger.exception("OpenAI Codex device login failed.")
+        logger.error("OpenAI Codex device login failed: %s", type(exc).__name__)
     finally:
         if _login_sessions.get(session_id) is session:
             _schedule_login_session_expiry(session_id, _LOGIN_RESULT_TTL_SECONDS)
@@ -1005,8 +1231,8 @@ async def _run_command_device_login(
         )
     except DeviceAuthError as exc:
         await event.send(MessageChain().message(f"OpenAI 登录失败：{exc}"))
-    except Exception:  # noqa: BLE001 - never send provider or credential details
-        logger.exception("OpenAI Codex admin device login failed.")
+    except Exception as exc:  # noqa: BLE001 - never send provider or credential details
+        logger.error("OpenAI Codex admin device login failed: %s", type(exc).__name__)
         await event.send(MessageChain().message("OpenAI 登录或保存失败，请重试。"))
     else:
         await event.send(
@@ -1035,3 +1261,63 @@ async def _handle_device_poll() -> Any:
     if session["status"] in {"success", "error", "timeout"}:
         _discard_login_session(session_id, cancel_task=False)
     return json_response(payload, headers=_NO_STORE_HEADERS)
+
+
+async def _handle_device_cancel() -> Any:
+    if message := _login_request_error():
+        return _login_error_response(message, 403)
+    body = await request.json(default={}) or {}
+    if not isinstance(body, dict):
+        return _login_error_response("请求格式无效", 400)
+    session_id = str(body.get("session_id", "") or "")
+    session = _login_sessions.get(session_id)
+    owner = str(request.username)
+    if session is None or not secrets.compare_digest(
+        str(session.get("owner", "")), owner
+    ):
+        return _login_error_response("登录会话不存在或已过期", 404)
+    _discard_login_session(session_id)
+    return json_response({"status": "cancelled"}, headers=_NO_STORE_HEADERS)
+
+
+async def _handle_account_status() -> Any:
+    if message := _login_request_error():
+        return _login_error_response(message, 403)
+    try:
+        status = _get_credential_coordinator().status().as_dict()
+    except CredentialError:
+        status = {"status": "invalid"}
+    return json_response(status, headers=_NO_STORE_HEADERS)
+
+
+async def _handle_account_usage() -> Any:
+    if message := _login_request_error():
+        return _login_error_response(message, 403)
+    try:
+        usage = await _fetch_source_usage()
+    except CredentialCooldownError as exc:
+        return json_response(
+            {
+                "status": "cooling",
+                "cooldown_until": exc.cooldown_until,
+                "cooldown_reason": exc.reason,
+            },
+            headers=_NO_STORE_HEADERS,
+        )
+    except (
+        CredentialsNotConfiguredError,
+        ReauthenticationRequiredError,
+        CredentialExpiredError,
+    ):
+        return json_response({"status": "reauth_required"}, headers=_NO_STORE_HEADERS)
+    except CredentialSchemaError:
+        return json_response({"status": "invalid"}, headers=_NO_STORE_HEADERS)
+    except CredentialError:
+        return json_response({"status": "invalid"}, headers=_NO_STORE_HEADERS)
+    except Exception as exc:  # noqa: BLE001 - do not expose provider responses
+        logger.error("OpenAI Codex usage API failed: %s", type(exc).__name__)
+        return _login_error_response("额度查询失败，请稍后重试", 502)
+    return json_response(
+        {"status": "success", "usage": usage},
+        headers=_NO_STORE_HEADERS,
+    )

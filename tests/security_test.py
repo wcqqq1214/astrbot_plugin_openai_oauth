@@ -98,6 +98,9 @@ class _FakeContext:
 
 
 class LoginBoundaryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        plugin._config_mgr = _FakeConfigManager()
+
     def tearDown(self) -> None:
         discard = getattr(plugin, "_discard_all_login_sessions", None)
         if discard is not None:
@@ -141,18 +144,23 @@ class LoginBoundaryTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         request_code.assert_not_awaited()
 
-    def test_api_key_cannot_enter_the_login_boundary(self) -> None:
+    def test_api_key_cannot_enter_account_or_login_boundaries(self) -> None:
         async def run():
             with bind_request_context(_plugin_request(username="api_key:key-1")):
-                return await plugin._handle_device_start()
+                start = await plugin._handle_device_start()
+            with bind_request_context(_plugin_request(username="api_key:key-1")):
+                status = await plugin._handle_account_status()
+            with bind_request_context(_plugin_request(username="api_key:key-1")):
+                usage = await plugin._handle_account_usage()
+            return start, status, usage
 
         with mock.patch.object(
             plugin,
             "request_device_user_code",
             new=mock.AsyncMock(return_value=("device", "CODE", 5)),
         ) as request_code:
-            response = asyncio.run(run())
-        self.assertEqual(response.status_code, 403)
+            responses = asyncio.run(run())
+        self.assertTrue(all(response.status_code == 403 for response in responses))
         request_code.assert_not_awaited()
 
     def test_standalone_login_route_is_not_registered(self) -> None:
@@ -169,6 +177,9 @@ class LoginBoundaryTests(unittest.TestCase):
             [
                 "/astrbot_plugin_openai_oauth/device/start",
                 "/astrbot_plugin_openai_oauth/device/poll",
+                "/astrbot_plugin_openai_oauth/device/cancel",
+                "/astrbot_plugin_openai_oauth/account/status",
+                "/astrbot_plugin_openai_oauth/account/usage",
             ],
         )
 
@@ -203,7 +214,7 @@ class LoginBoundaryTests(unittest.TestCase):
 
         first, second, stolen_poll = asyncio.run(run())
         self.assertEqual(first.status_code, 200)
-        self.assertEqual(second.status_code, 429)
+        self.assertEqual(second.status_code, 409)
         self.assertEqual(stolen_poll.status_code, 404)
 
     def test_login_sessions_have_a_per_user_limit(self) -> None:
@@ -234,8 +245,12 @@ class LoginBoundaryTests(unittest.TestCase):
 
         first, same_owner, other_owner = asyncio.run(run())
         self.assertEqual(first.status_code, 200)
-        self.assertEqual(same_owner.status_code, 429)
-        self.assertEqual(other_owner.status_code, 200)
+        self.assertEqual(same_owner.status_code, 200)
+        self.assertEqual(
+            _payload(first)["session_id"],
+            _payload(same_owner)["session_id"],
+        )
+        self.assertEqual(other_owner.status_code, 409)
 
     def test_expiry_cancels_task_and_removes_session(self) -> None:
         async def run():

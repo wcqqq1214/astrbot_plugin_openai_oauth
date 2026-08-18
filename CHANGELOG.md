@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Source-scoped OAuth credential coordination with versioned credential records,
+  single-flight refresh, cooldown state, and safe Plugin Page account status.
+- Explicit quota lookup and cancellation controls in the native Plugin Page.
+- Offline protocol, credential-concurrency, provider-isolation, and Web-boundary
+  regression coverage with an AstrBot compatibility CI workflow.
+
+### Changed
+
+- Kept the plugin as a native, single-account OpenAI OAuth integration; it does
+  not download, run, or depend on CLIProxyAPI.
+- Made Codex requests use request-scoped OAuth clients and disabled generic 429
+  retries for subscription quota failures.
+
 ## [v1.1.0] - 2026-08-09
 
 ### Added

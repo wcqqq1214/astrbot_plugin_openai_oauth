@@ -106,13 +106,36 @@ button.secondary {
   color: #6b7280;
 }
 
+.account {
+  margin: 20px 0;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 10px;
+}
+
+.account h2 {
+  margin-top: 0;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.usage-result {
+  margin-bottom: 0;
+  white-space: pre-wrap;
+}
+
 .error {
   color: #dc2626;
   white-space: pre-wrap;
 }
 
 @media (max-width: 520px) {
-  .copy-row {
+  .copy-row,
+  .actions {
     align-items: stretch;
     flex-direction: column;
   }

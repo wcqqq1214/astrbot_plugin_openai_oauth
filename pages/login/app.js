@@ -8,8 +8,13 @@ const text = isEnglish
       intro: "Authorize with a ChatGPT device code. Credentials stay on the AstrBot server.",
       warning:
         "This Dashboard is using plain HTTP. The Dashboard session may be intercepted; HTTPS, a VPN, or an SSH tunnel is recommended.",
+      accountTitle: "Account status",
+      checkUsage: "Check quota",
+      checkingUsage: "Checking quota…",
       start: "Start login",
-      restart: "Try again",
+      restart: "Log in again",
+      cancel: "Cancel login",
+      cancelled: "Login was cancelled.",
       instructions: "Complete authorization",
       open: "Copy the verification URL and open it in a new tab:",
       code: "Enter device code:",
@@ -22,14 +27,37 @@ const text = isEnglish
       success: "Login succeeded. Credentials were saved on the server.",
       failed: "Login failed.",
       expired: "The device code expired. Please start again.",
+      states: {
+        ready: "Signed in and ready to use.",
+        refreshing: "Refreshing credentials…",
+        cooling: "The subscription quota is temporarily cooling down.",
+        degraded: "The current credential is usable, but its refresh needs attention.",
+        reauth_required: "Sign in again to renew the OpenAI credential.",
+        not_logged_in: "Not signed in yet.",
+        invalid: "The stored credential is unsupported. Update the plugin and sign in again.",
+        unknown: "Account status is unavailable.",
+      },
+      usageUnavailable: "Quota details are unavailable.",
+      quotaTitle: "OpenAI subscription quota:",
+      noWindows: "No quota windows were returned.",
+      limitReached: "Status: quota limit reached.",
+      unavailable: "Status: currently unavailable.",
+      window: "window",
+      remaining: "remaining",
+      reset: "resets",
     }
   : {
       title: "OpenAI 订阅登录",
       intro: "使用 ChatGPT 设备码完成授权，凭据会由 AstrBot 服务端保存。",
       warning:
         "当前 Dashboard 使用明文 HTTP，会话可能被网络窃听；建议为整个 Dashboard 使用 HTTPS、VPN 或 SSH 隧道。",
+      accountTitle: "账号状态",
+      checkUsage: "查询额度",
+      checkingUsage: "正在查询额度……",
       start: "开始登录",
       restart: "重新登录",
+      cancel: "取消登录",
+      cancelled: "已取消登录。",
       instructions: "完成授权",
       open: "复制验证网址并在新标签页打开：",
       code: "输入设备码：",
@@ -42,10 +70,32 @@ const text = isEnglish
       success: "登录成功，凭据已由服务端保存。",
       failed: "登录失败。",
       expired: "设备码已过期，请重新开始登录。",
+      states: {
+        ready: "已登录，可以使用。",
+        refreshing: "正在刷新凭据……",
+        cooling: "订阅额度当前处于冷却状态。",
+        degraded: "当前凭据仍可使用，但刷新需要留意。",
+        reauth_required: "请重新登录以更新 OpenAI 凭据。",
+        not_logged_in: "尚未登录。",
+        invalid: "已保存的凭据格式不受支持，请升级插件后重新登录。",
+        unknown: "账号状态暂不可用。",
+      },
+      usageUnavailable: "额度详情暂不可用。",
+      quotaTitle: "OpenAI 订阅额度：",
+      noWindows: "当前账号暂无可用额度窗口。",
+      limitReached: "状态：已达额度上限。",
+      unavailable: "状态：当前不可用。",
+      window: "窗口",
+      remaining: "剩余",
+      reset: "重置",
     };
 
 const byId = (id) => document.getElementById(id);
 const startButton = byId("start");
+const cancelButton = byId("cancel");
+const usageButton = byId("usage");
+const accountStatus = byId("account-status");
+const usageResult = byId("usage-result");
 const instructions = byId("instructions");
 const verifyUrl = byId("verify-url");
 const userCode = byId("user-code");
@@ -56,18 +106,22 @@ const status = byId("status");
 const error = byId("error");
 const maxConsecutivePollFailures = 5;
 let pollTimer = null;
+let activeSessionId = null;
 let consecutivePollFailures = 0;
 
 document.documentElement.lang = isEnglish ? "en" : "zh-CN";
 document.title = text.title;
 byId("title").textContent = text.title;
 byId("intro").textContent = text.intro;
+byId("account-title").textContent = text.accountTitle;
 byId("instructions-title").textContent = text.instructions;
 byId("open-label").textContent = text.open;
 byId("code-label").textContent = text.code;
 copyUrlButton.textContent = text.copyUrl;
 copyCodeButton.textContent = text.copyCode;
+usageButton.textContent = text.checkUsage;
 startButton.textContent = text.start;
+cancelButton.textContent = text.cancel;
 
 if (window.location.protocol === "http:") {
   const warning = byId("transport-warning");
@@ -95,20 +149,117 @@ function schedulePoll(sessionId, intervalSeconds) {
   );
 }
 
-function showError(message) {
+function finishSession() {
+  activeSessionId = null;
+  cancelButton.hidden = true;
+}
+
+function showError(message, terminal = true) {
   clearPollTimer();
   status.textContent = "";
   error.hidden = false;
   error.textContent = message || text.failed;
   startButton.disabled = false;
   startButton.textContent = text.restart;
+  if (terminal) {
+    finishSession();
+  }
+}
+
+function formatReset(timestamp) {
+  const value = Number(timestamp);
+  if (!Number.isFinite(value) || value <= 0) {
+    return "";
+  }
+  return ` · ${text.reset} ${new Date(value * 1000).toLocaleString()}`;
+}
+
+function renderAccountStatus(result) {
+  const accountState = String(result?.status || "unknown");
+  const base = text.states[accountState] || text.states.unknown;
+  accountStatus.textContent = `${base}${formatReset(result?.cooldown_until)}`;
+}
+
+function windowLabel(seconds) {
+  const value = Number(seconds);
+  if (value === 18000) {
+    return isEnglish ? "5-hour window" : "5 小时窗口";
+  }
+  if (value === 604800) {
+    return isEnglish ? "7-day window" : "7 天窗口";
+  }
+  if (value === 2592000) {
+    return isEnglish ? "30-day window" : "30 天窗口";
+  }
+  return value > 0 ? `${Math.round(value / 3600)} ${text.window}` : text.window;
+}
+
+function renderUsage(result) {
+  usageResult.hidden = false;
+  if (result?.status === "cooling") {
+    renderAccountStatus(result);
+    usageResult.textContent = `${text.states.cooling}${formatReset(result.cooldown_until)}`;
+    return;
+  }
+  if (result?.status !== "success" || !result.usage) {
+    usageResult.textContent = text.usageUnavailable;
+    return;
+  }
+
+  const usage = result.usage;
+  const lines = [text.quotaTitle];
+  const windows = Array.isArray(usage.windows) ? usage.windows : [];
+  if (!windows.length) {
+    lines.push(text.noWindows);
+  }
+  for (const item of windows) {
+    const remaining = Math.max(0, 100 - Number(item.used_percent || 0));
+    const resetAt = item.reset_at || (
+      Number.isFinite(Number(item.reset_after_seconds))
+        ? Math.floor(Date.now() / 1000) + Number(item.reset_after_seconds)
+        : null
+    );
+    lines.push(
+      `· ${windowLabel(item.label_seconds)}: ${text.remaining} ${Math.round(remaining)}%${formatReset(resetAt)}`,
+    );
+  }
+  if (usage.limit_reached) {
+    lines.push(text.limitReached);
+  } else if (usage.allowed === false) {
+    lines.push(text.unavailable);
+  }
+  usageResult.textContent = lines.join("\n");
+}
+
+async function loadAccountStatus() {
+  try {
+    renderAccountStatus(await bridge.apiPost("account/status", {}));
+  } catch {
+    renderAccountStatus({ status: "unknown" });
+  }
+}
+
+async function queryUsage() {
+  usageButton.disabled = true;
+  usageButton.textContent = text.checkingUsage;
+  try {
+    renderUsage(await bridge.apiPost("account/usage", {}));
+  } catch {
+    usageResult.hidden = false;
+    usageResult.textContent = text.usageUnavailable;
+  } finally {
+    usageButton.disabled = false;
+    usageButton.textContent = text.checkUsage;
+  }
 }
 
 function finishSuccess() {
   clearPollTimer();
+  finishSession();
   setStatus(text.success);
   startButton.disabled = false;
   startButton.textContent = text.restart;
+  void loadAccountStatus();
 }
 
 async function poll(sessionId, intervalSeconds) {
@@ -131,7 +282,7 @@ async function poll(sessionId, intervalSeconds) {
   } catch (reason) {
     consecutivePollFailures += 1;
     if (consecutivePollFailures >= maxConsecutivePollFailures) {
-      showError(reason?.message || text.failed);
+      showError(reason?.message || text.failed, false);
       return;
     }
     setStatus(text.retrying);
@@ -154,13 +305,35 @@ async function startLogin() {
     if (result.status !== "pending") {
       throw new Error(result.message || text.failed);
     }
+    activeSessionId = result.session_id;
+    cancelButton.hidden = false;
     instructions.hidden = false;
     verifyUrl.value = result.verify_url;
     userCode.value = result.user_code;
     setStatus(text.waiting);
     await poll(result.session_id, Math.max(2, Number(result.interval) || 5));
   } catch (reason) {
-    showError(reason?.message || text.failed);
+    showError(reason?.message || text.failed, false);
+  }
+}
+
+async function cancelLogin() {
+  if (!activeSessionId) {
+    return;
+  }
+  cancelButton.disabled = true;
+  try {
+    await bridge.apiPost("device/cancel", { session_id: activeSessionId });
+    clearPollTimer();
+    finishSession();
+    instructions.hidden = true;
+    setStatus(text.cancelled);
+    startButton.disabled = false;
+    startButton.textContent = text.restart;
+  } catch (reason) {
+    showError(reason?.message || text.failed, false);
+  } finally {
+    cancelButton.disabled = false;
   }
 }
 
@@ -185,5 +358,8 @@ async function copyField(field) {
 }
 
 startButton.addEventListener("click", () => void startLogin());
+cancelButton.addEventListener("click", () => void cancelLogin());
+usageButton.addEventListener("click", () => void queryUsage());
 copyUrlButton.addEventListener("click", () => void copyField(verifyUrl));
 copyCodeButton.addEventListener("click", () => void copyField(userCode));
+void loadAccountStatus();

@@ -17,7 +17,17 @@
         <span>Dashboard 会话可能被网络窃听；建议为整个 Dashboard 使用 HTTPS、VPN 或 SSH 隧道。</span>
       </div>
 
-      <button id="start" type="button">开始登录</button>
+      <section class="account" aria-live="polite">
+        <h2 id="account-title">账号状态</h2>
+        <p id="account-status" class="status"></p>
+        <button id="usage" class="secondary" type="button">查询额度</button>
+        <p id="usage-result" class="usage-result" hidden></p>
+      </section>
+
+      <div class="actions">
+        <button id="start" type="button">开始登录</button>
+        <button id="cancel" class="secondary" type="button" hidden>取消登录</button>
+      </div>
 
       <section id="instructions" hidden>
         <h2 id="instructions-title">完成授权</h2>

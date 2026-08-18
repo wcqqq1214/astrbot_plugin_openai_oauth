@@ -1,0 +1,61 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: astrbot_plugin_openai_oauth
+
+      - name: Checkout AstrBot compatibility revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: AstrBotDevs/AstrBot
+          ref: c4616578d610c237766a5d497f9db4b607d1c75b
+          path: AstrBot
+
+      - name: Install uv
+        run: python3.12 -m pip install --disable-pip-version-check "uv==0.9.9"
+
+      - name: Install plugin lint dependencies
+        working-directory: astrbot_plugin_openai_oauth
+        run: uv sync --frozen
+
+      - name: Lint plugin
+        working-directory: astrbot_plugin_openai_oauth
+        run: |
+          uv run ruff format --check .
+          uv run ruff check .
+
+      - name: Install AstrBot test environment
+        working-directory: AstrBot
+        run: uv sync --frozen
+
+      - name: Run plugin integration regressions
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/AstrBot/data/plugins"
+          ln -s "$GITHUB_WORKSPACE/astrbot_plugin_openai_oauth" \
+            "$GITHUB_WORKSPACE/AstrBot/data/plugins/astrbot_plugin_openai_oauth"
+          "$GITHUB_WORKSPACE/AstrBot/.venv/bin/python" \
+            "$GITHUB_WORKSPACE/astrbot_plugin_openai_oauth/tests/credential_store_test.py"
+          "$GITHUB_WORKSPACE/AstrBot/.venv/bin/python" \
+            "$GITHUB_WORKSPACE/astrbot_plugin_openai_oauth/tests/protocol_test.py"
+          "$GITHUB_WORKSPACE/AstrBot/.venv/bin/python" \
+            "$GITHUB_WORKSPACE/astrbot_plugin_openai_oauth/tests/login_test.py"
+          "$GITHUB_WORKSPACE/AstrBot/.venv/bin/python" \
+            "$GITHUB_WORKSPACE/astrbot_plugin_openai_oauth/tests/security_test.py"
+          "$GITHUB_WORKSPACE/AstrBot/.venv/bin/python" \
+            "$GITHUB_WORKSPACE/astrbot_plugin_openai_oauth/tests/wiring_test.py"
+          "$GITHUB_WORKSPACE/AstrBot/.venv/bin/python" \
+            "$GITHUB_WORKSPACE/astrbot_plugin_openai_oauth/tests/smoke_test.py"

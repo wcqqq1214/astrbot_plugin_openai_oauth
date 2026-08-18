@@ -36,6 +36,14 @@ an OAuth token obtained from a device-code login, so billing draws on your
    adds a provider of type **OpenAI Subscribe** in the WebUI model configuration
    and writes the credentials into the provider's `key` field.
 
+   The page shows a redacted account state (not signed in, ready, refreshing,
+   reauthorization required, quota cooling, or temporarily degraded). You can
+   explicitly select **Check quota** and can **Cancel login** while a device code
+   is pending. Loading the page only reads local status; it does not query quota
+   automatically. One provider source represents one ChatGPT account. When that
+   subscription reaches quota, the plugin reports its cooling state and known
+   reset time instead of automatically rotating to another account.
+
    If the WebUI is unavailable, send `/openai_login` in an administrator's
    **private/direct chat**. The ADMIN-only command promptly sends the OpenAI
    verification URL and one-time device code, then polls, exchanges, and saves
@@ -111,30 +119,36 @@ WebUI label directly.
   access token appears only in requests to these two hosts and is never sent
   anywhere else.
 - `proxy` is empty by default (direct connection); configure it only when your
-  network cannot reach OpenAI directly — requests are then forwarded through
-  that proxy. For cloud or Docker deployments that use an authorized outbound
-  proxy, you must set both standard `HTTP_PROXY` and `HTTPS_PROXY` environment
-  variables on the **AstrBot container** and leave the plugin's own `proxy`
-  setting empty; a non-empty plugin proxy takes precedence over the environment
-  variables. OpenAI endpoints use HTTPS, so `HTTP_PROXY` alone does not proxy
-  those requests. This plugin does not provide proxy nodes, subscriptions,
-  routing rules, or traffic-shaping tutorials.
-  `originator` defaults to `codex_cli_rs`, matching the official Codex CLI
-  (Cloudflare allows first-party clients by this header); it is configurable so
-  it can follow whatever value OpenAI accepts next, without a plugin release.
+  network cannot reach OpenAI directly. Device login, token refresh, model
+  discovery, quota requests, and inference then use that proxy. For cloud or
+  Docker deployments that use an authorized outbound proxy, you must set both
+  standard `HTTP_PROXY` and `HTTPS_PROXY` environment variables on the
+  **AstrBot container** and leave the plugin's own `proxy` setting empty; a
+  non-empty plugin proxy takes precedence over the environment variables.
+  OpenAI endpoints use HTTPS, so `HTTP_PROXY` alone does not proxy those
+  requests. This plugin does not provide proxy nodes, subscriptions, routing
+  rules, or traffic-shaping tutorials. `originator` defaults to `codex_cli_rs`,
+  matching the official Codex CLI (Cloudflare allows first-party clients by this
+  header); it is configurable so it can follow whatever value OpenAI accepts
+  next, without a plugin release.
 - A login response with `unsupported_country_region_territory` is OpenAI's
   determination of deployment-egress availability, not a plugin error. Use a
   deployment network that meets OpenAI service-availability and account
   requirements; the plugin does not and cannot bypass such restrictions.
-- The native Plugin Page calls `device/start` / `device/poll` through AstrBot's
-  authenticated Dashboard bridge. These APIs accept WebUI user sessions, not
-  general API keys. Device sessions are user-bound, bounded and cleaned up
-  after completion or expiry. The ADMIN-only private `/openai_login` fallback
-  uses the same server-side flow. OAuth credentials are exchanged and saved only
-  on the server and are never returned to the browser. Stored credentials
+- The native Plugin Page calls `device/start`, `device/poll`, `device/cancel`,
+  `account/status`, and `account/usage` through AstrBot's authenticated
+  Dashboard bridge. These APIs accept WebUI user sessions, not general API keys.
+  Device sessions are user-bound, bounded, and cleaned up after cancellation,
+  completion, or expiry. OAuth credentials are exchanged and saved only on the
+  server and are never returned to the browser; status responses do not expose
+  access tokens, refresh tokens, or complete account IDs. The ADMIN-only private
+  `/openai_login` fallback uses the same server-side flow. Stored credentials
   (access_token / refresh_token) live in the provider's `key` field, persisted
   as plaintext in the AstrBot config (`data/cmd_config.json`); restrict read
   access to that file and its backups.
+- This is a native, single-account OpenAI OAuth integration. It does not
+  download, start, or manage CLIProxyAPI; it does not expose a local
+  OpenAI-compatible gateway or automatically rotate accounts.
 - This is a personal-use tool: it runs models on your own ChatGPT subscription
   quota (Codex OAuth) and offers no free-API path. Please make sure your usage
   complies with OpenAI's terms of service.
