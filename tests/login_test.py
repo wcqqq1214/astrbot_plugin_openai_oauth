@@ -445,6 +445,122 @@ def test_private_command_fallback() -> None:
     plugin._cancel_all_command_login_tasks()
 
 
+def test_effort_command() -> None:
+    print("\n=== Session reasoning-effort command ===")
+    handler = next(
+        item
+        for item in star_handlers_registry
+        if item.handler_name == "effort" and item.handler_module_path == plugin.__name__
+    )
+    check(
+        any(
+            isinstance(filter_, PermissionTypeFilter)
+            and filter_.permission_type == PermissionType.ADMIN
+            for filter_ in handler.event_filters
+        ),
+        "/effort keeps the AstrBot ADMIN filter",
+    )
+
+    class _Provider:
+        def __init__(self, provider_type: str) -> None:
+            self.provider_type = provider_type
+            self.provider_config = {"custom_extra_body": {"reasoning_effort": "medium"}}
+
+        def meta(self):
+            return SimpleNamespace(type=self.provider_type)
+
+    class _Context:
+        def __init__(self, provider) -> None:
+            self.provider = provider
+            self.umos: list[str] = []
+
+        async def get_using_provider_async(self, umo: str):
+            self.umos.append(umo)
+            return self.provider
+
+    class _Event:
+        def __init__(self) -> None:
+            self.unified_msg_origin = "test:FriendMessage:effort-session"
+            self.call_llm = True
+            self.sent: list = []
+
+        def should_call_llm(self, value: bool) -> None:
+            self.call_llm = value
+
+        async def send(self, message) -> None:
+            self.sent.append(message)
+
+    provider = _Provider(plugin._PROVIDER_TYPE)
+    context = _Context(provider)
+    plugin_instance = SimpleNamespace(context=context)
+    event = _Event()
+    fake_sp = SimpleNamespace(
+        get_async=mock.AsyncMock(return_value="high"),
+        put_async=mock.AsyncMock(),
+        remove_async=mock.AsyncMock(),
+    )
+
+    async def run() -> None:
+        with mock.patch.object(plugin, "sp", fake_sp):
+            await plugin.OpenAI_OAuth_Plugin.effort(plugin_instance, event, "max")
+            await plugin.OpenAI_OAuth_Plugin.effort(plugin_instance, event)
+            await plugin.OpenAI_OAuth_Plugin.effort(
+                plugin_instance,
+                event,
+                "default",
+            )
+            await plugin.OpenAI_OAuth_Plugin.effort(
+                plugin_instance,
+                event,
+                "unsupported",
+            )
+
+    asyncio.run(run())
+    check(event.call_llm is False, "/effort suppresses the default LLM")
+    check(
+        context.umos == [event.unified_msg_origin] * 4,
+        "/effort resolves the active provider for the current UMO",
+    )
+    fake_sp.put_async.assert_awaited_once_with(
+        "umo",
+        event.unified_msg_origin,
+        plugin._SESSION_EFFORT_KEY,
+        "max",
+    )
+    fake_sp.remove_async.assert_awaited_once_with(
+        "umo",
+        event.unified_msg_origin,
+        plugin._SESSION_EFFORT_KEY,
+    )
+    text = sent_text(event)
+    check("high" in text, "/effort shows the current session override")
+    check("不支持" in text, "/effort rejects unsupported values")
+
+    other_event = _Event()
+    other_context = _Context(_Provider("openai"))
+    other_instance = SimpleNamespace(context=other_context)
+    other_sp = SimpleNamespace(
+        get_async=mock.AsyncMock(),
+        put_async=mock.AsyncMock(),
+        remove_async=mock.AsyncMock(),
+    )
+
+    async def run_other_provider() -> None:
+        with mock.patch.object(plugin, "sp", other_sp):
+            await plugin.OpenAI_OAuth_Plugin.effort(
+                other_instance,
+                other_event,
+                "high",
+            )
+
+    asyncio.run(run_other_provider())
+    other_sp.put_async.assert_not_awaited()
+    check(
+        "未使用 OpenAI Subscribe" in sent_text(other_event),
+        "/effort rejects non-OpenAI providers",
+    )
+
+
 def test_plugin_page_assets() -> None:
     print("\n=== Plugin Page bridge assets ===")
     page_root = os.path.join(os.path.dirname(__file__), "..", "pages", "login")
@@ -478,6 +594,7 @@ def main() -> int:
         test_login_error_and_cancel()
         test_account_status_and_usage_api()
         test_private_command_fallback()
+        test_effort_command()
         test_plugin_page_assets()
     finally:
         plugin._discard_all_login_sessions()

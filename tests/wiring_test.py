@@ -259,6 +259,152 @@ def test_payload_conversion_and_stream_usage() -> None:
     check(retry_options.get("retry_rate_limits") is False, "429 retries are disabled")
 
 
+def test_session_effort_request_override() -> None:
+    print("\n=== Session reasoning-effort request override ===")
+
+    class _FakeStream:
+        def __aiter__(self):
+            async def iterate():
+                yield {"type": "response.output_text.delta", "delta": "ok"}
+                yield {
+                    "type": "response.completed",
+                    "response": {
+                        "id": "resp-effort",
+                        "status": "completed",
+                        "output": [],
+                    },
+                }
+
+            return iterate()
+
+    class _RequestClient:
+        def __init__(self) -> None:
+            self.responses = SimpleNamespace(
+                create=mock.AsyncMock(return_value=_FakeStream())
+            )
+
+    async def collect(provider, session_effort: str | None) -> dict:
+        request_client = _RequestClient()
+
+        async def retry(_label, factory, **_kwargs):
+            return await factory()
+
+        with mock.patch.object(module, "retry_provider_request", new=retry):
+            _ = [
+                item
+                async for item in provider._query_stream(
+                    request_client,
+                    {"model": "gpt-5.4-mini", "input": []},
+                    None,
+                    request_max_retries=1,
+                    session_effort=session_effort,
+                )
+            ]
+        return request_client.responses.create.call_args.kwargs["extra_body"]
+
+    provider = ProviderOpenAICodex(
+        make_config(
+            credentials(),
+            custom_extra_body={
+                "reasoning_effort": "low",
+                "reasoning": {"summary": "auto"},
+            },
+        ),
+        {},
+    )
+    overridden = asyncio.run(collect(provider, "max"))
+    check(
+        overridden.get("reasoning") == {"summary": "auto", "effort": "max"},
+        "session effort overrides only the effective request effort",
+    )
+    check(
+        "reasoning_effort" not in overridden,
+        "session override removes the competing request-level shorthand",
+    )
+    check(
+        provider.provider_config["custom_extra_body"]
+        == {
+            "reasoning_effort": "low",
+            "reasoning": {"summary": "auto"},
+        },
+        "session override does not mutate model configuration",
+    )
+
+    default_provider = ProviderOpenAICodex(
+        make_config(
+            credentials(),
+            custom_extra_body={"reasoning_effort": "high"},
+        ),
+        {},
+    )
+    default_body = asyncio.run(collect(default_provider, None))
+    check(
+        default_body.get("reasoning") == {"effort": "high"},
+        "requests without a session override keep model-level mapping",
+    )
+
+    fake_sp = SimpleNamespace(
+        get_async=mock.AsyncMock(side_effect=["low", "max", "invalid"])
+    )
+
+    async def read_session_overrides() -> tuple[str | None, str | None, str | None]:
+        with mock.patch.object(module, "sp", fake_sp):
+            return (
+                await module._get_session_effort("umo-a"),
+                await module._get_session_effort("umo-b"),
+                await module._get_session_effort("umo-c"),
+            )
+
+    session_values = asyncio.run(read_session_overrides())
+    check(
+        session_values == ("low", "max", None),
+        "session storage validates and isolates effort values",
+    )
+    scope_ids = [call.kwargs["scope_id"] for call in fake_sp.get_async.await_args_list]
+    check(scope_ids == ["umo-a", "umo-b", "umo-c"], "effort lookup uses each UMO")
+
+    captured_efforts: list[str | None] = []
+
+    async def stream_with_captured_effort(
+        _payloads,
+        _tools,
+        *,
+        request_max_retries,
+        session_effort=None,
+    ):
+        captured_efforts.append(session_effort)
+        yield module.LLMResponse(
+            "assistant",
+            result_chain=module.MessageChain().message("ok"),
+        )
+
+    provider._stream_with_current_credentials = stream_with_captured_effort
+    request_sp = SimpleNamespace(get_async=mock.AsyncMock(side_effect=["low", "max"]))
+
+    async def run_provider_sessions() -> None:
+        with mock.patch.object(module, "sp", request_sp):
+            _ = [
+                item
+                async for item in provider.text_chat_stream(
+                    prompt="first",
+                    session_id="umo-a",
+                )
+            ]
+            _ = [
+                item
+                async for item in provider.text_chat_stream(
+                    prompt="second",
+                    session_id="umo-b",
+                )
+            ]
+
+    asyncio.run(run_provider_sessions())
+    check(
+        captured_efforts == ["low", "max"],
+        "text_chat_stream forwards each UMO effort to its own request",
+    )
+
+
 def _provider_with_source(creds: dict) -> tuple[ProviderOpenAICodex, _FakeConfig]:
     conf = _FakeConfig({"provider_sources": [make_source(creds)]})
     module._config_mgr = _FakeConfigManager(conf)
@@ -273,7 +419,9 @@ def test_pre_stream_credential_recovery() -> None:
     class _UnauthorizedError(RuntimeError):
         status_code = 401
 
-    async def query(_client, _payloads, _tools, *, request_max_retries):
+    async def query(
+        _client, _payloads, _tools, *, request_max_retries, session_effort=None
+    ):
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -321,7 +469,9 @@ def test_stream_is_not_replayed_after_output() -> None:
     class _UnauthorizedError(RuntimeError):
         status_code = 401
 
-    async def query(_client, _payloads, _tools, *, request_max_retries):
+    async def query(
+        _client, _payloads, _tools, *, request_max_retries, session_effort=None
+    ):
         nonlocal calls
         calls += 1
         yield module.LLMResponse(
@@ -361,7 +511,9 @@ def test_usage_limit_enters_cooldown() -> None:
         def __init__(self) -> None:
             self.body = {"error": {"code": "usage_limit_reached"}}
 
-    async def query(_client, _payloads, _tools, *, request_max_retries):
+    async def query(
+        _client, _payloads, _tools, *, request_max_retries, session_effort=None
+    ):
         raise _UsageLimitError()
         yield
 
@@ -405,6 +557,7 @@ def main() -> int:
         test_provider_initialization_and_request_client()
         test_hot_reload_and_offline_models()
         test_payload_conversion_and_stream_usage()
+        test_session_effort_request_override()
         test_pre_stream_credential_recovery()
         test_stream_is_not_replayed_after_output()
         test_usage_limit_enters_cooldown()

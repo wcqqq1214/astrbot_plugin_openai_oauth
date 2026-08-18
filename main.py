@@ -17,7 +17,7 @@ from typing import Any
 
 import astrbot.core.message.components as Comp
 from astrbot import logger
-from astrbot.api import AstrBotConfig
+from astrbot.api import AstrBotConfig, sp
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star, register
 from astrbot.api.web import json_response, request
@@ -68,6 +68,50 @@ _REFRESH_SKEW_SECONDS = 120
 
 # WebUI 模型配置里展示的 provider 类型名（也是配置里的 type/id）。
 _PROVIDER_TYPE = "OpenAI Subscribe"
+
+_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+_SESSION_EFFORT_KEY = "openai_oauth_reasoning_effort"
+
+
+def _normalize_effort(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return normalized if normalized in _EFFORT_LEVELS else None
+
+
+async def _get_session_effort(session_id: Any) -> str | None:
+    if not isinstance(session_id, str) or not session_id:
+        return None
+    try:
+        return _normalize_effort(
+            await sp.get_async(
+                scope="umo",
+                scope_id=session_id,
+                key=_SESSION_EFFORT_KEY,
+                default=None,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - use the model default on storage failure
+        logger.warning(
+            "OpenAI Codex session effort lookup failed: %s",
+            type(exc).__name__,
+        )
+        return None
+
+
+def _provider_default_effort(provider: Any) -> str | None:
+    extra_body = provider.provider_config.get("custom_extra_body")
+    if not isinstance(extra_body, dict):
+        return None
+    configured = _normalize_effort(extra_body.get("reasoning_effort"))
+    if configured:
+        return configured
+    reasoning = extra_body.get("reasoning")
+    return _normalize_effort(
+        reasoning.get("effort") if isinstance(reasoning, dict) else None
+    )
+
 
 # Injected by OpenAI_OAuth_Plugin so provider instances can resolve current
 # source-scoped credentials from AstrBot configuration.
@@ -199,6 +243,97 @@ class OpenAI_OAuth_Plugin(Star):
             event.should_call_llm(False)
             return
         await event.send(MessageChain().message(await build_usage_message()))
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("effort")
+    async def effort(
+        self,
+        event: AstrMessageEvent,
+        value: str | None = None,
+    ) -> None:
+        """View or override Codex reasoning effort for the current session."""
+        event.should_call_llm(False)
+        session_id = str(event.unified_msg_origin or "")
+        if not session_id:
+            await event.send(MessageChain().message("当前会话不可用。"))
+            return
+        try:
+            provider = await self.context.get_using_provider_async(umo=session_id)
+        except Exception as exc:  # noqa: BLE001 - fail closed on provider resolution
+            logger.warning(
+                "OpenAI Codex effort provider lookup failed: %s",
+                type(exc).__name__,
+            )
+            await event.send(MessageChain().message("无法识别当前会话的模型。"))
+            return
+        if provider is None or provider.meta().type != _PROVIDER_TYPE:
+            await event.send(
+                MessageChain().message(
+                    "当前会话未使用 OpenAI Subscribe 模型，无法设置推理强度。"
+                )
+            )
+            return
+
+        requested = str(value or "").strip().lower()
+        if not requested:
+            override = await _get_session_effort(session_id)
+            default = _provider_default_effort(provider)
+            if override:
+                message = f"当前会话推理强度：{override}（会话覆盖）。"
+            elif default:
+                message = f"当前会话未设置覆盖，模型默认推理强度：{default}。"
+            else:
+                message = "当前会话未设置推理强度，将使用模型默认行为。"
+            await event.send(
+                MessageChain().message(
+                    f"{message}\n可用值：{', '.join(_EFFORT_LEVELS)}\n"
+                    "用法：/effort <值>；/effort default 恢复模型默认值。"
+                )
+            )
+            return
+
+        if requested == "default":
+            try:
+                await sp.remove_async("umo", session_id, _SESSION_EFFORT_KEY)
+            except Exception as exc:  # noqa: BLE001 - do not hide storage failure
+                logger.error(
+                    "OpenAI Codex session effort removal failed: %s",
+                    type(exc).__name__,
+                )
+                await event.send(
+                    MessageChain().message("恢复模型默认值失败，请稍后重试。")
+                )
+                return
+            await event.send(
+                MessageChain().message(
+                    "已恢复当前会话的模型默认推理强度，下一次 OpenAI 请求生效。"
+                )
+            )
+            return
+
+        effort = _normalize_effort(requested)
+        if effort is None:
+            await event.send(
+                MessageChain().message(
+                    f"不支持的推理强度：{requested}\n"
+                    f"可用值：{', '.join(_EFFORT_LEVELS)}，或使用 default。"
+                )
+            )
+            return
+        try:
+            await sp.put_async("umo", session_id, _SESSION_EFFORT_KEY, effort)
+        except Exception as exc:  # noqa: BLE001 - do not claim an unsaved override
+            logger.error(
+                "OpenAI Codex session effort update failed: %s",
+                type(exc).__name__,
+            )
+            await event.send(MessageChain().message("保存推理强度失败，请稍后重试。"))
+            return
+        await event.send(
+            MessageChain().message(
+                f"已将当前会话推理强度设为 {effort}，下一次 OpenAI 请求生效。"
+            )
+        )
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("openai_login")
@@ -391,6 +526,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         tools,
         *,
         request_max_retries: int | None = None,
+        session_effort: str | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
         """Stream from the Codex backend, which completes with an empty response
         object: the content only arrives as deltas. Assemble the final response
@@ -416,9 +552,19 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         max_tokens = extra_body.pop("max_tokens", None)
         if max_tokens is not None and "max_output_tokens" not in extra_body:
             extra_body["max_output_tokens"] = max_tokens
-        reasoning_effort = extra_body.pop("reasoning_effort", None)
-        if reasoning_effort is not None and "reasoning" not in extra_body:
-            extra_body["reasoning"] = {"effort": reasoning_effort}
+        effective_session_effort = _normalize_effort(session_effort)
+        if effective_session_effort:
+            existing_reasoning = extra_body.get("reasoning")
+            reasoning = (
+                dict(existing_reasoning) if isinstance(existing_reasoning, dict) else {}
+            )
+            reasoning["effort"] = effective_session_effort
+            extra_body["reasoning"] = reasoning
+            extra_body.pop("reasoning_effort", None)
+        else:
+            reasoning_effort = extra_body.pop("reasoning_effort", None)
+            if reasoning_effort is not None and "reasoning" not in extra_body:
+                extra_body["reasoning"] = {"effort": reasoning_effort}
         extra_body.pop("previous_response_id", None)
         extra_body.pop("conversation", None)
         extra_body.pop("store", None)
@@ -702,6 +848,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         tools: Any,
         *,
         request_max_retries: int | None,
+        session_effort: str | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
         coordinator = _get_credential_coordinator()
         retry_after_credential_error = True
@@ -717,6 +864,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                     deepcopy(base_payloads),
                     tools,
                     request_max_retries=request_max_retries,
+                    session_effort=session_effort,
                 ):
                     emitted_chunk = True
                     yield response
@@ -807,10 +955,12 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         )
         if func_tool and not func_tool.empty():
             payloads["tool_choice"] = tool_choice
+        session_effort = await _get_session_effort(session_id)
         async for item in self._stream_with_current_credentials(
             payloads,
             func_tool,
             request_max_retries=request_max_retries,
+            session_effort=session_effort,
         ):
             yield item
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Administrator-only `/effort` controls for per-session Codex reasoning effort.
+
 ## [v1.2.0] - 2026-08-18
 
 ### Added

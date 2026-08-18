@@ -79,6 +79,22 @@
 
 API 参数应填写右列的值，不要直接填写 WebUI 显示名称。
 
+### 按会话调整推理强度
+
+管理员可在任意私聊或群聊的当前会话中使用：
+
+```text
+/effort
+/effort low
+/effort medium
+/effort high
+/effort xhigh
+/effort max
+/effort default
+```
+
+`/effort` 查询当前会话的设置；指定等级会在该会话的下一次 OpenAI 请求中生效；`/effort default` 删除会话覆盖并恢复 WebUI 模型配置的默认值。该命令不会修改模型全局配置，也不会影响其他会话。
+
 ## 网络与凭据流向
 
 - 插件只与 OpenAI 官方域名通信：`auth.openai.com`（OAuth 设备登录、token 刷新）与 `chatgpt.com`（`backend-api/codex` 推理与模型列表、`backend-api/wham/usage` 额度查询）。访问令牌只出现在发给这两个域的请求头/请求体中，不会发往任何第三方。

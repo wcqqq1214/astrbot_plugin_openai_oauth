@@ -111,6 +111,22 @@ been verified to return successfully:
 Enter the value from the right column as the API parameter; do not enter the
 WebUI label directly.
 
+### Per-session reasoning-effort command
+
+Administrators can adjust the current private or group-chat session with:
+
+```text
+/effort
+/effort low
+/effort medium
+/effort high
+/effort xhigh
+/effort max
+/effort default
+```
+
+`/effort` displays the current session setting. A selected level takes effect on the next OpenAI request in that session; `/effort default` removes the session override and restores the model default configured in the WebUI. The command does not modify the global model configuration or affect other sessions.
+
 ## Network and credential flow
 
 - The plugin only talks to OpenAI-owned hosts: `auth.openai.com` (OAuth
