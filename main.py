@@ -258,7 +258,11 @@ class OpenAI_OAuth_Plugin(Star):
             await event.send(MessageChain().message("当前会话不可用。"))
             return
         try:
-            provider = await self.context.get_using_provider_async(umo=session_id)
+            selected_provider_id = event.get_extra("selected_provider")
+            if isinstance(selected_provider_id, str) and selected_provider_id:
+                provider = self.context.get_provider_by_id(selected_provider_id)
+            else:
+                provider = await self.context.get_using_provider_async(umo=session_id)
         except Exception as exc:  # noqa: BLE001 - fail closed on provider resolution
             logger.warning(
                 "OpenAI Codex effort provider lookup failed: %s",

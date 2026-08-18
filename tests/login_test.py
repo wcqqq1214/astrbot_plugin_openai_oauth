@@ -470,19 +470,29 @@ def test_effort_command() -> None:
             return SimpleNamespace(type=self.provider_type)
 
     class _Context:
-        def __init__(self, provider) -> None:
+        def __init__(self, provider, selected_provider=None) -> None:
             self.provider = provider
+            self.selected_provider = selected_provider
             self.umos: list[str] = []
+            self.selected_provider_ids: list[str] = []
 
         async def get_using_provider_async(self, umo: str):
             self.umos.append(umo)
             return self.provider
+
+        def get_provider_by_id(self, provider_id: str):
+            self.selected_provider_ids.append(provider_id)
+            return self.selected_provider
 
     class _Event:
         def __init__(self) -> None:
             self.unified_msg_origin = "test:FriendMessage:effort-session"
             self.call_llm = True
             self.sent: list = []
+            self.extras: dict[str, object] = {}
+
+        def get_extra(self, key: str):
+            return self.extras.get(key)
 
         def should_call_llm(self, value: bool) -> None:
             self.call_llm = value
@@ -535,6 +545,43 @@ def test_effort_command() -> None:
     text = sent_text(event)
     check("high" in text, "/effort shows the current session override")
     check("不支持" in text, "/effort rejects unsupported values")
+
+    selected_event = _Event()
+    selected_event.extras["selected_provider"] = "OpenAI Subscribe/gpt-5.6-luna"
+    selected_context = _Context(
+        _Provider("openai"),
+        _Provider(plugin._PROVIDER_TYPE),
+    )
+    selected_instance = SimpleNamespace(context=selected_context)
+    selected_sp = SimpleNamespace(
+        get_async=mock.AsyncMock(),
+        put_async=mock.AsyncMock(),
+        remove_async=mock.AsyncMock(),
+    )
+
+    async def run_selected_provider() -> None:
+        with mock.patch.object(plugin, "sp", selected_sp):
+            await plugin.OpenAI_OAuth_Plugin.effort(
+                selected_instance,
+                selected_event,
+                "high",
+            )
+
+    asyncio.run(run_selected_provider())
+    check(
+        selected_context.selected_provider_ids == ["OpenAI Subscribe/gpt-5.6-luna"],
+        "/effort honors the WebChat selected provider",
+    )
+    check(
+        selected_context.umos == [],
+        "WebChat selected provider takes precedence over the UMO default",
+    )
+    selected_sp.put_async.assert_awaited_once_with(
+        "umo",
+        selected_event.unified_msg_origin,
+        plugin._SESSION_EFFORT_KEY,
+        "high",
+    )
 
     other_event = _Event()
     other_context = _Context(_Provider("openai"))
