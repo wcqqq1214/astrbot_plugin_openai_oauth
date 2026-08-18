@@ -1,7 +1,7 @@
 <h1 align="center">OpenAI 订阅登录</h1>
 
 <p align="center">
-  <a href="https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/version-1.1.0-4b8bbe?style=flat-square" alt="Version 1.1.0"></a>
+  <a href="https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/version-1.2.0-4b8bbe?style=flat-square" alt="Version 1.2.0"></a>
   <a href="https://github.com/AstrBotDevs/AstrBot"><img src="https://img.shields.io/badge/AstrBot-%E2%89%A54.27.1-4b8bbe?style=flat-square" alt="AstrBot ≥ 4.27.1"></a>
   <img src="https://img.shields.io/badge/Python-%E2%89%A53.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python ≥ 3.12">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="License: AGPL-3.0"></a>
