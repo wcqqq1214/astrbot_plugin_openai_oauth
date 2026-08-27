@@ -61,22 +61,18 @@
 
 ## 想调整模型的思考强度？（可选）
 
-不设置也可以正常使用，模型会采用默认行为。只有你想手动控制思考强度时，才需要做下面的配置：
+不设置也可以正常使用，模型会采用默认行为。AstrBot 的模型编辑器已经提供
+**Reasoning Effort** 预设，不需要再手动新增 `reasoning_effort` 键。
 
 1. 进入模型配置，编辑使用 `OpenAI Subscribe` 的那一个模型。
 2. 找到 **自定义请求体参数（`custom_extra_body`）**。
-3. 填入键名 `reasoning_effort`，值类型选 `string`，点击 **+ 添加**。
-4. 在新出现的一行里填写具体值，最后点击右下角 **确认** 保存。
+3. 在 **Reasoning Effort** 输入框中填写想要的值，然后点击右下角 **确认** 保存。
 
-![添加 reasoning_effort 键](docs/images/reasoning-effort-add-key.png)
+![在内置的 Reasoning Effort 预设中填写 max](docs/images/reasoning-effort-preset-zh.png)
 
-*图 1：填好键名 `reasoning_effort`，并把值类型设为 `string` 后，点击 **+ 添加**。*
+*图：AstrBot 内置的 **Reasoning Effort** 预设。填写 `max` 后点击 **确认** 即可。*
 
-![填写 reasoning_effort 值](docs/images/reasoning-effort-set-value.png)
-
-*图 2：添加成功后填写值，例如 `max`，再点击右下角的 **确认**。*
-
-可填写的值只有下面五个，全部用小写英文：
+本插件支持以下值，填写时请使用小写英文：
 
 | WebUI 里常见的显示名 | 要填写的值 |
 | --- | --- |
@@ -86,14 +82,7 @@
 | Extra High | `xhigh` |
 | Max | `max` |
 
-不要把左侧显示名直接填进去。插件会把这个设置转换成 Codex 所需的请求格式。
-如果你习惯直接编辑 JSON，等价写法是：
-
-```json
-{
-  "reasoning_effort": "max"
-}
-```
+请填写右侧的值，不要把左侧显示名直接填进去。插件会自动转换为 Codex 所需的请求格式。
 
 ### 只给当前会话调整思考强度
 

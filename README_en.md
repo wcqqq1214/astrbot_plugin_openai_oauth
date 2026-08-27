@@ -70,27 +70,20 @@ the sign-in in that private chat; the flow will not start in group chats.
 ## Want to set the reasoning effort? (Optional)
 
 You do not need to configure this for normal use—the model uses its default
-behavior. Only follow these steps if you want to choose the reasoning effort
-yourself:
+behavior. AstrBot's model editor already includes a **Reasoning Effort** preset,
+so you do not need to add a `reasoning_effort` key yourself.
 
 1. Open model configuration and edit the model that uses `OpenAI Subscribe`.
 2. Find **Custom request body parameters (`custom_extra_body`)**.
-3. Enter `reasoning_effort` as the key, choose `string` as the value type, and
-   click **+ Add**.
-4. Enter the desired value in the new row, then click **Confirm** in the lower
-   right corner to save.
+3. Enter the desired value in **Reasoning Effort**, then click **Confirm** in
+   the lower right corner to save.
 
-![Adding the reasoning_effort key](docs/images/reasoning-effort-add-key.png)
+![Entering max in the built-in Reasoning Effort preset](docs/images/reasoning-effort-preset-en.png)
 
-*Figure 1: Enter `reasoning_effort`, choose `string` as its value type, then
-click **+ Add**.*
+*Figure: AstrBot's built-in **Reasoning Effort** preset. Enter `max`, then
+click **Confirm**.*
 
-![Entering the reasoning_effort value](docs/images/reasoning-effort-set-value.png)
-
-*Figure 2: After adding the key, enter a value such as `max`, then click
-**Confirm** in the lower right corner.*
-
-Use one of these five lowercase values:
+This plugin supports these lowercase values:
 
 | Common WebUI label | Value to enter |
 | --- | --- |
@@ -100,14 +93,8 @@ Use one of these five lowercase values:
 | Extra High | `xhigh` |
 | Max | `max` |
 
-Do not enter the label from the left column. The plugin converts the setting to
-the format Codex expects. If you prefer editing JSON directly, use:
-
-```json
-{
-  "reasoning_effort": "max"
-}
-```
+Enter the value from the right column rather than the label on the left. The
+plugin converts it to the format Codex expects.
 
 ### Set reasoning effort for only the current session
 
