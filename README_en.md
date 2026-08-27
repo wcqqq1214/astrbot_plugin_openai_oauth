@@ -1,4 +1,4 @@
-<h1 align="center">OpenAI 订阅登录</h1>
+<h1 align="center">OpenAI Subscription Sign-in</h1>
 
 <p align="center">
   <a href="https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/version-1.2.0-4b8bbe?style=flat-square" alt="Version 1.2.0"></a>
@@ -15,92 +15,85 @@
   <a href="README.md">简体中文</a>
 </p>
 
-An [AstrBot](https://astrbot.app) provider plugin: log in with your ChatGPT
-account (Plus / Pro subscription) and use its quota as a model provider —
-no API key needed.
+This plugin connects your ChatGPT account to AstrBot. After you sign in,
+AstrBot gets an `OpenAI Subscribe` model source. Choose a model from that
+source to use your ChatGPT/Codex quota—no separate OpenAI API key is needed.
 
-It registers an `OpenAI Subscribe` provider in the WebUI model configuration. AI
-calls go through OpenAI's Codex backend (`chatgpt.com/backend-api/codex`) with
-an OAuth token obtained from a device-code login, so billing draws on your
-**subscription**, not prepaid API credits.
-## Usage
+In short: usage counts against the Codex quota available to your ChatGPT
+account, not your prepaid OpenAI API balance.
 
-1. Install the plugin from the AstrBot plugin market (or clone it into
-   `data/plugins/`).
-2. Log in with your ChatGPT account. On the WebUI plugin detail page, open the
-   native AstrBot **Plugin Page** named `login` and click **Start login**. Copy
-   the OpenAI verification URL shown there, enter the device code, and approve.
-   The page calls the plugin through the Dashboard bridge; do not open a raw
-   `/api/v1/plugins/extensions/...` URL. The iframe never reads the Dashboard
-   JWT, cookies, or OAuth tokens. After login succeeds, the server automatically
-   adds a provider of type **OpenAI Subscribe** in the WebUI model configuration
-   and writes the credentials into the provider's `key` field.
+## Before you start
 
-   The page shows a redacted account state (not signed in, ready, refreshing,
-   reauthorization required, quota cooling, or temporarily degraded). You can
-   explicitly select **Check quota** and can **Cancel login** while a device code
-   is pending. Loading the page only reads local status; it does not query quota
-   automatically. One provider source represents one ChatGPT account. When that
-   subscription reaches quota, the plugin reports its cooling state and known
-   reset time instead of automatically rotating to another account.
+- Use AstrBot `4.27.1` or later.
+- You need a ChatGPT account that can use Codex.
+- If your Dashboard is publicly reachable, use HTTPS, a VPN, or an SSH tunnel.
+  Device-code sign-in also works over plain HTTP, but the Dashboard session can
+  be intercepted, so it is not recommended.
+- In ChatGPT, open **Settings → Security and login** and turn on
+  **Enable device code authorization for Codex**. The wording can vary slightly
+  by language; searching for “device code” is often the quickest way to find it.
 
-   If the WebUI is unavailable, send `/openai_login` in an administrator's
-   **private/direct chat**. The ADMIN-only command promptly sends the OpenAI
-   verification URL and one-time device code, then polls, exchanges, and saves
-   credentials on the AstrBot server. Tokens are never sent to chat, and group
-   chats do not start the flow.
+![Enable Codex device-code authorization in ChatGPT settings](docs/images/enable-device-code-auth-codex.png)
 
-   HTTPS, a VPN, or an SSH tunnel is strongly recommended for the entire public
-   Dashboard because plain HTTP exposes the Dashboard session. HTTPS is not a
-   plugin-level requirement for this device-code flow: once AstrBot has
-   authenticated the Dashboard user, a public-IP HTTP Plugin Page can call
-   `device/start` and `device/poll`; the page shows a prominent risk warning.
-   Prefer securing the whole Dashboard rather than relying on plain HTTP.
+*Figure: The switch is on ChatGPT's **Security and login** page. Its label in
+the screenshot is **Enable device code authorization for Codex**.*
 
-   > Device-code login must be enabled in your ChatGPT security settings
-   > (“Enable device code authentication for Codex”); the page reports it if
-   > not.
+> Treat a device code like a password: enter it only on OpenAI's verification
+> page, and never share it with anyone.
 
-   ![Enable Codex device-code authorization in ChatGPT settings](docs/images/enable-device-code-auth-codex.png)
+## Sign in in five steps
 
-   *Figure: Turn on **Enable device code authorization for Codex** under ChatGPT's **Security and login** settings.*
+1. Install the plugin from the AstrBot plugin marketplace. For a manual
+   installation, place the project in `data/plugins/`.
+2. Open this plugin's detail page and enter its **Plugin Page** (the sign-in
+   page). Click **Start login**.
+3. The page shows an OpenAI verification URL and a device code. Open the URL,
+   sign in to ChatGPT, enter the code, and approve the request.
+4. Return to AstrBot and wait for the “Login succeeded” message. Credentials are
+   stored only on the AstrBot server; they are not shown in the browser or chat.
+5. Open AstrBot's model configuration. Create or choose a model that uses the
+   `OpenAI Subscribe` source, enable it, and you are ready to go.
 
-3. Pick a model and enable the provider.
+The sign-in page can also show account status and quota. You can select
+**Cancel login** while a device code is still waiting for approval. After you
+sign in, `/usage` in chat also shows your quota.
 
-### Optional reasoning-effort setting
+If the WebUI is unavailable, an administrator can send this in a **private
+chat** with the bot:
 
-In the WebUI model configuration, edit the specific model under
-`OpenAI Subscribe`, find `custom_extra_body`, and add a new entry in the
-visual editor:
+```text
+/openai_login
+```
 
-- Key: `reasoning_effort`
-- Value type: `string`
-- Value: `low`, `medium`, `high`, `xhigh`, or `max`
+The bot replies with the verification URL and a one-time device code. Complete
+the sign-in in that private chat; the flow will not start in group chats.
 
-Visual editor examples:
+## Want to set the reasoning effort? (Optional)
+
+You do not need to configure this for normal use—the model uses its default
+behavior. Only follow these steps if you want to choose the reasoning effort
+yourself:
+
+1. Open model configuration and edit the model that uses `OpenAI Subscribe`.
+2. Find **Custom request body parameters (`custom_extra_body`)**.
+3. Enter `reasoning_effort` as the key, choose `string` as the value type, and
+   click **+ Add**.
+4. Enter the desired value in the new row, then click **Confirm** in the lower
+   right corner to save.
 
 ![Adding the reasoning_effort key](docs/images/reasoning-effort-add-key.png)
 
-*Figure 1: Add the `reasoning_effort` key and set its value type to `string`.*
+*Figure 1: Enter `reasoning_effort`, choose `string` as its value type, then
+click **+ Add**.*
 
 ![Entering the reasoning_effort value](docs/images/reasoning-effort-set-value.png)
 
-*Figure 2: Enter an API parameter value, such as `max`.*
+*Figure 2: After adding the key, enter a value such as `max`, then click
+**Confirm** in the lower right corner.*
 
-If you edit the underlying JSON directly, the equivalent configuration is:
+Use one of these five lowercase values:
 
-```json
-{
-  "reasoning_effort": "max"
-}
-```
-
-The plugin converts this to the Codex Responses API shape
-`{"reasoning": {"effort": "max"}}`. For the GPT-5.6 family
-(`gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol`), the following levels have
-been verified to return successfully:
-
-| WebUI label | API `reasoning_effort` value |
+| Common WebUI label | Value to enter |
 | --- | --- |
 | Light | `low` |
 | Medium | `medium` |
@@ -108,12 +101,19 @@ been verified to return successfully:
 | Extra High | `xhigh` |
 | Max | `max` |
 
-Enter the value from the right column as the API parameter; do not enter the
-WebUI label directly.
+Do not enter the label from the left column. The plugin converts the setting to
+the format Codex expects. If you prefer editing JSON directly, use:
 
-### Per-session reasoning-effort command
+```json
+{
+  "reasoning_effort": "max"
+}
+```
 
-Administrators can adjust the current private or group-chat session with:
+### Set reasoning effort for only the current session
+
+Administrators can use these commands in the current private or group-chat
+session:
 
 ```text
 /effort
@@ -125,49 +125,34 @@ Administrators can adjust the current private or group-chat session with:
 /effort default
 ```
 
-`/effort` displays the current session setting. A selected level takes effect on the next OpenAI request in that session; `/effort default` removes the session override and restores the model default configured in the WebUI. The command does not modify the global model configuration or affect other sessions.
+`/effort` shows the current setting. A chosen value takes effect on the next
+request. `/effort default` removes the session override and restores the model
+default. It does not change other sessions or the model's global configuration.
 
-## Network and credential flow
+## Network, quota, and security
 
-- The plugin only talks to OpenAI-owned hosts: `auth.openai.com` (OAuth
-  device login, token refresh) and `chatgpt.com` (`backend-api/codex` for
-  inference and the model catalog, `backend-api/wham/usage` for quota). The
-  access token appears only in requests to these two hosts and is never sent
-  anywhere else.
-- `proxy` is empty by default (direct connection); configure it only when your
-  network cannot reach OpenAI directly. Device login, token refresh, model
-  discovery, quota requests, and inference then use that proxy. For cloud or
-  Docker deployments that use an authorized outbound proxy, you must set both
-  standard `HTTP_PROXY` and `HTTPS_PROXY` environment variables on the
-  **AstrBot container** and leave the plugin's own `proxy` setting empty; a
-  non-empty plugin proxy takes precedence over the environment variables.
-  OpenAI endpoints use HTTPS, so `HTTP_PROXY` alone does not proxy those
-  requests. This plugin does not provide proxy nodes, subscriptions, routing
-  rules, or traffic-shaping tutorials. `originator` defaults to `codex_cli_rs`,
-  matching the official Codex CLI (Cloudflare allows first-party clients by this
-  header); it is configurable so it can follow whatever value OpenAI accepts
-  next, without a plugin release.
-- A login response with `unsupported_country_region_territory` is OpenAI's
-  determination of deployment-egress availability, not a plugin error. Use a
-  deployment network that meets OpenAI service-availability and account
-  requirements; the plugin does not and cannot bypass such restrictions.
-- The native Plugin Page calls `device/start`, `device/poll`, `device/cancel`,
-  `account/status`, and `account/usage` through AstrBot's authenticated
-  Dashboard bridge. These APIs accept WebUI user sessions, not general API keys.
-  Device sessions are user-bound, bounded, and cleaned up after cancellation,
-  completion, or expiry. OAuth credentials are exchanged and saved only on the
-  server and are never returned to the browser; status responses do not expose
-  access tokens, refresh tokens, or complete account IDs. The ADMIN-only private
-  `/openai_login` fallback uses the same server-side flow. Stored credentials
-  (access_token / refresh_token) live in the provider's `key` field, persisted
-  as plaintext in the AstrBot config (`data/cmd_config.json`); restrict read
-  access to that file and its backups.
-- This is a native, single-account OpenAI OAuth integration. It does not
-  download, start, or manage CLIProxyAPI; it does not expose a local
-  OpenAI-compatible gateway or automatically rotate accounts.
-- This is a personal-use tool: it runs models on your own ChatGPT subscription
-  quota (Codex OAuth) and offers no free-API path. Please make sure your usage
-  complies with OpenAI's terms of service.
+- With the default direct connection, the plugin talks only to OpenAI's
+  `auth.openai.com` and `chatgpt.com` hosts for sign-in, token refresh, model
+  discovery, quota checks, and inference.
+- Configure the plugin's `proxy` only when the network cannot reach OpenAI
+  directly. For an authorized outbound proxy in Docker or on a cloud server,
+  set both `HTTP_PROXY` and `HTTPS_PROXY` in the **AstrBot container** and leave
+  the plugin's own `proxy` empty. A non-empty plugin `proxy` takes precedence.
+- Credentials are never returned to the browser or sent to chat, but they are
+  stored in plaintext in AstrBot's `data/cmd_config.json`. Limit read access to
+  that file and its backups.
+- One `OpenAI Subscribe` model source represents one ChatGPT account. When the
+  quota is exhausted, the page shows the cooldown and reset time; the plugin
+  does not rotate accounts automatically.
+- If you see `unsupported_country_region_territory`, OpenAI does not accept the
+  deployment egress network or account conditions. The plugin cannot bypass
+  that restriction.
+- This is a personal OAuth integration. It does not download or manage
+  CLIProxyAPI, and it does not provide a local OpenAI-compatible gateway or a
+  free API.
+
+Use your own account and make sure your use complies with OpenAI's terms of
+service.
 
 ## License
 
