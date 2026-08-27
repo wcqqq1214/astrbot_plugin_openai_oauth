@@ -6,8 +6,6 @@ const text = isEnglish
   ? {
       title: "OpenAI subscription login",
       intro: "Authorize with a ChatGPT device code. Credentials stay on the AstrBot server.",
-      warning:
-        "This Dashboard is using plain HTTP. The Dashboard session may be intercepted; HTTPS, a VPN, or an SSH tunnel is recommended.",
       accountTitle: "Account status",
       checkUsage: "Check quota",
       checkingUsage: "Checking quota…",
@@ -49,8 +47,6 @@ const text = isEnglish
   : {
       title: "OpenAI 订阅登录",
       intro: "使用 ChatGPT 设备码完成授权，凭据会由 AstrBot 服务端保存。",
-      warning:
-        "当前 Dashboard 使用明文 HTTP，会话可能被网络窃听；建议为整个 Dashboard 使用 HTTPS、VPN 或 SSH 隧道。",
       accountTitle: "账号状态",
       checkUsage: "查询额度",
       checkingUsage: "正在查询额度……",
@@ -123,12 +119,6 @@ usageButton.textContent = text.checkUsage;
 startButton.textContent = text.start;
 cancelButton.textContent = text.cancel;
 
-if (window.location.protocol === "http:") {
-  const warning = byId("transport-warning");
-  warning.hidden = false;
-  warning.querySelector("span").textContent = text.warning;
-}
-
 function setStatus(message) {
   status.textContent = message;
   error.hidden = true;
@@ -171,7 +161,11 @@ function formatReset(timestamp) {
   if (!Number.isFinite(value) || value <= 0) {
     return "";
   }
-  return ` · ${text.reset} ${new Date(value * 1000).toLocaleString()}`;
+  const date = new Date(value * 1000);
+  if (isEnglish) {
+    return ` · ${text.reset} ${date.toLocaleString()}`;
+  }
+  return ` · 将于 ${date.toLocaleString("zh-CN", { hour12: false })} 重置`;
 }
 
 function renderAccountStatus(result) {
