@@ -30,7 +30,7 @@
 - 打开 ChatGPT 的 **设置 → 账户安全与登录**，开启
   **为 Codex 启用设备代码授权**。
 
-![在 ChatGPT 账户安全与登录设置中启用 Codex 设备代码授权](docs/images/enable-device-code-auth-codex-zh.png)
+![在 ChatGPT 账户安全与登录设置中启用 Codex 设备代码授权](images/enable-device-code-auth-codex-zh.png)
 
 *图：在 ChatGPT 的 **设置 → 账户安全与登录** 中，打开
 **为 Codex 启用设备代码授权**。*
@@ -67,7 +67,7 @@
 2. 找到 **自定义请求体参数（`custom_extra_body`）**。
 3. 在 **Reasoning Effort** 输入框中填写想要的值，然后点击右下角 **确认** 保存。
 
-![在内置的 Reasoning Effort 预设中填写 max](docs/images/reasoning-effort-preset-zh.png)
+![在内置的 Reasoning Effort 预设中填写 max](images/reasoning-effort-preset-zh.png)
 
 *图：AstrBot 内置的 **Reasoning Effort** 预设。填写 `max` 后点击 **确认** 即可。*
 

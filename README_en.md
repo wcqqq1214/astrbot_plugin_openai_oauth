@@ -32,7 +32,7 @@ account, not your prepaid OpenAI API balance.
 - In ChatGPT, open **Settings → Security and login** and turn on
   **Enable device code authorization for Codex**.
 
-![Enable Codex device-code authorization in ChatGPT settings](docs/images/enable-device-code-auth-codex.png)
+![Enable Codex device-code authorization in ChatGPT settings](images/enable-device-code-auth-codex.png)
 
 *Figure: The switch is on ChatGPT's **Security and login** page. Its label in
 the screenshot is **Enable device code authorization for Codex**.*
@@ -77,7 +77,7 @@ behavior.
 3. Enter the desired value in **Reasoning Effort**, then click **Confirm** in
    the lower right corner to save.
 
-![Entering max in the built-in Reasoning Effort preset](docs/images/reasoning-effort-preset-en.png)
+![Entering max in the built-in Reasoning Effort preset](images/reasoning-effort-preset-en.png)
 
 *Figure: AstrBot's built-in **Reasoning Effort** preset. Enter `max`, then
 click **Confirm**.*
