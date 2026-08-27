@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [v1.3.0] - 2026-08-28
+
 ### Added
 
 - Administrator-only `/effort` controls for per-session Codex reasoning effort.
+
+### Fixed
+
+- Apply the session reasoning-effort override to the provider selected in WebChat.
 
 ## [v1.2.0] - 2026-08-18
 
