@@ -70,8 +70,7 @@ the sign-in in that private chat; the flow will not start in group chats.
 ## Want to set the reasoning effort? (Optional)
 
 You do not need to configure this for normal use—the model uses its default
-behavior. AstrBot's model editor already includes a **Reasoning Effort** preset,
-so you do not need to add a `reasoning_effort` key yourself.
+behavior.
 
 1. Open model configuration and edit the model that uses `OpenAI Subscribe`.
 2. Find **Custom request body parameters (`custom_extra_body`)**.

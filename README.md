@@ -61,8 +61,7 @@
 
 ## 想调整模型的思考强度？（可选）
 
-不设置也可以正常使用，模型会采用默认行为。AstrBot 的模型编辑器已经提供
-**Reasoning Effort** 预设，不需要再手动新增 `reasoning_effort` 键。
+不设置也可以正常使用，模型会采用默认行为。
 
 1. 进入模型配置，编辑使用 `OpenAI Subscribe` 的那一个模型。
 2. 找到 **自定义请求体参数（`custom_extra_body`）**。
