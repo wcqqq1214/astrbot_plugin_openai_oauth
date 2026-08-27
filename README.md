@@ -15,61 +15,71 @@
   <a href="README_en.md">English</a>
 </p>
 
-一个 [AstrBot](https://astrbot.app) 插件：用你的 ChatGPT 账号（Plus / Pro 订阅）登录，将账号订阅额度作为模型 provider 使用——无需 API Key。
+这个插件把你的 ChatGPT 账号接到 AstrBot 里。登录后，AstrBot 会多出一个
+`OpenAI Subscribe` 模型来源；选择它的模型即可使用 ChatGPT/Codex 的额度，
+不用另外创建或填写 OpenAI API Key。
 
-它在 WebUI 模型配置中注册了一个 `OpenAI Subscribe` provider。AI 调用通过 OpenAI 的 Codex 后端（`chatgpt.com/backend-api/codex`）发出，使用设备码登录获取的 OAuth token，因此计费走你的**订阅额度**，而不是预付的 API 余额。
+简单说：这里消耗的是 ChatGPT 账号可用的 Codex 额度，不是 OpenAI API 预付余额。
 
-## 使用方法
+## 开始前，先确认这几件事
 
-1. 从 AstrBot 插件市场安装（或克隆到 `data/plugins/`）。
-2. 登录你的 ChatGPT 账号。在 WebUI 插件详情页打开 AstrBot 原生 **Plugin Page**（登录页），点击 **开始登录**，复制页面显示的 OpenAI 验证网址并输入设备码完成授权。页面通过 Dashboard bridge 调用插件接口，不需要手动打开任何 `/api/v1/plugins/extensions/...` 地址；浏览器不会接触 Dashboard JWT、Cookie 或 access token / refresh token。登录成功后，服务端会在 WebUI 模型配置中自动添加一个类型为 **OpenAI Subscribe** 的 provider，并将凭据写入 provider 的 `key` 字段。
+- AstrBot 版本需要为 `4.27.1` 或更高。
+- 你需要一个可以使用 Codex 的 ChatGPT 账号。
+- 如果 Dashboard 暴露在公网，请优先配置 HTTPS、VPN 或 SSH 隧道。明文 HTTP
+  也能完成设备码登录，但 Dashboard 会话可能被窃取，不建议这样用。
+- 打开 ChatGPT 的 **Settings → Security and login**，开启
+  **Enable device code authorization for Codex**。不同语言界面的文字可能略有差异，
+  搜索 “device code” 也能更快找到它。
 
-   登录页会显示脱敏状态（未登录、可用、刷新中、需要重新登录、额度冷却或暂时异常），可以显式点击 **查询额度**，也可以在设备码授权期间点击 **取消登录**。页面加载只读取本地状态，不会自动发起额度请求。当前设计为一个 provider source 对应一个 ChatGPT 账号；达到订阅额度后会显示冷却和已知重置时间，不会自动轮换其他账号。
+![在 ChatGPT 安全设置中启用 Codex 设备码授权](docs/images/enable-device-code-auth-codex.png)
 
-   如果无法使用 WebUI，也可以在管理员的**私聊**中发送 `/openai_login`。该命令仅允许管理员使用，会及时发送 OpenAI 验证网址和一次性设备码，然后由 AstrBot 服务端后台轮询、交换并保存凭据；令牌不会发送到聊天。群聊中不会启动设备码流程。
+*图：开关位于 ChatGPT 的 **Security and login** 页面。截图中的名称是
+**Enable device code authorization for Codex**。*
 
-   HTTPS/VPN/SSH 隧道仍然强烈建议用于整个公网 Dashboard，因为明文 HTTP 会暴露 Dashboard 会话。HTTPS 不是本插件设备码流程的强制条件：只要 AstrBot Dashboard 已经完成身份认证，公网 IP + HTTP 的 Plugin Page 也可以调用 `device/start` 和 `device/poll`；页面会显示风险警告。请优先为整个 Dashboard 配置 HTTPS 或安全隧道。
+> 设备码和密码一样敏感：只在 OpenAI 的验证页面输入，不要发给别人。
 
-   > 需要在你的 ChatGPT 安全设置中开启设备码登录（“Enable device code authentication for Codex”）；未开启时页面会提示。
+## 登录：按这几步做就行
 
-   ![在 ChatGPT 安全设置中启用 Codex 设备码授权](docs/images/enable-device-code-auth-codex.png)
+1. 在 AstrBot 插件市场安装本插件；手动安装则把项目放进 `data/plugins/`。
+2. 打开该插件的详情页，进入它的 **Plugin Page**（登录页），点击 **开始登录**。
+3. 页面会给出一个 OpenAI 验证网址和一串设备码。打开该网址，登录你的 ChatGPT
+   账号，然后输入设备码并确认授权。
+4. 回到 AstrBot，等待页面显示“登录成功”。凭据只会保存在 AstrBot 服务端，不会显示在
+   浏览器或聊天消息里。
+5. 前往 AstrBot 的模型配置，使用 `OpenAI Subscribe` 这个模型来源新建或选择模型，
+   启用后即可使用。
 
-   *图：在 ChatGPT 的 **Security and login** 设置中开启 **Enable device code authorization for Codex**。*
+登录页还可以查看账号状态和订阅额度；设备码还在等待授权时，也可以点 **取消登录**。
+登录后，在聊天中发送 `/usage` 也能查询额度。
 
-3. 选择模型，并启用该 provider。
+如果暂时打不开 WebUI，管理员可以在与机器人的**私聊**中发送：
 
-### 设置模型思考强度（可选）
+```text
+/openai_login
+```
 
-在 WebUI 的模型配置中，打开 `OpenAI Subscribe` 下具体模型的编辑窗口，找到
-`自定义请求体参数（custom_extra_body）`。在可视化编辑器中点击添加，填写：
+机器人会回复验证网址和一次性设备码。请在私聊里完成它；群聊不会启动登录流程。
 
-- 键名：`reasoning_effort`
-- 值类型：`string`
-- 值：`low`、`medium`、`high`、`xhigh` 或 `max`
+## 想调整模型的思考强度？（可选）
 
-可视化编辑器示例：
+不设置也可以正常使用，模型会采用默认行为。只有你想手动控制思考强度时，才需要做下面的配置：
+
+1. 进入模型配置，编辑使用 `OpenAI Subscribe` 的那一个模型。
+2. 找到 **自定义请求体参数（`custom_extra_body`）**。
+3. 填入键名 `reasoning_effort`，值类型选 `string`，点击 **+ 添加**。
+4. 在新出现的一行里填写具体值，最后点击右下角 **确认** 保存。
 
 ![添加 reasoning_effort 键](docs/images/reasoning-effort-add-key.png)
 
-*图 1：添加 `reasoning_effort` 键，并将值类型设为 `string`。*
+*图 1：填好键名 `reasoning_effort`，并把值类型设为 `string` 后，点击 **+ 添加**。*
 
 ![填写 reasoning_effort 值](docs/images/reasoning-effort-set-value.png)
 
-*图 2：填写 API 参数值，例如 `max`。*
+*图 2：添加成功后填写值，例如 `max`，再点击右下角的 **确认**。*
 
-如果直接编辑底层 JSON，等价配置为：
+可填写的值只有下面五个，全部用小写英文：
 
-```json
-{
-  "reasoning_effort": "max"
-}
-```
-
-插件会把它转换为 Codex Responses API 的
-`{"reasoning": {"effort": "max"}}`。对于 GPT-5.6 系列
-（`gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`），已验证以下等级均可正常返回：
-
-| WebUI 显示名称 | API 的 `reasoning_effort` 值 |
+| WebUI 里常见的显示名 | 要填写的值 |
 | --- | --- |
 | Light | `low` |
 | Medium | `medium` |
@@ -77,11 +87,18 @@
 | Extra High | `xhigh` |
 | Max | `max` |
 
-API 参数应填写右列的值，不要直接填写 WebUI 显示名称。
+不要把左侧显示名直接填进去。插件会把这个设置转换成 Codex 所需的请求格式。
+如果你习惯直接编辑 JSON，等价写法是：
 
-### 按会话调整推理强度
+```json
+{
+  "reasoning_effort": "max"
+}
+```
 
-管理员可在任意私聊或群聊的当前会话中使用：
+### 只给当前会话调整思考强度
+
+管理员可以在私聊或群聊的当前会话里使用：
 
 ```text
 /effort
@@ -93,16 +110,21 @@ API 参数应填写右列的值，不要直接填写 WebUI 显示名称。
 /effort default
 ```
 
-`/effort` 查询当前会话的设置；指定等级会在该会话的下一次 OpenAI 请求中生效；`/effort default` 删除会话覆盖并恢复 WebUI 模型配置的默认值。该命令不会修改模型全局配置，也不会影响其他会话。
+`/effort` 用来查看当前设置；指定一个值后，会在下一次请求时生效。
+`/effort default` 会取消这次会话的覆盖，恢复模型配置里的默认值。它不会改动其他会话，
+也不会改掉模型的全局配置。
 
-## 网络与凭据流向
+## 网络、额度和安全
 
-- 插件只与 OpenAI 官方域名通信：`auth.openai.com`（OAuth 设备登录、token 刷新）与 `chatgpt.com`（`backend-api/codex` 推理与模型列表、`backend-api/wham/usage` 额度查询）。访问令牌只出现在发给这两个域的请求头/请求体中，不会发往任何第三方。
-- `proxy` 默认留空（直连），仅当你的网络无法直连 OpenAI 时才配置；配置后设备码登录、token 刷新、模型列表、额度查询和推理请求都经该代理转发。对于使用已获授权出站代理的云服务器或 Docker 部署，需在 **AstrBot 容器**中同时设置标准环境变量 `HTTP_PROXY` 与 `HTTPS_PROXY`，并保持插件自身的 `proxy` 为空；非空的插件 `proxy` 会优先于环境变量。OpenAI 端点使用 HTTPS，只设置 `HTTP_PROXY` 不会代理这些 HTTPS 请求。本插件不提供代理节点、订阅、分流规则或限速配置教程。`originator` 默认 `codex_cli_rs`，与官方 Codex CLI 一致（Cloudflare 对首方客户端白名单放行）；做成可配置是为了能跟随 OpenAI 后续接受的值，无需等待插件发版。
-- 若登录请求返回 `unsupported_country_region_territory`，这是 OpenAI 对部署出口网络和服务可用性的判定，并非插件错误。请使用符合 OpenAI 服务可用性及账号要求的部署网络；插件不会也不能绕过此类限制。
-- Plugin Page 通过 AstrBot Dashboard bridge 调用 `device/start`、`device/poll`、`device/cancel`、`account/status` 和 `account/usage`，只接受已认证的 WebUI 用户会话，不接受通用 API Key。设备会话与登录用户绑定、数量受限，并在取消、完成或超时后清理。OAuth 凭据只在服务端交换和保存，不会返回浏览器；状态接口不会返回 token、refresh token 或完整 account ID。管理员私聊 `/openai_login` 使用同一套服务端设备码流程。登录后的凭据（access_token / refresh_token）保存在 provider 的 `key` 字段，落盘为 AstrBot 配置（`data/cmd_config.json`）中的明文；请限制该文件及备份的读取权限。
-- 本插件是原生单账号 OpenAI OAuth 集成：不会下载、启动或管理 CLIProxyAPI，也不提供本地 OpenAI-compatible 网关或自动账号轮换。
-- 本项目是个人自用工具：用你自己的 ChatGPT 账号订阅额度（Codex OAuth）跑模型，不提供免费 API 途径。请自行确认你的使用方式符合 OpenAI 服务条款。
+- 默认直连时，插件只会访问 OpenAI 的 `auth.openai.com` 和 `chatgpt.com`。登录、刷新凭据、获取模型、查询额度和调用模型都走这两个域名。
+- 只有网络无法直连 OpenAI 时才需要填写插件的 `proxy`。如果 AstrBot 跑在 Docker 或云服务器，并使用已获授权的出站代理，请在 **AstrBot 容器**中同时设置 `HTTP_PROXY` 和 `HTTPS_PROXY`，插件自己的 `proxy` 留空即可；插件里填写的 `proxy` 优先级更高。
+- 登录凭据不会返回到浏览器，也不会发到聊天里；但它会以明文保存到 AstrBot 的
+  `data/cmd_config.json`。请限制这个文件及其备份的读取权限。
+- 一个 `OpenAI Subscribe` 模型来源对应一个 ChatGPT 账号。达到额度时，页面会显示冷却和重置时间；插件不会自动轮换账号。
+- 如果看到 `unsupported_country_region_territory`，表示 OpenAI 不接受当前部署出口网络或账号条件。插件无法绕过这个限制。
+- 这是个人自用的 OAuth 集成，不会下载或管理 CLIProxyAPI，也不提供本地 OpenAI 兼容网关或免费 API。
+
+请使用你自己的账号，并确认使用方式符合 OpenAI 的服务条款。
 
 ## License / 许可证
 
