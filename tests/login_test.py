@@ -630,7 +630,10 @@ def test_plugin_page_assets() -> None:
         "page does not read credentials",
     )
     check("Authorization" not in app, "page does not handle Dashboard tokens")
-    check("location.protocol" in app and "HTTPS" in app, "page warns on plain HTTP")
+    check(
+        "transport-warning" not in html and "location.protocol" not in app,
+        "page does not render an HTTP warning",
+    )
 
 
 def main() -> int:
