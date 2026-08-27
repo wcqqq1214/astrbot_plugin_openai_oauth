@@ -30,8 +30,7 @@ account, not your prepaid OpenAI API balance.
   Device-code sign-in also works over plain HTTP, but the Dashboard session can
   be intercepted, so it is not recommended.
 - In ChatGPT, open **Settings → Security and login** and turn on
-  **Enable device code authorization for Codex**. The wording can vary slightly
-  by language; searching for “device code” is often the quickest way to find it.
+  **Enable device code authorization for Codex**.
 
 ![Enable Codex device-code authorization in ChatGPT settings](docs/images/enable-device-code-auth-codex.png)
 
@@ -147,9 +146,6 @@ default. It does not change other sessions or the model's global configuration.
 - If you see `unsupported_country_region_territory`, OpenAI does not accept the
   deployment egress network or account conditions. The plugin cannot bypass
   that restriction.
-- This is a personal OAuth integration. It does not download or manage
-  CLIProxyAPI, and it does not provide a local OpenAI-compatible gateway or a
-  free API.
 
 Use your own account and make sure your use complies with OpenAI's terms of
 service.

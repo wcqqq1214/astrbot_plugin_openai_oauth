@@ -27,14 +27,13 @@
 - 你需要一个可以使用 Codex 的 ChatGPT 账号。
 - 如果 Dashboard 暴露在公网，请优先配置 HTTPS、VPN 或 SSH 隧道。明文 HTTP
   也能完成设备码登录，但 Dashboard 会话可能被窃取，不建议这样用。
-- 打开 ChatGPT 的 **Settings → Security and login**，开启
-  **Enable device code authorization for Codex**。不同语言界面的文字可能略有差异，
-  搜索 “device code” 也能更快找到它。
+- 打开 ChatGPT 的 **设置 → 账户安全与登录**，开启
+  **为 Codex 启用设备代码授权**。
 
-![在 ChatGPT 安全设置中启用 Codex 设备码授权](docs/images/enable-device-code-auth-codex.png)
+![在 ChatGPT 账户安全与登录设置中启用 Codex 设备代码授权](docs/images/enable-device-code-auth-codex-zh.png)
 
-*图：开关位于 ChatGPT 的 **Security and login** 页面。截图中的名称是
-**Enable device code authorization for Codex**。*
+*图：在 ChatGPT 的 **设置 → 账户安全与登录** 中，打开
+**为 Codex 启用设备代码授权**。*
 
 > 设备码和密码一样敏感：只在 OpenAI 的验证页面输入，不要发给别人。
 
@@ -122,7 +121,6 @@
   `data/cmd_config.json`。请限制这个文件及其备份的读取权限。
 - 一个 `OpenAI Subscribe` 模型来源对应一个 ChatGPT 账号。达到额度时，页面会显示冷却和重置时间；插件不会自动轮换账号。
 - 如果看到 `unsupported_country_region_territory`，表示 OpenAI 不接受当前部署出口网络或账号条件。插件无法绕过这个限制。
-- 这是个人自用的 OAuth 集成，不会下载或管理 CLIProxyAPI，也不提供本地 OpenAI 兼容网关或免费 API。
 
 请使用你自己的账号，并确认使用方式符合 OpenAI 的服务条款。
 
