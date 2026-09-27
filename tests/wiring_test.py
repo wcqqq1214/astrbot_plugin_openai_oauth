@@ -7,6 +7,7 @@ import importlib
 import json
 import os
 import sys
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest import mock
 
@@ -182,6 +183,51 @@ def test_hot_reload_and_offline_models() -> None:
         models == list(oauth.CODEX_FALLBACK_MODELS),
         "missing credentials use offline models",
     )
+
+
+def test_source_model_listing_preserves_credentials() -> None:
+    print("\n=== Dashboard source model listing preserves credentials ===")
+    source = make_source(credentials())
+    source["custom_headers"] = {"X-Test": "preserved"}
+    original = deepcopy(source)
+    conf = _FakeConfig(provider_sources=[source])
+    manager = _FakeConfigManager(conf)
+    live_models = ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]
+    fetch = mock.AsyncMock(return_value=live_models)
+
+    async def run() -> None:
+        with (
+            mock.patch.object(module, "_config_mgr", manager),
+            mock.patch.object(module, "_credential_coordinator", None),
+            mock.patch.object(module, "fetch_models", fetch),
+        ):
+            # The dashboard passes the actual shared source to the constructor.
+            for _ in range(2):
+                provider = ProviderOpenAICodex(source, {})
+                try:
+                    models = await provider.get_models()
+                    check(models == live_models, "source listing returns live models")
+                    check(source == original, "source configuration stays unchanged")
+                finally:
+                    await provider.terminate()
+
+    asyncio.run(run())
+    check(fetch.await_count == 2, "each source listing reaches the live catalog")
+    check(
+        fetch.await_args_list
+        == [
+            mock.call(
+                ACCESS_TOKEN,
+                ACCOUNT_ID,
+                "",
+                oauth.DEFAULT_ORIGINATOR,
+                oauth.DEFAULT_USER_AGENT,
+            )
+        ]
+        * 2,
+        "repeated listings keep the original OAuth credentials",
+    )
+    check(conf.saved == 0, "model listing does not persist configuration changes")
 
 
 def test_payload_conversion_and_stream_usage() -> None:
@@ -556,6 +602,7 @@ def main() -> int:
     try:
         test_provider_initialization_and_request_client()
         test_hot_reload_and_offline_models()
+        test_source_model_listing_preserves_credentials()
         test_payload_conversion_and_stream_usage()
         test_session_effort_request_override()
         test_pre_stream_credential_recovery()

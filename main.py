@@ -191,7 +191,7 @@ def _get_credential_coordinator() -> CredentialCoordinator:
     "astrbot_plugin_openai_oauth",
     "wcqqq1214",
     "ChatGPT 订阅 (Codex OAuth) provider 插件",
-    "1.3.0",
+    "1.3.1",
 )
 class OpenAI_OAuth_Plugin(Star):
     def __init__(
@@ -450,6 +450,9 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
     """
 
     def __init__(self, provider_config: dict, provider_settings: dict) -> None:
+        # The dashboard passes its shared source config when listing models.
+        # Keep client placeholders and SDK mutations out of the credential store.
+        provider_config = deepcopy(provider_config)
         raw_key = provider_config.get("key")
         try:
             bootstrap_creds = parse_credentials(raw_key)

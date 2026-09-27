@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [v1.3.1] - 2026-09-28
+
+### Fixed
+
+- Preserve source OAuth credentials when the WebUI fetches the model catalog,
+  preventing an unintended fallback to an outdated model list without GPT-6.
+- Add regression coverage for repeated model discovery with shared source configuration.
+
 ## [v1.3.0] - 2026-08-28
 
 ### Added
