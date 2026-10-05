@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [v1.3.2] - 2026-10-05
+
+### Fixed
+
+- Retry explicit Codex streaming overload and temporary service errors before any
+  response is emitted, using exponential backoff and a shared request-attempt limit.
+- Prevent response replay after output and discard partial tool-call state on retry,
+  while preserving credential recovery and subscription quota cooldown handling.
+- Add SDK SSE regression coverage for retries, exhaustion, cancellation, and output safety.
+
 ## [v1.3.1] - 2026-09-28
 
 ### Fixed
