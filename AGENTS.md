@@ -11,7 +11,7 @@
 - Use English for all comments and logs.
 - Use `httpx` or `aiohttp` for network requests (do not use `requests`).
 - Persist data under the AstrBot `data` directory, not the plugin directory.
-- Run `ruff format .` and `ruff check .` before committing.
+- For Python changes, run Ruff formatting on changed Python files and the relevant lint checks before committing. Preserve any additional CI checks; documentation-only changes do not require Python formatting.
 - Add third-party dependencies to `requirements.txt`.
 
 ## Development environment
