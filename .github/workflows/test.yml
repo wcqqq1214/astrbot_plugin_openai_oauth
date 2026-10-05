@@ -58,4 +58,6 @@ jobs:
           "$GITHUB_WORKSPACE/AstrBot/.venv/bin/python" \
             "$GITHUB_WORKSPACE/astrbot_plugin_openai_oauth/tests/wiring_test.py"
           "$GITHUB_WORKSPACE/AstrBot/.venv/bin/python" \
+            "$GITHUB_WORKSPACE/astrbot_plugin_openai_oauth/tests/stream_retry_test.py"
+          "$GITHUB_WORKSPACE/AstrBot/.venv/bin/python" \
             "$GITHUB_WORKSPACE/astrbot_plugin_openai_oauth/tests/smoke_test.py"

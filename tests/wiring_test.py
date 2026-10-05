@@ -249,6 +249,9 @@ def test_payload_conversion_and_stream_usage() -> None:
         def __init__(self, events: list[dict]) -> None:
             self.events = events
 
+        async def close(self) -> None:
+            pass
+
         def __aiter__(self):
             async def iterate():
                 for event in self.events:
@@ -309,6 +312,9 @@ def test_session_effort_request_override() -> None:
     print("\n=== Session reasoning-effort request override ===")
 
     class _FakeStream:
+        async def close(self) -> None:
+            pass
+
         def __aiter__(self):
             async def iterate():
                 yield {"type": "response.output_text.delta", "delta": "ok"}

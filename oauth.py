@@ -17,6 +17,7 @@ from typing import Any
 
 from astrbot import logger
 from astrbot.core.utils.network_utils import create_proxy_client
+from openai import APIError
 
 CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
@@ -218,12 +219,28 @@ def classify_codex_error(error: BaseException) -> str:
     code, message = _error_details(error)
     if status_code in {401, 403} or code in {"invalid_grant", "invalid_token"}:
         return "credential"
-    if status_code == 429:
-        if "usage_limit_reached" in code or "usage_limit_reached" in message:
-            return "usage_limit"
+    if code == "usage_limit_reached" or (
+        status_code == 429
+        and ("usage_limit_reached" in code or "usage_limit_reached" in message)
+    ):
+        return "usage_limit"
+    if status_code == 429 or code == "rate_limit_exceeded":
         return "rate_limit"
     if status_code in {408, 409, 500, 502, 503, 504, 529}:
         return "temporary"
+    # SSE errors arrive as APIError without an HTTP error status. Only accept
+    # explicit service failures; a generic "try again" is not sufficient.
+    if status_code is None and isinstance(error, APIError):
+        if code in {
+            "server_error",
+            "internal_server_error",
+            "service_unavailable",
+            "overloaded",
+            "overloaded_error",
+        }:
+            return "temporary"
+        if not code and "servers are currently overloaded" in message:
+            return "temporary"
     return "other"
 
 

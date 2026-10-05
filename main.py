@@ -30,7 +30,12 @@ from astrbot.core.provider.register import (
 from astrbot.core.provider.sources.openai_responses_source import (
     ProviderOpenAIResponses,
 )
-from astrbot.core.provider.sources.request_retry import retry_provider_request
+from astrbot.core.provider.sources.request_retry import (
+    REQUEST_RETRY_ATTEMPTS,
+    REQUEST_RETRY_WAIT_MAX_S,
+    retry_provider_request,
+)
+from astrbot.core.utils.config_number import coerce_int_config
 from astrbot.core.workspace import API_KEY_USERNAME_PREFIX
 
 from .credential_store import (
@@ -579,17 +584,62 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         payloads.pop("conversation", None)
         payloads["store"] = False
 
-        stream = await retry_provider_request(
-            "OpenAI Responses",
-            lambda: request_client.responses.create(
+        max_attempts = coerce_int_config(
+            request_max_retries,
+            default=REQUEST_RETRY_ATTEMPTS,
+            min_value=1,
+            field_name="request_max_retries",
+            source="OpenAI Codex",
+            warn=request_max_retries is not None,
+        )
+        attempts = 0
+        emitted_response = False
+
+        async def create_stream():
+            nonlocal attempts
+            attempts += 1
+            return await request_client.responses.create(
                 **payloads,
                 stream=True,
                 extra_body=extra_body,
-            ),
-            retry_rate_limits=False,
-            max_attempts=request_max_retries,
-        )
+            )
 
+        while attempts < max_attempts:
+            # Creation and stream iteration share one request-attempt budget.
+            stream = await retry_provider_request(
+                "OpenAI Responses",
+                create_stream,
+                retry_rate_limits=False,
+                max_attempts=max_attempts - attempts,
+            )
+            try:
+                async for response in self._consume_stream(stream, tools):
+                    emitted_response = True
+                    yield response
+                return
+            except Exception as exc:
+                if (
+                    emitted_response
+                    or attempts >= max_attempts
+                    or classify_codex_error(exc) != "temporary"
+                ):
+                    raise
+            finally:
+                await stream.close()
+
+            delay = min(2 ** min(attempts - 1, 5), REQUEST_RETRY_WAIT_MAX_S)
+            logger.warning(
+                "OpenAI Codex stream failed before output; retrying (%s/%s) in %ss.",
+                attempts + 1,
+                max_attempts,
+                delay,
+            )
+            await asyncio.sleep(delay)
+
+    async def _consume_stream(
+        self, stream: Any, tools: Any
+    ) -> AsyncGenerator[LLMResponse, None]:
+        """Keep partial response state scoped to a single stream attempt."""
         response_id: str | None = None
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
