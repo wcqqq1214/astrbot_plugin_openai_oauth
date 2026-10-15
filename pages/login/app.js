@@ -236,6 +236,10 @@ const plans = {
 const codexIcon =
   '<img class="codex-icon-light" src="./icons/codex-color.svg" alt="" width="34" height="34">' +
   '<img class="codex-icon-dark" src="./icons/codex-color-dark.svg" alt="" width="34" height="34">';
+const providerIcons = {
+  local_codex: codexIcon,
+  device_oauth: '<span class="openai-icon"></span>',
+};
 const chevronIcon = '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>';
 // Rows persist across refreshes and are updated in place, so the detail
 // editor (and a name being typed in it) is never detached by a re-render.
@@ -613,7 +617,6 @@ function providerRow(id) {
   row.setAttribute("aria-controls", "provider-detail");
   const icon = element("span", "provider-icon");
   icon.setAttribute("aria-hidden", "true");
-  icon.innerHTML = codexIcon;
   const copy = element("span", "provider-copy");
   const name = element("strong", "provider-name");
   const sub = element("span", "provider-sub");
@@ -628,7 +631,7 @@ function providerRow(id) {
   chevron.innerHTML = chevronIcon;
   row.append(icon, copy, meta, chevron);
   row.addEventListener("click", () => void selectProvider(id));
-  node = { row, name, sub, meta, metaText };
+  node = { row, icon, name, sub, meta, metaText, iconMode: null };
   rowNodes.set(id, node);
   return node;
 }
@@ -638,6 +641,11 @@ function renderProviders() {
   for (const provider of providers) {
     const node = providerRow(provider.id);
     const local = provider.credential_mode === "local_codex";
+    const iconMode = local ? "local_codex" : "device_oauth";
+    if (node.iconMode !== iconMode) {
+      node.iconMode = iconMode;
+      node.icon.innerHTML = providerIcons[iconMode];
+    }
     const selected = provider.id === selectedSourceId;
     const state = String(provider.status || "unknown");
     node.row.className =

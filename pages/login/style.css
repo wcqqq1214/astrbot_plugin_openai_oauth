@@ -685,6 +685,12 @@ dialog::backdrop {
 :root[data-theme="dark"] .provider-icon .codex-icon-dark {
   display: block;
 }
+.provider-icon .openai-icon {
+  width: 28px;
+  height: 28px;
+  background-color: var(--text);
+  mask: url("./icons/openai.svg") center / contain no-repeat;
+}
 .provider-copy {
   display: grid;
   gap: 1px;
