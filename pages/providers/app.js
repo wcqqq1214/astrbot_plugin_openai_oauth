@@ -21,6 +21,11 @@ const strings = {
     name: "Provider name",
     nameShort: "Name",
     saveName: "Save",
+    settingsFor: (name) => `Settings for ${name}`,
+    settingsTitle: "Provider settings",
+    cancelEdit: "Cancel",
+    nameRequired: "Enter a name.",
+    settingsGone: "This provider no longer exists, so its settings were closed.",
     quotaLabel: "Allowance",
     removeHint: "Its saved login is deleted too.",
     confirmHint: "Click again to delete permanently.",
@@ -142,6 +147,11 @@ const strings = {
     name: "Provider 名称",
     nameShort: "名称",
     saveName: "保存",
+    settingsFor: (name) => `设置 ${name}`,
+    settingsTitle: "Provider 设置",
+    cancelEdit: "取消",
+    nameRequired: "请输入名称。",
+    settingsGone: "该 Provider 已不存在，设置已关闭。",
     quotaLabel: "额度",
     removeHint: "会同时删除它保存的登录凭据。",
     confirmHint: "再次点击即永久删除。",
@@ -265,10 +275,16 @@ const loginDialog = byId("login-dialog");
 const closeButton = byId("close-login");
 const providerList = byId("providers");
 const providerDetail = byId("provider-detail");
-const providerNameInput = byId("provider-name");
-const renameButton = byId("rename-provider");
-const routingButtons = { fixed: byId("routing-fixed"), auto: byId("routing-auto") };
 const saveError = byId("save-error");
+const settingsDialog = byId("settings-dialog");
+const settingsNameInput = byId("settings-name");
+const settingsSave = byId("settings-save");
+const settingsCancel = byId("settings-cancel");
+const closeSettingsButton = byId("close-settings");
+const settingsRouting = {
+  fixed: byId("settings-routing-fixed"),
+  auto: byId("settings-routing-auto"),
+};
 const plans = {
   free: "Free",
   go: "Go",
@@ -291,8 +307,10 @@ const stateIcons = {
   ok: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.2 12.4l2.6 2.6 5-5.2"/></svg>',
   warn: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.6v5.2M12 16.4h.01"/></svg>',
 };
-// Rows persist across refreshes and are updated in place, so the detail
-// editor (and a name being typed in it) is never detached by a re-render.
+const gearIcon =
+  '<svg viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
+// Rows persist across refreshes and are updated in place, so focus inside a
+// row and the expanded allowance panel survive the 30-second refresh.
 const rowNodes = new Map();
 const maxConsecutivePollFailures = 5;
 const warningStates = ["cooling", "degraded"];
@@ -351,6 +369,12 @@ const pendingChanges = new Map();
 const lastMutation = new Map();
 let mutationSeq = 0;
 const editableFields = ["name", "enabled", "routing_mode"];
+// The open settings dialog. A session is bound to one source ID for its whole
+// lifetime and is replaced, never mutated, when the dialog opens again, so a
+// late reply can compare identity before touching the dialog. `base` holds
+// the values the draft started from: only fields the user changed are sent,
+// and refreshes never rewrite what they typed.
+let settings = null;
 
 function applyLocale(locale) {
   isEnglish = String(locale || "zh-CN").startsWith("en");
@@ -360,12 +384,14 @@ function applyLocale(locale) {
   for (const [id, value] of Object.entries({
     title: t.title,
     "add-provider-label": t.add,
-    "rename-label": t.nameShort,
-    "rename-provider": t.saveName,
     "quota-label": t.quotaLabel,
-    "routing-label": t.routingLabel,
-    "routing-fixed": t.routingFixed,
-    "routing-auto": t.routingAuto,
+    "settings-kicker": t.settingsTitle,
+    "settings-name-label": t.nameShort,
+    "settings-routing-label": t.routingLabel,
+    "settings-routing-fixed": t.routingFixed,
+    "settings-routing-auto": t.routingAuto,
+    "settings-cancel": t.cancelEdit,
+    "settings-save": t.saveName,
     "delete-hint": t.removeHint,
     "delete-provider": t.remove,
     "open-login": t.renew,
@@ -380,6 +406,8 @@ function applyLocale(locale) {
     byId(id).textContent = value;
   closeButton.setAttribute("aria-label", t.close);
   verifyUrl.setAttribute("aria-label", t.verifyLink);
+  closeSettingsButton.setAttribute("aria-label", t.close);
+  closeSettingsButton.setAttribute("title", t.close);
   usageButton.setAttribute("aria-label", t.refresh);
   usageButton.setAttribute("title", t.refresh);
   byId("updated").setAttribute("title", t.automatic);
@@ -472,36 +500,11 @@ function renderAccountStatus(result) {
 
   const local = account.credential_mode === "local_codex";
   byId("source-name").textContent = providerName(account);
-  if (document.activeElement !== providerNameInput)
-    providerNameInput.value = account.name || "";
-  syncRename();
   byId("open-login").hidden = local;
   byId("delete-provider").hidden = local;
   byId("delete-row").hidden = local;
-  renderControls();
   updateNotice();
   return Boolean(identityChanged);
-}
-
-// Enabled and routing mode are separate from the health status above: a
-// disabled source keeps its login, and enabling it repairs nothing.
-function renderControls() {
-  const view = effective(account);
-  const busy = isSaving(account.id);
-  const mode = routingMode(view);
-  for (const [key, button] of Object.entries(routingButtons)) {
-    button.setAttribute("aria-pressed", String(key === mode));
-    button.disabled = busy || !account.id;
-  }
-  byId("routing-help").textContent =
-    mode === "auto" ? t.routingAutoHelp : t.routingFixedHelp;
-  syncRename();
-}
-
-function syncRename() {
-  const value = String(providerNameInput.value || "").trim();
-  renameButton.disabled =
-    !value || value === (effective(account).name || "") || isSaving(account.id);
 }
 
 function isSaving(id) {
@@ -700,8 +703,9 @@ function providerName(provider) {
 function providerRow(id) {
   let node = rowNodes.get(id);
   if (node) return node;
-  // The row is a container: the main button selects the provider for
-  // management, and the switch beside it (never nested in it) sets `enabled`.
+  // The row is a container of sibling buttons, never nested: the main button
+  // expands the allowance, the gear only opens the settings dialog and the
+  // switch only sets `enabled`.
   const row = element("div", "provider-row");
   const main = element("button", "provider-main");
   main.type = "button";
@@ -726,13 +730,18 @@ function providerRow(id) {
   chevron.innerHTML = chevronIcon;
   main.append(icon, copy, meta, chevron);
   main.addEventListener("click", () => void selectProvider(id));
+  const gear = element("button", "icon-button row-settings");
+  gear.type = "button";
+  gear.setAttribute("aria-haspopup", "dialog");
+  gear.innerHTML = gearIcon;
+  gear.addEventListener("click", () => openSettings(id));
   const toggle = element("button", "switch");
   toggle.type = "button";
   toggle.setAttribute("role", "switch");
   toggle.append(element("span", "switch-track"));
   toggle.addEventListener("click", () => void toggleEnabled(id));
-  row.append(main, toggle);
-  node = { row, main, icon, name, disabledTag, autoTag, sub, meta, metaText, toggle, iconMode: null };
+  row.append(main, gear, toggle);
+  node = { row, main, icon, name, disabledTag, autoTag, sub, meta, metaText, gear, toggle, iconMode: null };
   rowNodes.set(id, node);
   return node;
 }
@@ -763,6 +772,8 @@ function renderProviders() {
     node.disabledTag.hidden = enabled;
     node.autoTag.textContent = t.autoTag;
     node.autoTag.hidden = routingMode(provider) !== "auto";
+    node.gear.setAttribute("aria-label", t.settingsFor(providerName(provider)));
+    node.gear.setAttribute("title", t.settingsFor(providerName(provider)));
     node.toggle.setAttribute("aria-checked", String(enabled));
     node.toggle.setAttribute("aria-label", t.enable(providerName(provider)));
     node.toggle.setAttribute("title", busy ? t.saving : t.enable(providerName(provider)));
@@ -791,6 +802,7 @@ function renderProviders() {
     providerList.replaceChildren(...order);
   // The login result card reads the saved provider from this list.
   if (login.phase === "success") renderLogin();
+  syncSettings();
 }
 
 async function selectProvider(id) {
@@ -911,10 +923,7 @@ function runInChain(sourceId, task) {
 
 function renderSourceState(sourceId) {
   renderProviders();
-  if (sourceId === selectedSourceId) {
-    renderControls();
-    updateNotice();
-  }
+  if (sourceId === selectedSourceId) updateNotice();
 }
 
 function applyProvider(provider) {
@@ -931,16 +940,19 @@ function showSaveError(message) {
 }
 
 // Send only the fields the user changed. The server's provider object is
-// authoritative; a rejected or unclear outcome reloads the list.
-async function saveProvider(sourceId, changes) {
+// authoritative; a rejected or unclear outcome reloads the list. Resolves
+// once the write settles with {status, message, followUp}, where `followUp`
+// is the reload or quota refresh that the outcome started.
+async function writeProvider(sourceId, changes, { report = true } = {}) {
   const queued = pendingChanges.get(sourceId) || [];
   queued.push(changes);
   pendingChanges.set(sourceId, queued);
   markMutation(sourceId);
-  showSaveError("");
+  if (report) showSaveError("");
   renderSourceState(sourceId);
   let reconcile = false;
   let refreshIdentity = false;
+  let outcome = { status: "success", message: "" };
   try {
     const result = await runInChain(sourceId, () =>
       bridge.apiPost("providers/update", { source_id: sourceId, ...changes }),
@@ -950,7 +962,7 @@ async function saveProvider(sourceId, changes) {
       refreshIdentity = applyProvider(provider);
     } else {
       reconcile = true;
-      showSaveError(t.saveUnknown);
+      outcome = { status: "unknown", message: t.saveUnknown };
     }
   } catch (reason) {
     // The bridge reports HTTP rejections and transport failures alike, so
@@ -958,18 +970,33 @@ async function saveProvider(sourceId, changes) {
     // reload it from the server.
     reconcile = true;
     const local = providers.find((p) => p.id === sourceId);
-    showSaveError(
-      t.saveFailed(local ? providerName(local) : sourceId, reason?.message || t.saveUnknown),
-    );
+    outcome = {
+      status: "failed",
+      message: t.saveFailed(
+        local ? providerName(local) : sourceId,
+        reason?.message || t.saveUnknown,
+      ),
+    };
   } finally {
     const left = (pendingChanges.get(sourceId) || []).filter((c) => c !== changes);
     if (left.length) pendingChanges.set(sourceId, left);
     else pendingChanges.delete(sourceId);
     markMutation(sourceId);
+    if (report && outcome.status !== "success") showSaveError(outcome.message);
     renderSourceState(sourceId);
   }
-  if (reconcile) await reloadProviders();
-  else if (refreshIdentity) await refreshAccountUsage();
+  outcome.followUp = reconcile
+    ? reloadProviders()
+    : refreshIdentity
+      ? refreshAccountUsage()
+      : Promise.resolve();
+  return outcome;
+}
+
+async function saveProvider(sourceId, changes) {
+  const outcome = await writeProvider(sourceId, changes);
+  await outcome.followUp;
+  return outcome;
 }
 
 async function refreshAccountUsage() {
@@ -1008,18 +1035,148 @@ async function toggleEnabled(sourceId) {
   await saveProvider(sourceId, { enabled: !isEnabled(effective(provider)) });
 }
 
-async function setRoutingMode(mode) {
-  const sourceId = selectedSourceId;
-  if (!sourceId || isSaving(sourceId)) return;
-  if (routingMode(effective(account)) === mode) return;
-  await saveProvider(sourceId, { routing_mode: mode });
+// ---------- Settings dialog ----------
+
+function settingsProvider() {
+  return settings ? providers.find((p) => p.id === settings.sourceId) : undefined;
 }
 
-async function renameProvider() {
-  const sourceId = selectedSourceId;
-  const name = String(providerNameInput.value || "").trim();
-  if (!sourceId || renameButton.disabled || !name) return;
-  await saveProvider(sourceId, { name });
+function openSettings(sourceId) {
+  const provider = providers.find((p) => p.id === sourceId);
+  if (!provider || settingsDialog.open || loginDialog.open) return;
+  // Start from the latest effective state, including queued writes.
+  const view = effective(provider);
+  const base = { name: String(view.name || ""), routing_mode: routingMode(view) };
+  settings = {
+    sourceId,
+    base,
+    draft: { ...base },
+    busy: null,
+    error: "",
+    iconMode: null,
+  };
+  settingsNameInput.value = base.name;
+  renderSettings();
+  settingsDialog.showModal();
+  settingsNameInput.focus?.();
+}
+
+// The fields that differ from where the draft started, normalized the way
+// the server stores them.
+function settingsChanges(session = settings) {
+  const changes = {};
+  if (!session) return changes;
+  const name = session.draft.name.trim();
+  if (name !== session.base.name) changes.name = name;
+  if (session.draft.routing_mode !== session.base.routing_mode)
+    changes.routing_mode = session.draft.routing_mode;
+  return changes;
+}
+
+function renderSettings() {
+  const session = settings;
+  if (!session) return;
+  const provider = settingsProvider();
+  if (provider) {
+    const view = effective(provider);
+    byId("settings-title").textContent = providerName(view);
+    const iconMode =
+      view.credential_mode === "local_codex" ? "local_codex" : "device_oauth";
+    if (session.iconMode !== iconMode) {
+      session.iconMode = iconMode;
+      byId("settings-icon").innerHTML = providerIcons[iconMode];
+    }
+  }
+  const busy = Boolean(session.busy);
+  const nameMissing = !session.draft.name.trim();
+  settingsNameInput.disabled = busy;
+  settingsNameInput.setAttribute("aria-invalid", String(nameMissing));
+  const nameHint = byId("settings-name-hint");
+  nameHint.textContent = nameMissing ? t.nameRequired : "";
+  nameHint.hidden = !nameMissing;
+  const mode = session.draft.routing_mode;
+  for (const [key, button] of Object.entries(settingsRouting)) {
+    button.setAttribute("aria-pressed", String(key === mode));
+    button.disabled = busy;
+  }
+  byId("settings-routing-help").textContent =
+    mode === "auto" ? t.routingAutoHelp : t.routingFixedHelp;
+  const dirty = Object.keys(settingsChanges(session)).length > 0;
+  const saving = session.busy === "save";
+  settingsSave.disabled = busy || !dirty || nameMissing || !provider;
+  settingsSave.textContent = saving ? t.saving : t.saveName;
+  settingsSave.setAttribute("aria-busy", String(saving));
+  settingsCancel.disabled = busy;
+  closeSettingsButton.disabled = busy;
+  const settingsError = byId("settings-error");
+  settingsError.textContent = session.error;
+  settingsError.hidden = !session.error;
+}
+
+// End the session and return focus to the row's gear, or to a stable control
+// when that row is gone.
+function endSettings() {
+  const session = settings;
+  settings = null;
+  if (settingsDialog.open) settingsDialog.close();
+  const gear = session && rowNodes.get(session.sourceId)?.gear;
+  const target = gear && gear.isConnected !== false ? gear : byId("add-provider");
+  target.focus?.();
+}
+
+// Cancel, the close button and Escape all discard the draft. A save in
+// flight cannot be undone, so the dialog stays until it settles.
+function closeSettings() {
+  if (!settings || settings.busy) return;
+  endSettings();
+}
+
+// A refresh may reveal that the edited provider is gone. End the session
+// rather than let a later save address another account.
+function syncSettings() {
+  if (!settings) return;
+  if (settingsProvider()) {
+    renderSettings();
+    return;
+  }
+  endSettings();
+  byId("page-error").textContent = t.settingsGone;
+  byId("page-error").hidden = false;
+}
+
+function setSettingsRouting(mode) {
+  if (!settings || settings.busy) return;
+  settings.draft.routing_mode = mode;
+  renderSettings();
+}
+
+async function saveSettings() {
+  const session = settings;
+  if (!session || session.busy || settingsSave.disabled) return;
+  const changes = settingsChanges(session);
+  if (!Object.keys(changes).length || !session.draft.name.trim()) return;
+  session.busy = "save";
+  session.error = "";
+  renderSettings();
+  // One request carries every changed field for the bound source.
+  const outcome = await writeProvider(session.sourceId, changes, { report: false });
+  if (settings === session && outcome.status === "success") {
+    session.busy = null;
+    endSettings();
+  }
+  await outcome.followUp;
+  if (settings !== session || outcome.status === "success") return;
+  // The outcome is unclear or the write was rejected. Keep the draft, but
+  // adopt fields the reloaded server state shows did land, so the dialog
+  // never re-sends or claims an unconfirmed result.
+  const current = providers.find((p) => p.id === session.sourceId);
+  if (current && "name" in changes && current.name === changes.name)
+    session.base.name = changes.name;
+  if (current && "routing_mode" in changes && routingMode(current) === changes.routing_mode)
+    session.base.routing_mode = changes.routing_mode;
+  session.busy = null;
+  session.error = outcome.message;
+  renderSettings();
 }
 
 async function deleteProvider() {
@@ -1055,6 +1212,7 @@ function rerender() {
   }
   renderUpdated();
   renderLogin();
+  renderSettings();
 }
 
 bridge.onContext?.((next) => {
@@ -1462,14 +1620,31 @@ loginNameInput.addEventListener("keydown", (event) => {
 });
 byId("open-login").addEventListener("click", () => openLogin(selectedSourceId));
 byId("add-provider").addEventListener("click", () => openLogin());
-byId("rename-provider").addEventListener("click", () => void renameProvider());
-routingButtons.fixed.addEventListener("click", () => void setRoutingMode("fixed"));
-routingButtons.auto.addEventListener("click", () => void setRoutingMode("auto"));
-providerNameInput.addEventListener("input", syncRename);
-providerNameInput.addEventListener("keydown", (event) => {
+settingsRouting.fixed.addEventListener("click", () => setSettingsRouting("fixed"));
+settingsRouting.auto.addEventListener("click", () => setSettingsRouting("auto"));
+settingsNameInput.addEventListener("input", () => {
+  if (!settings || settings.busy) return;
+  settings.draft.name = String(settingsNameInput.value || "");
+  renderSettings();
+});
+settingsNameInput.addEventListener("keydown", (event) => {
   // Some browsers report the composition-ending Enter only as keyCode 229.
   if (event.isComposing || event.keyCode === 229) return;
-  if (event.key === "Enter" && !renameButton.disabled) void renameProvider();
+  if (event.key === "Enter") void saveSettings();
+});
+settingsSave.addEventListener("click", () => void saveSettings());
+settingsCancel.addEventListener("click", closeSettings);
+closeSettingsButton.addEventListener("click", closeSettings);
+settingsDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeSettings();
+});
+// Browsers may close a modal without a cancellable event. Keep a busy
+// session on screen; otherwise treat it like Cancel.
+settingsDialog.addEventListener("close", () => {
+  if (!settings) return;
+  if (settings.busy) settingsDialog.showModal();
+  else endSettings();
 });
 byId("delete-provider").addEventListener("click", () => void deleteProvider());
 async function closeLogin() {

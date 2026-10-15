@@ -958,6 +958,22 @@ dialog::backdrop {
   color: var(--muted);
 }
 
+/* The gear sits between the row's main button and its switch. It stays
+   quiet until the row is hovered or focused. */
+.row-settings {
+  width: 34px;
+  height: 34px;
+  color: var(--muted);
+}
+.row-settings svg {
+  width: 16px;
+  height: 16px;
+}
+.provider-row:hover .row-settings,
+.row-settings:focus-visible {
+  color: var(--secondary);
+}
+
 .chevron {
   display: grid;
   place-items: center;
@@ -1083,6 +1099,76 @@ dialog::backdrop {
   height: 36px;
 }
 
+/* ---------- Settings dialog ---------- */
+/* Header and actions stay put; only the body scrolls on short screens. */
+.settings-dialog {
+  max-height: min(680px, calc(100dvh - 32px));
+}
+.settings-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.settings-heading {
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 14px 12px 14px 20px;
+  box-shadow: inset 0 -1px var(--line);
+}
+.settings-heading .provider-icon,
+.settings-heading .provider-icon img {
+  width: 30px;
+  height: 30px;
+}
+.settings-heading .provider-icon .openai-icon {
+  width: 25px;
+  height: 25px;
+}
+.settings-heading-copy {
+  flex: 1;
+  min-width: 0;
+}
+.settings-heading h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  line-height: 1.35;
+}
+.settings-kicker {
+  font-size: 12px;
+  color: var(--muted);
+}
+.settings-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 20px 20px;
+}
+.settings-body > .field {
+  margin-top: 16px;
+}
+.settings-body .segmented {
+  justify-self: start;
+}
+.field-label {
+  font-size: 13px;
+  font-weight: var(--medium);
+}
+.field-hint {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+#settings-name-hint {
+  color: var(--bad-text);
+}
+.text-input[aria-invalid="true"] {
+  border-color: var(--bad);
+}
+.settings-dialog .actions {
+  flex-shrink: 0;
+}
+
 /* ---------- Narrow containers ---------- */
 /* Wrap the reset time based on the space inside the editor, not the page. */
 @container (max-width: 600px) {
@@ -1148,9 +1234,21 @@ dialog::backdrop {
   .chevron {
     grid-area: chevron;
   }
+  .row-settings {
+    width: 32px;
+  }
   .switch {
     width: 46px;
     margin-right: 4px;
+  }
+  .settings-heading {
+    padding-left: 16px;
+  }
+  .settings-body {
+    padding: 4px 16px 18px;
+  }
+  .settings-dialog .actions {
+    padding: 12px 16px;
   }
   .editor {
     padding: 0 12px;
