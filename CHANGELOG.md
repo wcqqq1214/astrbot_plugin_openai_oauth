@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [v2.1.0] - 2026-10-16
+
+### Added
+
+- Chinese, English, Russian, and Japanese translations for the provider page and
+  plugin metadata, following AstrBot's language setting.
+- Independent allowance panels so multiple accounts can be viewed at once.
+
+### Changed
+
+- Combined account naming, routing, reauthorization, and removal in one settings dialog.
+- Simplified device-code login with copy controls and clearer progress and results.
+- Moved the implementation into `src/` while preserving the AstrBot entry point.
+- Shortened both READMEs, refreshed example screenshots, and added a development guide.
+
+### Fixed
+
+- Prevent an old account's quota lookup from applying a cooldown to a replacement login,
+  including when the lookup uses cached data.
+- Recover interrupted or expired login sessions and ignore stale dialog close events.
+- Preserve settings drafts and localized default names across language changes.
+- Keep status tags readable on narrow screens and synchronize localized plugin descriptions.
+- Update the README workflow test to match the current Plugin Views entry.
+
 ## [v2.0.0] - 2026-10-16
 
 ### Added

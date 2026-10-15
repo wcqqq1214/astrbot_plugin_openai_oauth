@@ -1,8 +1,8 @@
 {
   "metadata": {
     "display_name": "OpenAI 订阅登录",
-    "short_desc": "用 ChatGPT 订阅账号跑模型，无需 API Key",
-    "desc": "用你的 ChatGPT 订阅账号登录后，即可把订阅额度当作模型使用，无需 API Key。"
+    "short_desc": "用 ChatGPT 订阅在 AstrBot 聊天，无需 API Key。",
+    "desc": "支持本地 Codex 登录和设备码登录，可管理多个账号、查看剩余额度。开启自动回退后，账号不可用时会尝试备用账号。"
   },
   "pages": {
     "providers": {

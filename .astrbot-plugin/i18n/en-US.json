@@ -1,8 +1,8 @@
 {
   "metadata": {
     "display_name": "OpenAI Subscription Login",
-    "short_desc": "Use your ChatGPT subscription for models, without an API key",
-    "desc": "Sign in with your ChatGPT subscription to use its allowance for models, without an API key."
+    "short_desc": "Use your ChatGPT subscription in AstrBot without an API key.",
+    "desc": "Sign in through local Codex or a device code, manage multiple accounts, and check remaining allowances. Enable automatic fallback to try another account when one is unavailable."
   },
   "pages": {
     "providers": {

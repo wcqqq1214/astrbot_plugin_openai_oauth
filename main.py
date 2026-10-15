@@ -16,7 +16,7 @@ __all__ = ["OpenAI_OAuth_Plugin", "ProviderOpenAICodex"]
     "astrbot_plugin_openai_oauth",
     "wcqqq1214",
     "ChatGPT 订阅 (Codex OAuth) provider 插件",
-    "2.0.0",
+    "2.1.0",
 )
 class OpenAI_OAuth_Plugin(Star):
     def __init__(

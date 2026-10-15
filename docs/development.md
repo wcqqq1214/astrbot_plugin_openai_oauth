@@ -44,8 +44,12 @@ isolated credentials to avoid reading or refreshing real accounts. Follow
 
 Pushing `main` runs tests without publishing a release. To release:
 
-1. Keep `metadata.yaml`, `pyproject.toml`, the README version badges, and the changelog in sync.
-2. Create and push the matching `vX.Y.Z` tag.
+1. Update the version in `metadata.yaml`, `pyproject.toml`, the `main.py` registration,
+   and both README badges. Run `uv lock` and add the release notes to `CHANGELOG.md`.
+2. Keep the plugin descriptions in `.astrbot-plugin/i18n/` aligned with `metadata.yaml`.
+3. Run the checks above and the integration suite, then confirm CI passes on the
+   exact commit to release.
+4. Create and push the matching `vX.Y.Z` tag.
 
 The release workflow checks that the tag matches the plugin version, then packages
 and publishes it. A local-only tag does not trigger a release.
