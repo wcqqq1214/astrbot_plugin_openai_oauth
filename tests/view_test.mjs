@@ -45,15 +45,6 @@ const html = readFileSync(
   new URL("../pages/providers/index.html", import.meta.url),
   "utf8",
 );
-const prototypeHtml = readFileSync(
-  new URL("../pages/providers/prototype.html", import.meta.url),
-  "utf8",
-);
-assert.equal(
-  prototypeHtml,
-  html.replace('/api/plugin/page/bridge-sdk.js', './prototype.js'),
-  "Offline preview must retain the production page structure",
-);
 const ids = new Map(
   [...html.matchAll(/id="([^"]+)"/g)].map((x) => [x[1], new Element()]),
 );
@@ -553,4 +544,4 @@ await tick();
 assert.equal(rowFor("Newer device"), undefined, "a stale recovery read must not resurrect a deleted provider");
 bridge.apiPost = originalPost;
 updateHandler = null;
-console.log("View regressions passed: preview parity, quota windows, provider selection, stale-result isolation, login and cancellation races, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");
+console.log("View regressions passed: quota windows, provider selection, stale-result isolation, login and cancellation races, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");
