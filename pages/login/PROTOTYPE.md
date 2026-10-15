@@ -13,6 +13,10 @@ Run `python pages/login/serve_prototype.py`, then open
 - Reauthorize updates the selected provider; rename keeps its ID.
 - Production refuses deletion of Local Codex or a source still bound to models.
 - Production migrates legacy mixed sources while retaining existing model bindings.
+- Each row has an enable switch; the editor has a fixed / automatic fallback
+  choice for models that prefer that provider. Updates take ~0.6 s so the
+  saving state is visible. Open `prototype.html?fail=update` to preview a
+  rejected save.
 
 `index.html` loads the real AstrBot bridge. `prototype.html` uses the same markup
 but loads the offline bridge. Keep their page structure aligned when editing.
@@ -25,6 +29,8 @@ node tests/view_test.mjs
 ```
 
 The view regression covers weekly-only quota, unavailable usage, independent
-provider selection, stale results after selection changes, and login cancellation.
+provider selection, stale results after selection changes, login cancellation,
+the enable switch and routing mode, serialized per-provider saves, stale list
+responses during a save, and failed or unclear saves.
 The Python scripts cover migration, credential isolation, refresh, provider
 lifecycle, device sessions and the authenticated WebUI boundary.

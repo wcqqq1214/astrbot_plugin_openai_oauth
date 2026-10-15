@@ -641,24 +641,31 @@ dialog::backdrop {
 .provider-list > * + .editor {
   border-top: 1px solid var(--line);
 }
+/* A row holds the selecting button and, beside it, the enable switch. */
 .provider-row {
   display: flex;
   align-items: center;
-  gap: 12px;
   width: 100%;
-  min-height: 60px;
-  padding: 10px 14px 10px 16px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  font: inherit;
   transition: background 120ms var(--snap);
 }
 .provider-row:hover {
   background: var(--hover-fill);
 }
-.provider-row:focus-visible {
+.provider-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  min-height: 60px;
+  padding: 10px 6px 10px 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+.provider-main:focus-visible {
   outline-offset: -2px;
 }
 .provider-row.open,
@@ -690,7 +697,14 @@ dialog::backdrop {
   flex: 1;
   min-width: 0;
 }
+.provider-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .provider-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -740,6 +754,115 @@ dialog::backdrop {
 .provider-meta.danger .status-dot {
   background: var(--bad);
 }
+.row-tag {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--muted-surface);
+  color: var(--secondary);
+  font-size: 11px;
+  font-weight: var(--medium);
+  line-height: 18px;
+  white-space: nowrap;
+}
+.row-tag.auto {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+/* Disabled is not a health state: dim the identity, keep the status color. */
+.provider-row.disabled .provider-icon {
+  opacity: 0.5;
+}
+.provider-row.disabled .provider-name {
+  color: var(--secondary);
+}
+
+/* ---------- Switch and segmented choice ---------- */
+.switch {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 52px;
+  height: 44px;
+  margin-right: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+}
+.switch-track {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  transition: background 140ms var(--snap);
+}
+.switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 30%);
+  transition: transform 160ms var(--snap);
+}
+.switch[aria-checked="true"] .switch-track {
+  background: var(--primary);
+}
+.switch[aria-checked="true"] .switch-track::after {
+  transform: translateX(14px);
+}
+.switch[aria-busy="true"] {
+  cursor: progress;
+}
+.switch:focus-visible {
+  outline-offset: -4px;
+}
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 100%;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--muted-surface);
+}
+.segmented button {
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--secondary);
+  font-size: 12.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+  transition:
+    background 120ms var(--snap),
+    color 120ms var(--snap);
+}
+.segmented button:hover:not(:disabled) {
+  color: var(--text);
+}
+.segmented button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: var(--medium);
+  box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgb(0 0 0 / 6%);
+}
+.editor-note {
+  padding-top: 6px;
+  font-size: 12.5px;
+  color: var(--secondary);
+}
+.segmented + .editor-note {
+  padding-top: 8px;
+  color: var(--muted);
+}
+
 .chevron {
   display: grid;
   place-items: center;
@@ -889,8 +1012,47 @@ dialog::backdrop {
     flex: 1;
     font-size: 11.5px;
   }
-  .provider-row {
-    padding: 10px 12px;
+  .provider-main {
+    gap: 10px;
+    padding: 10px 2px 10px 12px;
+  }
+  /* Stack name, account and status so tags never squeeze the name out. */
+  .provider-main {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "icon title chevron"
+      "icon sub chevron"
+      "icon meta chevron";
+    row-gap: 1px;
+  }
+  .provider-copy {
+    display: contents;
+  }
+  .provider-icon {
+    grid-area: icon;
+  }
+  .provider-title {
+    grid-area: title;
+  }
+  .provider-name {
+    min-width: 4em;
+  }
+  .provider-sub {
+    grid-area: sub;
+  }
+  .provider-meta {
+    grid-area: meta;
+    max-width: none;
+    min-width: 0;
+    font-size: 12.5px;
+  }
+  .chevron {
+    grid-area: chevron;
+  }
+  .switch {
+    width: 46px;
+    margin-right: 4px;
   }
   .editor {
     padding: 0 12px;

@@ -1,9 +1,11 @@
 // Offline preview of the production page. All accounts and quotas are examples.
 const previewProviders = [
-  {id: "local-codex", name: "Local Codex", credential_mode: "local_codex", status: "ready", email: "local@example.com", plan_type: "pro", account_revision: "local-one"},
-  {id: "personal", name: "ChatGPT · 个人", credential_mode: "device_oauth", status: "ready", email: "personal@example.com", plan_type: "plus", account_revision: "personal-one"},
-  {id: "work", name: "ChatGPT · 工作", credential_mode: "device_oauth", status: "not_logged_in"},
+  {id: "local-codex", name: "Local Codex", credential_mode: "local_codex", status: "ready", email: "local@example.com", plan_type: "pro", account_revision: "local-one", enabled: true, routing_mode: "auto"},
+  {id: "personal", name: "ChatGPT · 个人", credential_mode: "device_oauth", status: "ready", email: "personal@example.com", plan_type: "plus", account_revision: "personal-one", enabled: true, routing_mode: "fixed"},
+  {id: "work", name: "ChatGPT · 工作", credential_mode: "device_oauth", status: "not_logged_in", enabled: false, routing_mode: "fixed"},
 ];
+// `?fail=update` rejects every provider update, to preview the error path.
+const failUpdates = new URLSearchParams(location.search).get("fail") === "update";
 const previewSessions = new Map();
 window.AstrBotPluginPage = {
   ready: async () => ({locale: "zh-CN"}),
@@ -18,8 +20,15 @@ window.AstrBotPluginPage = {
         {label_seconds: 604800, used_percent: provider.id === "local-codex" ? 4 : 42, reset_after_seconds: 172800},
       ]},
     };
-    if (endpoint === "providers/update") provider.name = body.name;
-    else if (endpoint === "providers/delete") previewProviders.splice(previewProviders.indexOf(provider), 1);
+    if (endpoint === "providers/update") {
+      // Mirror the server: partial updates with strict types, then the saved object.
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      if (failUpdates) throw new Error("离线演示：模拟保存失败");
+      if ("enabled" in body && typeof body.enabled !== "boolean") throw new Error("enabled must be a boolean.");
+      if ("routing_mode" in body && !["fixed", "auto"].includes(body.routing_mode)) throw new Error("routing_mode must be fixed or auto.");
+      for (const key of ["name", "enabled", "routing_mode"]) if (key in body) provider[key] = body[key];
+      return {status: "success", provider: structuredClone(provider)};
+    } else if (endpoint === "providers/delete") previewProviders.splice(previewProviders.indexOf(provider), 1);
     else if (endpoint === "device/start") {
       const id = "demo-" + Date.now();
       previewSessions.set(id, body);
@@ -32,7 +41,7 @@ window.AstrBotPluginPage = {
       const id = target.source_id || body.session_id;
       const existing = previewProviders.find((p) => p.id === id);
       if (existing) existing.status = "ready";
-      else previewProviders.push({id, name: target.name, credential_mode: "device_oauth", status: "ready", account_revision: id});
+      else previewProviders.push({id, name: target.name, credential_mode: "device_oauth", status: "ready", account_revision: id, enabled: true, routing_mode: "fixed"});
       previewSessions.delete(body.session_id);
       return {status: "success", source_id: id};
     }

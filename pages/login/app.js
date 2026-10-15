@@ -5,7 +5,24 @@ const strings = {
   en: {
     title: "Providers",
     refresh: "Refresh status",
-    providerHelp: "Select a provider to see its allowance and settings. Choose which source to use in AstrBot model settings.",
+    providerHelp: "Select a provider to see its allowance and settings; selecting it does not change the account that serves requests. Choose each model's source in AstrBot model settings.",
+    enabledLabel: "Enabled",
+    enable: (name) => `Use ${name} for new requests`,
+    enabledOn: "Enabled. Models bound to it can use it, and automatic fallback may pick it.",
+    enabledOff:
+      "Disabled. New requests, including fallback, skip it. Its login, allowance and model bindings are kept; enabling it again does not clear a cooldown or repair sign-in.",
+    disabledTag: "Disabled",
+    autoTag: "Fallback",
+    routingLabel: "Routing",
+    routingFixed: "Fixed provider",
+    routingAuto: "Automatic fallback",
+    routingFixedHelp:
+      "Applies to models bound to this provider: only this provider is used. If it is disabled or unavailable, the request fails.",
+    routingAutoHelp:
+      "Applies to models bound to this provider: try it first, then other enabled, available providers in list order. Each account is tried once, and nothing switches after output starts.",
+    saving: "Saving…",
+    saveFailed: (name, message) => `Could not save ${name}: ${message}`,
+    saveUnknown: "The save result is unknown. Reloaded the latest state.",
     name: "Provider name",
     nameShort: "Name",
     saveName: "Save",
@@ -74,10 +91,11 @@ const strings = {
       `Resets in ${n} ${{ m: "min", h: n === 1 ? "hour" : "hours", d: n === 1 ? "day" : "days" }[unit]}`,
     weeklyOnly:
       "Only the weekly window is returned. Missing windows do not imply unlimited usage.",
-    exhausted:
-      "Allowance limit reached. See the window reset time; the account will not switch automatically.",
-    exhaustedUntil: (when) =>
-      `Allowance limit reached. It recovers ${when}. The account will not switch automatically.`,
+    exhausted: "Allowance limit reached. See the window reset time.",
+    exhaustedUntil: (when) => `Allowance limit reached. It recovers ${when}.`,
+    noSwitch: "Models bound to it will not switch accounts automatically.",
+    willFallback:
+      "Automatic fallback is on: models bound to it try other enabled, available providers.",
     coolingUntil: (when) =>
       `The subscription quota is cooling down until ${when}.`,
     denied: "The service reports this allowance is currently unavailable.",
@@ -106,7 +124,24 @@ const strings = {
   zh: {
     title: "Providers",
     refresh: "刷新状态",
-    providerHelp: "点击 Provider 查看额度与设置；实际使用哪个来源，请在 AstrBot 模型配置中选择。",
+    providerHelp: "点击 Provider 查看额度与设置，不会切换实际请求使用的账号；各模型的来源请在 AstrBot 模型配置中选择。",
+    enabledLabel: "启用",
+    enable: (name) => `新请求使用 ${name}`,
+    enabledOn: "已启用：绑定它的模型可以使用它，自动回退也可能选中它。",
+    enabledOff:
+      "已停用：新请求（包括自动回退）都会跳过它。登录、额度和模型绑定仍保留；重新启用不会清除冷却，也不会修复认证。",
+    disabledTag: "已停用",
+    autoTag: "自动回退",
+    routingLabel: "路由",
+    routingFixed: "固定 Provider",
+    routingAuto: "自动回退",
+    routingFixedHelp:
+      "作用于以此 Provider 为首选来源的模型：只使用它；它停用或不可用时请求直接失败。",
+    routingAutoHelp:
+      "作用于以此 Provider 为首选来源的模型：先用它，再按列表顺序尝试其他已启用且可用的 Provider；同一账号只尝试一次，开始输出后不再切换。",
+    saving: "正在保存…",
+    saveFailed: (name, message) => `保存「${name}」失败：${message}`,
+    saveUnknown: "保存结果未知，已重新获取最新状态。",
     name: "Provider 名称",
     nameShort: "名称",
     saveName: "保存",
@@ -170,10 +205,10 @@ const strings = {
     resetIn: (n, unit) =>
       `${n} ${{ m: "分钟", h: "小时", d: "天" }[unit]}后重置`,
     weeklyOnly: "仅显示已返回的每周窗口；未返回不代表无限额度。",
-    exhausted:
-      "已达到额度上限，请查看窗口重置时间。当前不会自动切换 Provider。",
-    exhaustedUntil: (when) =>
-      `已达到额度上限，将于 ${when} 恢复。当前不会自动切换 Provider。`,
+    exhausted: "已达到额度上限，请查看窗口重置时间。",
+    exhaustedUntil: (when) => `已达到额度上限，将于 ${when} 恢复。`,
+    noSwitch: "以它为首选的模型不会自动切换账号。",
+    willFallback: "已开启自动回退：以它为首选的模型会尝试其他已启用且可用的 Provider。",
     coolingUntil: (when) => `订阅额度冷却中，预计 ${when} 恢复。`,
     denied: "服务端返回当前额度不可用。",
     close: "关闭",
@@ -223,6 +258,8 @@ const providerList = byId("providers");
 const providerDetail = byId("provider-detail");
 const providerNameInput = byId("provider-name");
 const renameButton = byId("rename-provider");
+const routingButtons = { fixed: byId("routing-fixed"), auto: byId("routing-auto") };
+const saveError = byId("save-error");
 const plans = {
   free: "Free",
   go: "Go",
@@ -269,6 +306,17 @@ let usageMessage = "loading";
 let shownRevision = null;
 let lastUpdated = null;
 let startLabel = "start";
+// Provider writes. Each source has one promise chain so its updates reach the
+// server in order. `pendingChanges` holds the values the user asked for while
+// they are queued or in flight; `providers` only holds server-confirmed state.
+const saveChains = new Map();
+const pendingChanges = new Map();
+// A list or usage response issued before a write settled may describe the
+// previous state. Every write start and finish bumps the sequence so such a
+// response keeps the locally confirmed editable fields instead.
+const lastMutation = new Map();
+let mutationSeq = 0;
+const editableFields = ["name", "enabled", "routing_mode"];
 
 function applyLocale(locale) {
   isEnglish = String(locale || "zh-CN").startsWith("en");
@@ -283,6 +331,10 @@ function applyLocale(locale) {
     "rename-provider": t.saveName,
     "quota-label": t.quotaLabel,
     "source-label": t.sourceLabel,
+    "enabled-label": t.enabledLabel,
+    "routing-label": t.routingLabel,
+    "routing-fixed": t.routingFixed,
+    "routing-auto": t.routingAuto,
     "delete-hint": t.removeHint,
     "delete-provider": t.remove,
     "open-login": t.renew,
@@ -426,12 +478,48 @@ function renderAccountStatus(result) {
   byId("open-login").hidden = local;
   byId("delete-provider").hidden = local;
   byId("delete-row").hidden = local;
+  renderControls();
   updateNotice();
+}
+
+// Enabled and routing mode are separate from the health status above: a
+// disabled source keeps its login, and enabling it repairs nothing.
+function renderControls() {
+  const view = effective(account);
+  const busy = isSaving(account.id);
+  byId("enabled-note").textContent = isEnabled(view) ? t.enabledOn : t.enabledOff;
+  const mode = routingMode(view);
+  for (const [key, button] of Object.entries(routingButtons)) {
+    button.setAttribute("aria-pressed", String(key === mode));
+    button.disabled = busy || !account.id;
+  }
+  byId("routing-help").textContent =
+    mode === "auto" ? t.routingAutoHelp : t.routingFixedHelp;
+  syncRename();
 }
 
 function syncRename() {
   const value = String(providerNameInput.value || "").trim();
-  renameButton.disabled = !value || value === (account.name || "");
+  renameButton.disabled =
+    !value || value === (effective(account).name || "") || isSaving(account.id);
+}
+
+function isSaving(id) {
+  return Boolean(pendingChanges.get(id)?.length);
+}
+
+function effective(provider) {
+  const changes = pendingChanges.get(provider?.id);
+  return changes?.length ? Object.assign({}, provider, ...changes) : provider;
+}
+
+// Sources saved before the switch existed migrate to enabled on the server.
+function isEnabled(provider) {
+  return provider?.enabled !== false;
+}
+
+function routingMode(provider) {
+  return provider?.routing_mode === "auto" ? "auto" : "fixed";
 }
 
 function windowLabel(seconds, short = false) {
@@ -577,6 +665,7 @@ function updateNotice() {
     message = resets.length
       ? t.exhaustedUntil(formatAbsolute(Math.max(...resets)))
       : t.exhausted;
+    message += (isEnglish ? " " : "") + (routingMode(effective(account)) === "auto" ? t.willFallback : t.noSwitch);
   } else if (account.status === "cooling") {
     const until = formatAbsolute(resetSeconds(account.cooldown_until));
     message = until ? t.coolingUntil(until) : t.details.cooling;
@@ -611,15 +700,22 @@ function providerName(provider) {
 function providerRow(id) {
   let node = rowNodes.get(id);
   if (node) return node;
-  const row = element("button", "provider-row");
-  row.type = "button";
-  row.setAttribute("aria-controls", "provider-detail");
+  // The row is a container: the main button selects the provider for
+  // management, and the switch beside it (never nested in it) sets `enabled`.
+  const row = element("div", "provider-row");
+  const main = element("button", "provider-main");
+  main.type = "button";
+  main.setAttribute("aria-controls", "provider-detail");
   const icon = element("span", "provider-icon");
   icon.setAttribute("aria-hidden", "true");
   const copy = element("span", "provider-copy");
+  const title = element("span", "provider-title");
   const name = element("strong", "provider-name");
+  const disabledTag = element("span", "row-tag");
+  const autoTag = element("span", "row-tag auto");
+  title.append(name, disabledTag, autoTag);
   const sub = element("span", "provider-sub");
-  copy.append(name, sub);
+  copy.append(title, sub);
   // Row summary: a status dot and the plan while healthy, the
   // status itself once something needs attention.
   const meta = element("span", "provider-meta");
@@ -628,30 +724,51 @@ function providerRow(id) {
   const chevron = element("span", "chevron");
   chevron.setAttribute("aria-hidden", "true");
   chevron.innerHTML = chevronIcon;
-  row.append(icon, copy, meta, chevron);
-  row.addEventListener("click", () => void selectProvider(id));
-  node = { row, icon, name, sub, meta, metaText, mode: null };
+  main.append(icon, copy, meta, chevron);
+  main.addEventListener("click", () => void selectProvider(id));
+  const toggle = element("button", "switch");
+  toggle.type = "button";
+  toggle.setAttribute("role", "switch");
+  toggle.append(element("span", "switch-track"));
+  toggle.addEventListener("click", () => void toggleEnabled(id));
+  row.append(main, toggle);
+  node = { row, main, icon, name, disabledTag, autoTag, sub, meta, metaText, toggle, mode: null };
   rowNodes.set(id, node);
   return node;
 }
 
 function renderProviders() {
   const order = [];
-  for (const provider of providers) {
+  for (const confirmed of providers) {
+    const provider = effective(confirmed);
     const node = providerRow(provider.id);
     const local = provider.credential_mode === "local_codex";
     const selected = provider.id === selectedSourceId;
     const state = String(provider.status || "unknown");
     const mode = local ? "local" : "device";
+    const enabled = isEnabled(provider);
+    const busy = isSaving(provider.id);
     if (node.mode !== mode) {
       node.mode = mode;
       node.icon.className = "provider-icon " + mode;
       node.icon.innerHTML = providerIcons[mode];
     }
     node.row.className =
-      "provider-row" + (selected ? " selected" : "") + (selected && expanded ? " open" : "");
-    node.row.setAttribute("aria-expanded", String(selected && expanded));
+      "provider-row" +
+      (selected ? " selected" : "") +
+      (selected && expanded ? " open" : "") +
+      (enabled ? "" : " disabled");
+    node.main.setAttribute("aria-expanded", String(selected && expanded));
     node.name.textContent = providerName(provider);
+    node.disabledTag.textContent = t.disabledTag;
+    node.disabledTag.hidden = enabled;
+    node.autoTag.textContent = t.autoTag;
+    node.autoTag.hidden = routingMode(provider) !== "auto";
+    node.toggle.setAttribute("aria-checked", String(enabled));
+    node.toggle.setAttribute("aria-label", t.enable(providerName(provider)));
+    node.toggle.setAttribute("title", busy ? t.saving : t.enable(providerName(provider)));
+    node.toggle.setAttribute("aria-busy", String(busy));
+    node.toggle.disabled = busy;
     const plan = plans[provider.plan_type];
     node.sub.textContent = provider.email || (local ? t.localShort : t.deviceShort);
     const healthy = state === "ready";
@@ -710,11 +827,12 @@ async function queryUsage() {
   const pending = (async () => {
     setRefreshing(true);
     if (!lastUsage) showUsageMessage("loading");
+    const since = mutationSeq;
     try {
       const list = await bridge.apiPost("providers/list", {});
       if (generation !== viewGeneration) return;
-      providers = list.providers;
-      if (!Array.isArray(providers)) throw new Error(t.listFailed);
+      if (!Array.isArray(list?.providers)) throw new Error(t.listFailed);
+      providers = list.providers.map((p) => keepNewerEdits(p, since));
       byId("page-error").hidden = true;
       if (!providers.some((p) => p.id === selectedSourceId)) {
         selectedSourceId = providers[0]?.id || null;
@@ -735,6 +853,7 @@ async function queryUsage() {
       if (generation !== viewGeneration) return;
       if (result?.status === "account_changed") result = await bridge.apiPost("account/usage", body);
       if (generation !== viewGeneration) return;
+      if (result?.account) result.account = keepNewerEdits(result.account, since);
       renderUsage(result);
       providers = providers.map((p) => p.id === selectedSourceId ? account : p);
       renderProviders();
@@ -755,22 +874,144 @@ async function queryUsage() {
   finally { if (refreshPromise === pending) refreshPromise = null; }
 }
 
-async function editProvider(remove = false) {
+function markMutation(id) {
+  lastMutation.set(id, ++mutationSeq);
+}
+
+// Keep the confirmed editable fields when this response may predate a write.
+function keepNewerEdits(next, since) {
+  const id = next?.id;
+  if (!isSaving(id) && (lastMutation.get(id) ?? 0) <= since) return next;
+  const local = providers.find((p) => p.id === id);
+  if (!local) return next;
+  const kept = { ...next };
+  for (const key of editableFields) if (key in local) kept[key] = local[key];
+  return kept;
+}
+
+function runInChain(sourceId, task) {
+  const previous = saveChains.get(sourceId) || Promise.resolve();
+  const next = previous.then(task, task);
+  const tail = next.catch(() => {});
+  saveChains.set(sourceId, tail);
+  void tail.then(() => {
+    if (saveChains.get(sourceId) === tail) saveChains.delete(sourceId);
+  });
+  return next;
+}
+
+function renderSourceState(sourceId) {
+  renderProviders();
+  if (sourceId === selectedSourceId) renderControls();
+}
+
+function applyProvider(provider) {
+  const index = providers.findIndex((p) => p.id === provider.id);
+  if (index < 0) return;
+  providers[index] = provider;
+  if (provider.id === selectedSourceId) renderAccountStatus(provider);
+}
+
+function showSaveError(message) {
+  saveError.textContent = message;
+  saveError.hidden = !message;
+}
+
+// Send only the fields the user changed. The server's provider object is
+// authoritative; a rejected or unclear outcome reloads the list.
+async function saveProvider(sourceId, changes) {
+  const queued = pendingChanges.get(sourceId) || [];
+  queued.push(changes);
+  pendingChanges.set(sourceId, queued);
+  markMutation(sourceId);
+  showSaveError("");
+  renderSourceState(sourceId);
+  let reconcile = false;
+  try {
+    const result = await runInChain(sourceId, () =>
+      bridge.apiPost("providers/update", { source_id: sourceId, ...changes }),
+    );
+    const provider = result?.provider;
+    if (result?.status === "success" && provider?.id === sourceId) {
+      applyProvider(provider);
+    } else {
+      reconcile = true;
+      showSaveError(t.saveUnknown);
+    }
+  } catch (reason) {
+    // The bridge reports HTTP rejections and transport failures alike, so
+    // the write may or may not have landed. Keep the previous state and
+    // reload it from the server.
+    reconcile = true;
+    const local = providers.find((p) => p.id === sourceId);
+    showSaveError(
+      t.saveFailed(local ? providerName(local) : sourceId, reason?.message || t.saveUnknown),
+    );
+  } finally {
+    const left = (pendingChanges.get(sourceId) || []).filter((c) => c !== changes);
+    if (left.length) pendingChanges.set(sourceId, left);
+    else pendingChanges.delete(sourceId);
+    markMutation(sourceId);
+    renderSourceState(sourceId);
+  }
+  if (reconcile) await reloadProviders();
+}
+
+// Refetch the provider list without touching the selected allowance.
+async function reloadProviders() {
+  const since = mutationSeq;
+  try {
+    const list = await bridge.apiPost("providers/list", {});
+    if (!Array.isArray(list?.providers)) return;
+    providers = list.providers.map((p) => keepNewerEdits(p, since));
+    const selected = providers.find((p) => p.id === selectedSourceId);
+    if (!selected) {
+      await queryUsage();
+      return;
+    }
+    renderProviders();
+    renderAccountStatus(selected);
+  } catch {
+    // The save error stays visible; the next refresh retries the list.
+  }
+}
+
+async function toggleEnabled(sourceId) {
+  const provider = providers.find((p) => p.id === sourceId);
+  if (!provider || isSaving(sourceId)) return;
+  await saveProvider(sourceId, { enabled: !isEnabled(effective(provider)) });
+}
+
+async function setRoutingMode(mode) {
+  const sourceId = selectedSourceId;
+  if (!sourceId || isSaving(sourceId)) return;
+  if (routingMode(effective(account)) === mode) return;
+  await saveProvider(sourceId, { routing_mode: mode });
+}
+
+async function renameProvider() {
+  const sourceId = selectedSourceId;
+  const name = String(providerNameInput.value || "").trim();
+  if (!sourceId || renameButton.disabled || !name) return;
+  await saveProvider(sourceId, { name });
+}
+
+async function deleteProvider() {
   const sourceId = selectedSourceId;
   if (!sourceId) return;
-  if (remove && deletingSourceId !== sourceId) {
+  if (deletingSourceId !== sourceId) {
     deletingSourceId = sourceId;
     byId("delete-provider").textContent = t.confirmRemove;
     byId("delete-hint").textContent = t.confirmHint;
     return;
   }
-  const button = byId(remove ? "delete-provider" : "rename-provider");
+  const button = byId("delete-provider");
   button.disabled = true;
   try {
-    await bridge.apiPost(remove ? "providers/delete" : "providers/update", {
-      source_id: sourceId, name: byId("provider-name").value,
-    });
-    if (remove && selectedSourceId === sourceId) await openProvider(null);
+    await runInChain(sourceId, () =>
+      bridge.apiPost("providers/delete", { source_id: sourceId }),
+    );
+    if (selectedSourceId === sourceId) await openProvider(null);
     else await queryUsage();
   } catch (reason) {
     byId("page-error").textContent = reason?.message || t.failed;
@@ -966,14 +1207,16 @@ copyCodeButton.addEventListener(
 );
 byId("open-login").addEventListener("click", () => openLogin(selectedSourceId));
 byId("add-provider").addEventListener("click", () => openLogin());
-byId("rename-provider").addEventListener("click", () => void editProvider());
+byId("rename-provider").addEventListener("click", () => void renameProvider());
+routingButtons.fixed.addEventListener("click", () => void setRoutingMode("fixed"));
+routingButtons.auto.addEventListener("click", () => void setRoutingMode("auto"));
 providerNameInput.addEventListener("input", syncRename);
 providerNameInput.addEventListener("keydown", (event) => {
   // Some browsers report the composition-ending Enter only as keyCode 229.
   if (event.isComposing || event.keyCode === 229) return;
-  if (event.key === "Enter" && !renameButton.disabled) void editProvider();
+  if (event.key === "Enter" && !renameButton.disabled) void renameProvider();
 });
-byId("delete-provider").addEventListener("click", () => void editProvider(true));
+byId("delete-provider").addEventListener("click", () => void deleteProvider());
 async function closeLogin() {
   if (closeButton.disabled || cancelling) return;
   if (activeSessionId) await cancelLogin();
