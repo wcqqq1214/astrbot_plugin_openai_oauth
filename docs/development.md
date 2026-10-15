@@ -1,0 +1,51 @@
+# Development
+
+## Layout
+
+`main.py` contains the AstrBot entry point, lifecycle hooks, and command registration.
+The implementation lives in the internal `src/` package, loaded by AstrBot through
+relative imports:
+
+- `runtime.py`: shared configuration and credential coordination.
+- `provider.py`: model adaptation, streaming, retries, and source routing.
+- `oauth.py` and `login.py`: OAuth protocol, login sessions, and task cleanup.
+- `web_api.py`: WebUI endpoints.
+- `usage.py` and `effort.py`: allowance queries and conversation reasoning settings.
+- `credential_store.py`, `local_codex.py`, `provider_registry.py`, and
+  `provider_routing.py`: credentials, account sources, and routing rules.
+
+WebUI assets live in `pages/providers/`. Plugin metadata and configuration descriptions
+stay at the repository root. See [routing API](provider-routing-api.md) for dispatch
+rules and [screenshot notes](../images/README.md) for image provenance.
+
+## Checks
+
+The plugin's uv environment contains only its own development dependencies.
+AstrBot and its framework dependencies are provided by the host process.
+
+```sh
+uv sync
+uv run ruff check .
+uv run ruff format --check .
+node tests/view_test.mjs
+```
+
+Run `tests/run_tests.py` with the local AstrBot checkout's virtualenv Python:
+
+```sh
+/path/to/AstrBot/.venv/bin/python tests/run_tests.py
+```
+
+The runner tests this checkout rather than the deployed plugin copy. Tests use
+isolated credentials to avoid reading or refreshing real accounts. Follow
+[AGENTS.md](../AGENTS.md) for repository conventions and local setup.
+
+## Releases
+
+Pushing `main` runs tests without publishing a release. To release:
+
+1. Keep `metadata.yaml`, `pyproject.toml`, the README version badges, and the changelog in sync.
+2. Create and push the matching `vX.Y.Z` tag.
+
+The release workflow checks that the tag matches the plugin version, then packages
+and publishes it. A local-only tag does not trigger a release.

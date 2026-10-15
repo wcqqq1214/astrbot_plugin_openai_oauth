@@ -15,203 +15,117 @@
   <a href="README_en.md">English</a>
 </p>
 
-这个插件把你的 ChatGPT 账号接到 AstrBot 里。安装后，AstrBot 会多出一个
-`OpenAI Subscribe` 模型来源；选择它的模型即可使用 ChatGPT/Codex 的额度，
-不用另外创建或填写 OpenAI API Key。
+用你的 ChatGPT 账号在 AstrBot 里聊天，无需另填 API Key。用的是账号的 Codex 额度，
+不是 OpenAI API 余额。需要 **AstrBot 4.27.1+** 和一个能使用 Codex 的 ChatGPT 账号。
 
-这里消耗的是 ChatGPT 账号可用的 Codex 额度，不是 OpenAI API 预付余额。
+## 先登录，再选模型
 
-支持跟随本地 Codex 登录、添加多个独立账号、查看订阅额度，以及按需开启账号自动回退。
-管理页面跟随 AstrBot 的界面语言，支持简体中文、英语、俄语和日语。
+### 已经在本机登录 Codex
 
-## 开始前，先确认这几件事
+如果 Codex 和 AstrBot 在同一台机器上，插件会自动跟随 Codex 的登录。
+在 AstrBot 模型配置中选择 **OpenAI Subscribe**，添加模型即可。以后在 Codex 切换账号，
+下一次请求就会跟随。
 
-- AstrBot 版本需要为 `4.27.1` 或更高。
-- 你需要一个可以使用 Codex 的 ChatGPT 账号。
-- 如果 Dashboard 暴露在公网，请优先配置 HTTPS、VPN 或 SSH 隧道。明文 HTTP
-  也能完成设备码登录，但 Dashboard 会话可能被窃取，不建议这样用。
-- 如果需要设备码登录，打开 ChatGPT 的 **设置 → 账户安全与登录**，开启
-  **为 Codex 启用设备代码授权**。
+没识别到登录？请看下方“常见问题”，或直接用设备码登录。
 
-![在 ChatGPT 账户安全与登录设置中启用 Codex 设备代码授权](images/enable-device-code-auth-codex-zh.png)
+### 用设备码登录，也可以添加更多账号
 
-*图：在 ChatGPT 的 **设置 → 账户安全与登录** 中，打开
-**为 Codex 启用设备代码授权**。*
+先到 ChatGPT 的 **设置 → 账户安全与登录**，开启 **为 Codex 启用设备代码授权**。
 
-> 设备码和密码一样敏感：只在 OpenAI 的验证页面输入，不要发给别人。
+<details>
+<summary>查看开关位置</summary>
 
-## 默认：跟随本地 Codex 账号
+![开启 Codex 设备代码授权](images/enable-device-code-auth-codex-zh.png)
 
-安装后默认读取 **AstrBot 所在机器**的 Codex 当前登录账号，无需进入 Plugin Page
-再次登录。先在该机器登录 Codex，再在 AstrBot 的模型配置中选择 `OpenAI Subscribe`。
+</details>
 
-- 默认读取 `$CODEX_HOME/auth.json`；未设置 `CODEX_HOME` 时读取 `~/.codex/auth.json`。
-  也可以在插件设置的 `codex_auth_path` 中填写完整文件路径。
-- 每次模型请求和额度查询都会重新读取当前账号；切换账号后，下次请求自动跟随。
-  已经开始的请求继续使用其开始时的账号。
-- 本地凭据不会复制到 AstrBot 配置。自动刷新会将轮换后的 token 原子写回 Codex
-  原文件，并保留其他字段。AstrBot 需要该文件的读取权限和所在目录的写入权限。
-- Docker 需要将整个 Codex 凭据目录挂载到容器，并配置容器内的文件路径；只挂载
-  单个文件可能导致原子替换失败。云端 AstrBot 无法直接读取你电脑的登录状态。
-- 当前支持文件中的 ChatGPT OAuth 登录；仅存于系统钥匙串的登录、API Key 登录和
-  浏览器 ChatGPT 登录不属于此模式，使用下方设备码登录即可。
+1. 打开插件详情页的 **Plugin Views → providers**，点 **新增 Provider → 获取设备码**。名称可不填。
+2. 复制授权链接，在浏览器中打开，登录 ChatGPT 并输入设备码。
+3. 看到“Provider 已保存”后，在 AstrBot 模型配置中选择新增的来源，再添加模型。
 
-Plugin Views 统一展示 Provider，本地 Codex 默认排在第一项，即使尚未登录也会保留。
-每个 Provider 独立绑定凭据，默认使用**固定 Provider**。只有主动开启**自动回退**后，
-不可用的来源才会按下文规则交给其他账号尝试。
-修改 `codex_auth_path` 后重载插件生效。
+每次新增都是独立账号，不会覆盖已有登录。设备码过期可以重新获取；不想继续时点取消。
+**设备码不要发给别人，只在 OpenAI 的授权页面输入。**
 
-## 新增 Provider：设备码登录
+## 查看额度、管理账号
 
-1. 打开插件详情页的 **Plugin Views → providers**，点击 **新增 Provider**，可选填写名称，再点击 **获取设备码**。
-2. 复制授权链接，在浏览器中打开；登录 ChatGPT 后输入设备码并确认授权。
-3. 回到 AstrBot，等待“Provider 已保存”。每次新增都会创建独立模型来源，不覆盖已有登录。
-4. 在 AstrBot 模型配置中选择对应来源，添加或绑定模型后使用。
-   点击列表项只是查看该项的状态与额度，不会改变当前会话使用的模型。
+仍在 **Plugin Views → providers** 页面操作：
 
-等待授权时可取消登录；未完成授权的新增流程不会留下空 Provider。授权码过期后可重新获取。
-聊天中的 `/usage` 查询当前选择的 OpenAI Subscribe 模型所绑定的来源。
+- **点账号行**查看额度，可以同时展开多个账号。页面打开时每 30 秒刷新，缺少额度数据不代表无限额。
+- **点齿轮**修改名称和路由，改好后点保存。设备码登录的账号也可在这里重新授权或移除。
+- **右侧开关**决定是否继续使用这个账号。关闭不会删除登录，也不会中断正在进行的请求。
 
-## 管理账号、额度和路由
+![多账号额度页面](images/providers-overview-zh.png)
 
-打开 **Plugin Views → providers**：
+*截图中的账号和额度均为示例。页面支持中文、英语、俄语和日语，跟随 AstrBot 的语言设置。*
 
-- 点击 Provider 行展开或收起额度；各账号独立展开，可以同时比较多个账号。
-- 每行显示账号、登录状态或套餐，右侧开关控制该来源是否用于新请求。
-- 点击齿轮打开设置弹窗，修改名称或路由模式后点击**保存**；取消会丢弃未保存的编辑。
-- 设备登录项可在设置中重新授权或移除。重新授权只更新该账号；移除前需先在 AstrBot 中解除模型绑定。
-  本地 Codex 的登录在主机上管理，不能从此页面移除。
-- 禁用会保留登录、模型绑定和额度信息；已开始的请求不被中断，后续尝试会重新检查开关。
-  重新启用不会清除冷却，也不会修复失效的登录。
+移除账号前，先在 AstrBot 中移除绑定它的模型。本地 Codex 账号在主机上管理，不能在这里删除。
+要切换聊天模型，请到 AstrBot 的模型设置中操作；点开账号只是在查看它。
 
-![Provider 管理页：同时展开多个账号的额度](images/providers-overview-zh.png)
+### 一个账号用不了时，自动试下一个
 
-*管理页面截图，账号与额度均为示例数据。点击齿轮配置对应来源，开关仅控制是否启用。*
+点账号旁的齿轮，选择路由模式并保存：
 
-页面可见时每 30 秒刷新列表和已展开账号的额度。额度按接口实际返回的窗口展示，
-例如仅返回每周窗口时，不补造 5 小时额度；查询失败或缺失数据不视为无限额。
-点击列表、展开额度或打开设置，都不会切换当前会话使用的模型。
-
-### 固定 Provider 与自动回退
-
-在该来源的设置弹窗中选择路由模式并保存。设置作用于绑定此来源的模型：
-
-| 路由模式 | 行为 |
+| 模式 | 怎么用 |
 | --- | --- |
-| 固定 Provider（默认） | 只使用绑定的来源；禁用或不可用时明确报错。 |
-| 自动回退 | 先尝试绑定的来源，再按列表顺序尝试其他已启用、可用的 OpenAI Subscribe 来源。 |
+| 固定 Provider（默认） | 只用这个账号，不可用时就报错。 |
+| 自动回退 | 优先用这个账号，失败时按列表顺序尝试其他已启用、可用的账号。 |
 
-![Provider 设置弹窗：名称、自动回退及账号操作](images/provider-settings-zh.png)
+自动回退只换账号，不换模型。额度用完、登录失效或临时网络故障时可以尝试其他账号；
+参数填错等问题仍会直接报错。开始输出内容或调用工具后，不再切换重来。
+下次请求仍优先尝试原来的账号，所有账号都不可用时会报错。
 
-*示例展示选择“自动回退”后的待保存状态。重新授权和移除是独立操作，不会保存上面的名称或路由草稿。*
+<details>
+<summary>查看设置弹窗</summary>
 
-自动回退保持请求模型和请求内容不变，仅切换账号；不会自动改用另一种模型。
-禁用、未登录、凭据失效、额度冷却的来源会跳过；可重试的网络或服务故障经有限重试后尝试下一账号。
-同一个账号的重复来源不会被当成新的回退账号。
+![在账号设置中选择自动回退](images/provider-settings-zh.png)
 
-已经输出文本、思考内容或工具调用后，不再切换或重放；取消请求也不会触发回退。
-参数错误、不支持的模型等错误会直接报告。全部候选均不可用或达到重试预算时，请求失败，
-不会自动启用被关闭的来源。
+*示例中已选“自动回退”，点击保存后才生效。*
 
-回退不会改写模型绑定，也不会让会话固定留在回退账号；后续请求仍从首选来源开始，
-按其当时状态决定是否跳过。聊天中的 `/usage` 仍显示绑定来源的额度，而非上一次实际响应账号。
-AstrBot 自身配置的模型 fallback 列表是另一层机制，本插件不会修改它。
+</details>
 
-## 旧配置迁移
+## 常用命令和思考强度
 
-插件初始化时自动迁移，重复加载不会重复创建。原 ID 与模型绑定保留：
+`/openai_login` 和 `/effort` 需要管理员权限。
 
-- 旧版开启本地跟随且本地登录可用：原来源变成本地 Codex，原来保存的设备登录拆成独立来源。
-- 旧版关闭本地跟随，或本地不可用且存在已保存凭据：原来源保留设备登录，另建本地 Codex。
-- 其他已有 OpenAI Subscribe 来源保留 ID、凭据及连接设置，作为独立设备登录 Provider。
-
-旧 `follow_local_codex` 设置仅用于首次迁移，不再作为账号切换开关。
-凭据格式无效时保留原数据并显示需处理状态，便于重新授权。
-
-如果暂时打不开 WebUI，管理员可以在与机器人的**私聊**中发送：
-
-```text
-/openai_login
-```
-
-机器人会回复验证网址和一次性设备码。成功后新增独立 Provider，并返回其 ID；请在模型配置中选择。群聊不会启动登录流程。
-
-## 想调整模型的思考强度？（可选）
-
-不设置也可以正常使用，模型会采用默认行为。
-
-1. 进入模型配置，编辑使用 `OpenAI Subscribe` 的那一个模型。
-2. 找到 **自定义请求体参数（`custom_extra_body`）**。
-3. 在 **Reasoning Effort** 输入框中填写想要的值，然后点击右下角 **确认** 保存。
-
-![在内置的 Reasoning Effort 预设中填写 max](images/reasoning-effort-preset-zh.png)
-
-*图：AstrBot 内置的 **Reasoning Effort** 预设。填写 `max` 后点击 **确认** 即可。*
-
-本插件支持以下值，填写时请使用小写英文：
-
-| WebUI 里常见的显示名 | 要填写的值 |
+| 命令 | 用途 |
 | --- | --- |
-| Light | `low` |
-| Medium | `medium` |
-| High | `high` |
-| Extra High | `xhigh` |
-| Max | `max` |
+| `/usage` | 查看当前模型绑定账号的额度，不一定是上次回退后实际使用的账号。 |
+| `/openai_login` | 私聊机器人，用设备码添加账号。 |
+| `/effort` | 查看当前会话的思考强度。 |
+| `/effort high` | 调整当前会话的思考强度，下次请求生效。 |
+| `/effort default` | 恢复模型默认设置。 |
 
-请填写右侧的值，不要把左侧显示名直接填进去。插件会自动转换为 Codex 所需的请求格式。
+思考强度可以不设。可选值为 `low`、`medium`、`high`、`xhigh`、`max`。
+要给模型设置默认值，在模型配置的 **自定义请求体参数 → Reasoning Effort** 中填写并保存。
+会话命令只影响当前会话，不会修改其他会话或模型默认值。
 
-### 只给当前会话调整思考强度
+<details>
+<summary>查看模型默认值的设置位置</summary>
 
-管理员可以在私聊或群聊的当前会话里使用：
+![填写 Reasoning Effort](images/reasoning-effort-preset-zh.png)
 
-```text
-/effort
-/effort low
-/effort medium
-/effort high
-/effort xhigh
-/effort max
-/effort default
-```
+</details>
 
-`/effort` 用来查看当前设置；指定一个值后，会在下一次请求时生效。
-`/effort default` 会取消这次会话的覆盖，恢复模型配置里的默认值。它不会改动其他会话，
-也不会改掉模型的全局配置。
+## 常见问题
 
-## 网络、额度和安全
+**没读到本地 Codex 登录？** 默认读取 `$CODEX_HOME/auth.json`，未设置时读 `~/.codex/auth.json`。
+可以在插件设置的 `codex_auth_path` 填完整路径，保存后重载插件。AstrBot 需要读取文件和写入所在目录的权限，
+以便自动更新登录。只在浏览器或系统钥匙串中登录的情况，请改用设备码。
 
-- 默认直连时，插件只会访问 OpenAI 的 `auth.openai.com` 和 `chatgpt.com`。登录、刷新凭据、获取模型、查询额度和调用模型都走这两个域名。
-- 需要出站代理时，可在对应的 OpenAI Subscribe 来源配置中填写 `proxy`。也可以在 **AstrBot 进程或容器**中同时设置 `HTTP_PROXY` 和 `HTTPS_PROXY`，来源的 `proxy` 留空；显式填写的来源代理优先。自动回退时使用候选来源自己的连接配置。
-- 登录凭据不会返回到浏览器，也不会发到聊天里。本地模式使用 Codex 的 `auth.json`；
-  设备码登录的凭据以明文保存在 AstrBot 的 `data/cmd_config.json`。
-  请限制这些文件及其备份的读取权限。
-- 一个 `OpenAI Subscribe` 模型来源对应一个 ChatGPT 账号。达到额度时，页面会显示冷却和重置时间；固定模式报错，自动回退模式按配置尝试其他可用账号。
-- 如果看到 `unsupported_country_region_territory`，表示 OpenAI 不接受当前部署出口网络或账号条件。插件无法绕过这个限制。
+**AstrBot 在 Docker 或服务器上？** 它不能直接读取你电脑的登录。
+Docker 需要挂载整个 Codex 凭据目录，并填写容器内的路径，不要只挂载单个文件；也可以用设备码登录。
 
-请使用你自己的账号，并确认使用方式符合 OpenAI 的服务条款。
+**需要代理？** 在对应模型来源的 `proxy` 中填写，或给 AstrBot 进程／容器设置
+`HTTP_PROXY` 和 `HTTPS_PROXY`。来源中填写的代理优先。
+如果报 `unsupported_country_region_territory`，说明 OpenAI 不接受当前网络出口或账号条件，插件无法绕过。
 
-## 开发验证
+**从旧版升级？** 插件会自动整理旧账号配置，保留原有模型绑定，必要时将本地登录和设备登录拆成两项，无需手动迁移。
 
-`main.py` 只保留 AstrBot 插件入口、生命周期和命令注册；核心代码位于 `src/`：
+请保管好登录文件及备份：本地登录使用 Codex 的 `auth.json`，设备码登录信息以明文保存在
+AstrBot 的 `data/cmd_config.json`。公网访问 Dashboard 请使用 HTTPS、VPN 或 SSH 隧道。
+请使用自己的账号，并遵守 OpenAI 的服务条款。
 
-- `runtime.py`：共享配置和凭据协调器。
-- `provider.py`：模型适配、流式响应、重试和来源路由。
-- `oauth.py`、`login.py`：OAuth 协议、登录会话和任务清理。
-- `web_api.py`：WebUI 接口；`usage.py`、`effort.py`：额度和会话推理强度。
-- `credential_store.py`、`local_codex.py`、`provider_registry.py`、`provider_routing.py`：凭据、账号来源和路由规则。
+## 开发与许可证
 
-`src` 是插件内部包，使用相对导入，由 AstrBot 加载，无需单独安装。
-`pages/` 保留 WebUI 静态资源；插件元数据和配置描述保留在根目录。
-
-使用本地 AstrBot 的解释器执行 `tests/run_tests.py`。它会测试当前插件仓库而非
-已部署的插件副本，并使用临时 Codex 目录，避免读取或刷新真实账号凭据。
-
-## License / 许可证
-
-AGPL-3.0。
-
-## 发布流程
-
-推送 `main` 仅更新代码并运行测试，不发布 Release。准备发布时，将
-`metadata.yaml`、项目版本和更新日志保持一致，创建并推送对应的 `vX.Y.Z` 标签。
-发布流程会校验标签与插件版本一致后打包发布；仅创建本地标签不会触发发布。
+开发、测试和发布方式见[开发说明](docs/development.md)，详细路由规则见[接口说明](docs/provider-routing-api.md)。
+本项目采用 [AGPL-3.0](LICENSE) 许可证。

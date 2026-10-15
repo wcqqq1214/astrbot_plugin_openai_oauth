@@ -15,251 +15,128 @@
   <a href="README.md">简体中文</a>
 </p>
 
-This plugin connects your ChatGPT account to AstrBot. After installation,
-AstrBot gets an `OpenAI Subscribe` model source. Choose a model from that
-source to use your ChatGPT/Codex quota—no separate OpenAI API key is needed.
+Use your ChatGPT account in AstrBot without a separate API key. Usage comes from
+your account’s Codex allowance, not your OpenAI API balance. You’ll need **AstrBot
+4.27.1+** and a ChatGPT account with access to Codex.
 
-Usage counts against the Codex quota available to your ChatGPT account, not your
-prepaid OpenAI API balance.
+## Sign in, then choose a model
 
-Follow the local Codex login, add independent accounts, inspect allowances, and opt
-into account fallback. The management page follows AstrBot’s interface language
-and supports Simplified Chinese, English, Russian, and Japanese.
+### Already signed in to Codex locally?
 
-## Before you start
+If Codex and AstrBot run on the same machine, the plugin follows the local Codex
+login. Choose **OpenAI Subscribe** in AstrBot’s model settings and add a model.
+Switching accounts in Codex takes effect on the next request.
 
-- Use AstrBot `4.27.1` or later.
-- You need a ChatGPT account that can use Codex.
-- If your Dashboard is publicly reachable, use HTTPS, a VPN, or an SSH tunnel.
-  Device-code sign-in also works over plain HTTP, but the Dashboard session can
-  be intercepted, so it is not recommended.
-- For device-code login, open ChatGPT **Settings → Security and login** and turn on
-  **Enable device code authorization for Codex**.
+If the login isn’t detected, check the tips below or use a device code instead.
 
-![Enable Codex device-code authorization in ChatGPT settings](images/enable-device-code-auth-codex.png)
+### Use a device code to sign in or add more accounts
 
-*Figure: The switch is on ChatGPT's **Security and login** page. Its label in
-the screenshot is **Enable device code authorization for Codex**.*
+In ChatGPT, open **Settings → Security and login** and turn on
+**Enable device code authorization for Codex**.
 
-> Treat a device code like a password: enter it only on OpenAI's verification
-> page, and never share it with anyone.
+<details>
+<summary>Show where to find the switch</summary>
 
-## Default: follow local Codex
+![Enable Codex device-code authorization](images/enable-device-code-auth-codex.png)
 
-The plugin uses the current Codex account on the **machine running AstrBot** by
-default. Sign in to Codex there, then choose the `OpenAI Subscribe` source in
-AstrBot's model configuration. No Plugin Page login is required.
+</details>
 
-- Reads `$CODEX_HOME/auth.json`, or `~/.codex/auth.json` when `CODEX_HOME` is unset.
-  Set the plugin's `codex_auth_path` to override the full file path.
-- Rereads credentials for each model request and quota lookup. Account switches
-  apply to the next request; requests already in progress keep their starting account.
-- Does not copy local credentials into AstrBot configuration. Refresh atomically
-  writes rotated tokens back to the Codex file, preserving other fields. AstrBot
-  needs file read access and directory write access.
-- In Docker, mount the entire credentials directory and configure the path inside
-  the container. A single-file mount may prevent atomic replacement. A remote
-  AstrBot server cannot read credentials from your personal computer directly.
-- Supports file-backed ChatGPT OAuth credentials. Keyring-only logins, API-key
-  logins and browser ChatGPT sessions need the device-login flow instead.
+1. Open **Plugin Views → providers** on the plugin’s detail page. Click **Add provider → Get device code**. The name is optional.
+2. Copy the authorization link into your browser, sign in to ChatGPT, and enter the code.
+3. Once you see “Provider saved”, select the new source in AstrBot’s model settings and add a model.
 
-Plugin Views lists all providers together, with Local Codex first even when signed out.
-Each provider has its own credentials and defaults to **Fixed provider**. Requests
-try other accounts only after you enable **Automatic fallback**, as described below.
-Reload the plugin after changing `codex_auth_path`.
+Each addition keeps its own login without replacing another account. You can cancel
+or get a new code if it expires. **Never share the code; enter it only on OpenAI’s authorization page.**
 
-## Add a provider with device-code login
-
-1. Open **Plugin Views → providers** in the plugin detail page, click **Add provider**, optionally enter a name,
-   then click **Get device code**.
-2. Copy the authorization link into your browser, sign in to ChatGPT, enter the code, and approve.
-3. Wait for “Provider saved”. Each new login creates an independent model source;
-   it does not overwrite an existing login.
-4. Select that source in AstrBot model settings and add or bind a model. Selecting
-   a row only displays its quota; it does not change a conversation’s model.
-
-Cancel a pending login without leaving an empty provider. Request a new code if the
-previous one expires. `/usage` in chat reports the source bound to the currently
-selected OpenAI Subscribe model.
-
-## Manage accounts, allowances, and routing
+## Check allowances and manage accounts
 
 Open **Plugin Views → providers**:
 
-- Click a provider row to expand or collapse its allowance. Panels expand independently,
-  so you can compare several accounts at once.
-- Each row shows the account and its login status or plan. The switch controls whether
-  the source can serve new requests.
-- Click the gear to open settings. Edit the name or routing mode and click **Save**;
-  cancelling discards unsaved changes.
-- Device-login accounts can be reauthorized or removed in settings. Reauthorization
-  updates only that account. Remove its model bindings in AstrBot before removing it.
-  Local Codex sign-in is managed on the host and cannot be removed here.
-- Disabling preserves credentials, model bindings, and allowance information. Attempts
-  already running finish; subsequent attempts check the switch again. Re-enabling
-  neither clears a cooldown nor repairs a failed login.
+- **Click an account row** to see its allowance. You can expand several at once. The page refreshes every 30 seconds while open; missing data doesn’t mean unlimited usage.
+- **Click the gear** to edit the name or routing mode, then save. Device-code accounts can also be reauthorized or removed here.
+- **Use the switch** to allow or stop new requests on that account. Turning it off keeps the login and lets requests already running finish.
 
-![Provider management with multiple account allowance panels expanded](images/providers-overview-en.png)
+![Account allowance panels](images/providers-overview-en.png)
 
-*Management page captured using sample accounts and allowances. Gears open
-source settings; switches control whether each source is enabled.*
+*Accounts and allowances shown are examples. The page follows AstrBot’s language setting and supports Chinese, English, Russian, and Japanese.*
 
-While visible, the page refreshes the list and expanded allowance panels every 30
-seconds. It shows only quota windows reported by the service: a weekly-only response
-does not gain an invented five-hour window. Missing or failed data never means unlimited
-allowance. Expanding a row or opening settings does not change a conversation’s model.
+Before removing an account, remove models bound to it in AstrBot. Local Codex is
+managed on the host and can’t be deleted here. To change your chat model, use
+AstrBot’s model settings; opening an account row only shows its details.
 
-### Fixed provider and automatic fallback
+### Try another account when one is unavailable
 
-Choose a routing mode in the source’s settings and save it. The setting applies to
-models bound to that source:
+Click the account’s gear, choose a routing mode, and save:
 
-| Mode | Behavior |
+| Mode | What happens |
 | --- | --- |
-| Fixed provider (default) | Uses only the bound source; fails explicitly if it is disabled or unavailable. |
-| Automatic fallback | Tries the bound source first, then other enabled, available OpenAI Subscribe sources in list order. |
+| Fixed provider (default) | Uses only this account and reports an error if it’s unavailable. |
+| Automatic fallback | Tries this account first, then other enabled, available accounts in list order. |
 
-![Provider settings with automatic fallback and account actions](images/provider-settings-en.png)
+Fallback changes the account, not the model. It can help with exhausted allowance,
+expired logins, or temporary network failures; invalid settings still produce an
+error. Once output or tool calls begin, the request won’t switch and start over.
+The next request tries the preferred account again. If none are available, it fails.
 
-*The example shows an unsaved selection of Automatic fallback. Reauthorization and
-removal are separate actions; neither saves the name or routing draft above.*
+<details>
+<summary>Show the settings dialog</summary>
 
-Fallback keeps the request body and model unchanged and switches only the account.
-It does not choose another model. Disabled, signed-out, invalid, and cooling sources
-are skipped. Retryable network or service errors receive bounded retries before the
-next account is tried. Duplicate sources for one account are not extra fallback accounts.
+![Choose automatic fallback in account settings](images/provider-settings-en.png)
 
-Once text, reasoning, or tool calls have been emitted, requests are never switched or
-replayed. Cancellation does not trigger fallback. Invalid requests and unsupported
-models fail directly. If no candidate is available or the retry budget is exhausted,
-the request fails without enabling a disabled source.
+*Automatic fallback is selected in this example; click Save to apply it.*
 
-Fallback does not change model bindings or keep the conversation on the fallback
-account. Later requests start with the preferred source again, skipping it if its
-current state requires it. Chat `/usage` still shows the bound source’s allowance,
-not the account that last answered. AstrBot’s own model fallback list is a separate
-mechanism and is not modified by this plugin.
+</details>
 
-## Migrating existing configurations
+## Commands and reasoning effort
 
-Initialization migrates old configurations once, preserving source IDs and model bindings:
+`/openai_login` and `/effort` require administrator access.
 
-- When local following was enabled and the local login is available, the existing ID
-  stays with Local Codex. Any stored device login becomes a separate provider.
-- When local following was disabled, or the local login is unavailable and a stored
-  credential exists, the existing ID stays with the device login and Local Codex is added.
-- Other existing OpenAI Subscribe sources retain their IDs, credentials and connection settings.
-
-The old `follow_local_codex` option is used only for migration. Invalid stored credentials
-are retained and shown as needing attention so the provider can be reauthorized.
-
-If the WebUI is unavailable, an administrator can send this in a **private
-chat** with the bot:
-
-```text
-/openai_login
-```
-
-The bot replies with the verification URL and a one-time device code. Complete
-the sign-in in that private chat; success adds an independent provider and returns its ID
-for model configuration. The flow will not start in group chats.
-
-## Want to set the reasoning effort? (Optional)
-
-You do not need to configure this for normal use—the model uses its default
-behavior.
-
-1. Open model configuration and edit the model that uses `OpenAI Subscribe`.
-2. Find **Custom request body parameters (`custom_extra_body`)**.
-3. Enter the desired value in **Reasoning Effort**, then click **Confirm** in
-   the lower right corner to save.
-
-![Entering max in the built-in Reasoning Effort preset](images/reasoning-effort-preset-en.png)
-
-*Figure: AstrBot's built-in **Reasoning Effort** preset. Enter `max`, then
-click **Confirm**.*
-
-This plugin supports these lowercase values:
-
-| Common WebUI label | Value to enter |
+| Command | What it does |
 | --- | --- |
-| Light | `low` |
-| Medium | `medium` |
-| High | `high` |
-| Extra High | `xhigh` |
-| Max | `max` |
+| `/usage` | Shows the allowance of the account bound to your model, which may differ from the account that last answered through fallback. |
+| `/openai_login` | Adds an account in a private chat with the bot. |
+| `/effort` | Shows this conversation’s reasoning effort. |
+| `/effort high` | Changes this conversation’s effort for the next request. |
+| `/effort default` | Restores the model default. |
 
-Enter the value from the right column rather than the label on the left. The
-plugin converts it to the format Codex expects.
+Reasoning effort is optional. Choose `low`, `medium`, `high`, `xhigh`, or `max`.
+To set a model default, enter the value under **Custom request body parameters →
+Reasoning Effort** in its settings and save. Conversation commands leave other
+conversations and model defaults unchanged.
 
-### Set reasoning effort for only the current session
+<details>
+<summary>Show where to set the model default</summary>
 
-Administrators can use these commands in the current private or group-chat
-session:
+![Set Reasoning Effort](images/reasoning-effort-preset-en.png)
 
-```text
-/effort
-/effort low
-/effort medium
-/effort high
-/effort xhigh
-/effort max
-/effort default
-```
+</details>
 
-`/effort` shows the current setting. A chosen value takes effect on the next
-request. `/effort default` removes the session override and restores the model
-default. It does not change other sessions or the model's global configuration.
+## Common questions
 
-## Network, quota, and security
+**Local Codex login not detected?** The plugin reads `$CODEX_HOME/auth.json`, or
+`~/.codex/auth.json` if unset. Set `codex_auth_path` to a full path in plugin settings
+and reload to override it. AstrBot needs to read the file and write to its directory
+to keep the login refreshed. Browser-only or keychain-only logins need a device code.
 
-- With the default direct connection, the plugin talks only to OpenAI's
-  `auth.openai.com` and `chatgpt.com` hosts for sign-in, token refresh, model
-  discovery, quota checks, and inference.
-- Set `proxy` on the relevant OpenAI Subscribe source when an outbound proxy is
-  needed. Alternatively, set both `HTTP_PROXY` and `HTTPS_PROXY` in the **AstrBot
-  process or container** and leave the source proxy empty. An explicit source proxy
-  takes precedence; fallback uses each candidate’s own connection settings.
-- Credentials are never returned to the browser or sent to chat. Local mode uses
-  Codex's `auth.json`; device-login credentials are stored in plaintext in
-  AstrBot's `data/cmd_config.json`. Limit read access to these files and their backups.
-- One `OpenAI Subscribe` model source represents one ChatGPT account. When the
-  quota is exhausted, the page shows the cooldown and reset time. Fixed mode fails;
-  automatic fallback tries other available accounts as configured.
-- If you see `unsupported_country_region_territory`, OpenAI does not accept the
-  deployment egress network or account conditions. The plugin cannot bypass
-  that restriction.
+**Running AstrBot in Docker or on a server?** It can’t read your computer’s login
+directly. In Docker, mount the entire Codex credentials directory and use the path
+inside the container, rather than mounting a single file. Device-code login also works.
 
-Use your own account and make sure your use complies with OpenAI's terms of
-service.
+**Need a proxy?** Set `proxy` on the model source, or set `HTTP_PROXY` and
+`HTTPS_PROXY` for the AstrBot process or container. The source’s proxy takes priority.
+An `unsupported_country_region_territory` error means OpenAI doesn’t accept the
+network location or account conditions; the plugin can’t bypass this.
 
-## Development checks
+**Upgrading from an older version?** The plugin migrates accounts automatically,
+keeps existing model bindings, and separates local and device logins where needed.
 
-`main.py` contains the AstrBot entry point, lifecycle hooks, and command registration.
-The implementation lives in `src/`:
+Keep login files and backups private: local login uses Codex’s `auth.json`, and
+device-code credentials are stored in plaintext in AstrBot’s `data/cmd_config.json`.
+Use HTTPS, a VPN, or an SSH tunnel for a public Dashboard. Use your own account
+and follow OpenAI’s terms of service.
 
-- `runtime.py`: shared configuration and credential coordination.
-- `provider.py`: model adaptation, streaming, retries, and source routing.
-- `oauth.py` and `login.py`: OAuth protocol, login sessions, and task cleanup.
-- `web_api.py`: WebUI endpoints; `usage.py` and `effort.py`: quota and session reasoning settings.
-- `credential_store.py`, `local_codex.py`, `provider_registry.py`, and `provider_routing.py`: credentials, account sources, and routing rules.
+## Development and license
 
-`src` is an internal package loaded through relative imports by AstrBot; it needs no
-separate installation. WebUI assets stay in `pages/`, with plugin metadata and the
-configuration schema at the repository root.
-
-Run `tests/run_tests.py` with the local AstrBot virtualenv's Python. It tests this
-checkout rather than a deployed plugin copy and uses a temporary Codex directory
-to avoid reading or refreshing real account credentials.
-
-## License
-
-AGPL-3.0.
-
-## Release workflow
-
-Pushing `main` updates the code and runs tests without publishing a release.
-To release, keep `metadata.yaml`, the project version and changelog in sync, then
-create and push the matching `vX.Y.Z` tag. The release workflow validates the tag
-against the plugin version before packaging and publishing. Local-only tags do
-not trigger a release.
+See the [development guide](docs/development.md) for tests and releases, and the
+[API guide](docs/provider-routing-api.md) for detailed routing rules.
+Licensed under [AGPL-3.0](LICENSE).
