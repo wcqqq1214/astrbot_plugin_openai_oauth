@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [v1.3.3] - 2026-10-16
+
+### Added
+
+- Unified Provider management with local Codex account following, independent
+  device-code providers, and automatic migration of existing configurations.
+- Persistent enable switches and opt-in automatic fallback across available
+  providers, with account deduplication and no switching after output starts.
+
+### Changed
+
+- Refined provider rows, inline settings, theme-aware icons, and compact quota windows.
+- Renamed the Plugin Page from `login` to `providers` and simplified its copy.
+
+### Fixed
+
+- Preserve provider identity and saved settings across concurrent updates and
+  stale list or quota responses.
+- Align quota labels and reset times, including narrow layouts and weekly-only plans.
+
 ## [v1.3.2] - 2026-10-05
 
 ### Fixed
