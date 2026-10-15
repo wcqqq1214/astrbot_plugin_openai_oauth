@@ -180,14 +180,14 @@ def main() -> int:
     )
     check("_LOGIN_PAGE_HTML" not in plugin_src, "standalone login HTML is removed")
 
-    print("\n=== 8. README documents the Plugin Page workflow ===")
+    print("\n=== 8. README documents the Plugin Views workflow ===")
     repo_root = os.path.join(os.path.dirname(__file__), "..")
     for fname in ("README.md", "README_en.md"):
         with open(os.path.join(repo_root, fname), encoding="utf-8") as fh:
             readme_src = fh.read()
         check(
-            "Plugin Page" in readme_src or "插件 Page" in readme_src,
-            f"{fname} names the Plugin Page",
+            "Plugin Views → providers" in readme_src,
+            f"{fname} documents the Plugin Views providers entry",
         )
         check("openai_login" in readme_src, f"{fname} documents the command fallback")
         check("HTTPS" in readme_src, f"{fname} recommends HTTPS")
