@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Providers</title>
     <link rel="stylesheet" href="./style.css" />
-    <script src="./prototype.js"></script>
+    <script src="/api/plugin/page/bridge-sdk.js"></script>
   </head>
   <body>
     <main class="account-center">
@@ -27,6 +27,7 @@
         </button>
       </header>
       <p id="page-error" class="error" role="alert" hidden></p>
+      <p id="save-error" class="error" role="alert" hidden></p>
 
       <!-- Rows are rendered by app.js; the detail editor is moved under the
            selected row for inline editing. -->
@@ -60,16 +61,22 @@
               <button id="rename-provider" class="button small" type="button">保存</button>
             </div>
           </div>
-          <div class="editor-row">
-            <span id="source-label" class="editor-label">来源</span>
-            <div class="editor-body editor-inline">
-              <span id="source-caption" class="editor-text"></span>
-              <button id="open-login" class="button small" type="button">重新授权</button>
+          <div id="routing-row" class="editor-row">
+            <span id="routing-label" class="editor-label">路由</span>
+            <div class="editor-body">
+              <div class="segmented" role="group" aria-labelledby="routing-label">
+                <button id="routing-fixed" type="button" aria-pressed="true">固定 Provider</button>
+                <button id="routing-auto" type="button" aria-pressed="false">自动回退</button>
+              </div>
+              <p id="routing-help" class="editor-note"></p>
             </div>
           </div>
           <div id="delete-row" class="editor-foot">
-            <button id="delete-provider" class="link-button danger" type="button">移除此 Provider</button>
-            <span id="delete-hint" class="editor-hint"></span>
+            <button id="open-login" class="button small" type="button">重新授权</button>
+            <div class="editor-inline">
+              <button id="delete-provider" class="link-button danger" type="button">移除此 Provider</button>
+              <span id="delete-hint" class="editor-hint"></span>
+            </div>
           </div>
         </section>
       </div>

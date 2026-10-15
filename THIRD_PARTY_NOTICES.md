@@ -2,7 +2,7 @@
 
 ## Claude icon — LobeHub Icons
 
-The Claude SVG embedded in `pages/login/app.js` comes from
+The Claude SVG embedded in `pages/providers/app.js` comes from
 https://github.com/lobehub/lobe-icons/blob/master/packages/static-svg/icons/claude.svg.
 
 MIT License

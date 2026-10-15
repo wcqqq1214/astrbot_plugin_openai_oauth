@@ -20,6 +20,10 @@ class CredentialSourceError(CredentialError):
     """The configured provider source cannot safely be used."""
 
 
+class ProviderDisabledError(CredentialSourceError):
+    """The source is disabled for new inference attempts."""
+
+
 class CredentialSchemaError(CredentialError):
     """The persisted credential record has an unsupported schema."""
 
@@ -435,7 +439,7 @@ class CredentialCoordinator:
                     _as_string(source.get("proxy")) or None,
                 )
             except Exception as exc:
-                if not snapshot.is_access_token_expired():
+                if not snapshot.is_access_token_expired() and not force_refresh:
                     self._states[resolved_source_id] = CredentialStatus("degraded")
                     return snapshot
                 self._states[resolved_source_id] = CredentialStatus("reauth_required")

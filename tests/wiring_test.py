@@ -473,7 +473,13 @@ def test_pre_stream_credential_recovery() -> None:
         status_code = 401
 
     async def query(
-        _client, _payloads, _tools, *, request_max_retries, session_effort=None
+        _client,
+        _payloads,
+        _tools,
+        *,
+        request_max_retries,
+        session_effort=None,
+        before_attempt=None,
     ):
         nonlocal calls
         calls += 1
@@ -523,7 +529,13 @@ def test_stream_is_not_replayed_after_output() -> None:
         status_code = 401
 
     async def query(
-        _client, _payloads, _tools, *, request_max_retries, session_effort=None
+        _client,
+        _payloads,
+        _tools,
+        *,
+        request_max_retries,
+        session_effort=None,
+        before_attempt=None,
     ):
         nonlocal calls
         calls += 1
@@ -565,7 +577,13 @@ def test_usage_limit_enters_cooldown() -> None:
             self.body = {"error": {"code": "usage_limit_reached"}}
 
     async def query(
-        _client, _payloads, _tools, *, request_max_retries, session_effort=None
+        _client,
+        _payloads,
+        _tools,
+        *,
+        request_max_retries,
+        session_effort=None,
+        before_attempt=None,
     ):
         raise _UsageLimitError()
         yield

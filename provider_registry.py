@@ -10,12 +10,14 @@ from typing import Any
 from .credential_store import (
     CredentialPersistenceError,
     CredentialSourceError,
+    ProviderDisabledError,
     dump_credentials,
     normalize_credentials,
 )
 
 LOCAL = "local_codex"
 DEVICE = "device_oauth"
+UNSET = object()
 
 
 class ProviderRegistry:
@@ -25,6 +27,28 @@ class ProviderRegistry:
         self.coordinator = coordinator
         self.lock = asyncio.Lock()
         self.on_change: Any = None
+        self._pending_previous: dict[str, dict[str, Any]] = {}
+
+    def policy_source(self, source_id: str) -> dict[str, Any]:
+        """Keep dispatch on the committed policy while persistence is pending."""
+        source = self.coordinator._source(source_id)
+        return self._pending_previous.get(source_id, source)
+
+    def enabled(self, source_id: str) -> bool:
+        return self.policy_source(source_id).get("enable", True) is True
+
+    def ensure_enabled(self, source_id: str) -> None:
+        if not self.enabled(source_id):
+            raise ProviderDisabledError("This Provider is disabled for new requests.")
+
+    def routing_mode(self, source_id: str) -> str:
+        value = self.policy_source(source_id).get("oauth_routing_mode", "fixed")
+        return "auto" if value == "auto" else "fixed"
+
+    def candidates(self, source_id: str) -> list[str]:
+        if self.routing_mode(source_id) == "fixed":
+            return [source_id]
+        return [source_id, *(s["id"] for s in self.owned() if s["id"] != source_id)]
 
     def sources(self) -> list[dict[str, Any]]:
         sources = self.coordinator._conf().get("provider_sources", [])
@@ -63,6 +87,7 @@ class ProviderRegistry:
     async def _save(self, previous: list[dict[str, Any]]) -> None:
         conf = self.coordinator._conf()
         proposed = deepcopy(conf["provider_sources"])
+        self._pending_previous = {s["id"]: s for s in previous}
         try:
             # A newer AstrBot snapshot can supersede this one; retry once.
             if (
@@ -72,7 +97,7 @@ class ProviderRegistry:
                 raise CredentialPersistenceError(
                     "Provider configuration was not saved."
                 )
-        except Exception as exc:
+        except BaseException as exc:
             before = {s["id"]: s for s in previous}
             after = {s["id"]: s for s in proposed}
             current = conf["provider_sources"]
@@ -93,10 +118,13 @@ class ProviderRegistry:
                     )
                 if source_id in before:
                     current.insert(index, before[source_id])
+            if not isinstance(exc, Exception):
+                raise
             raise CredentialPersistenceError(
                 "Could not save provider configuration."
             ) from exc
         finally:
+            self._pending_previous = {}
             if self.on_change is not None:
                 self.on_change(conf["provider_sources"])
 
@@ -141,6 +169,10 @@ class ProviderRegistry:
                     source["id"] = self.new_id()
                 source.update(name="Local Codex", credential_mode=LOCAL, key="")
                 planned.append(source)
+            for source in planned:
+                if source.get("type") == c._provider_type:
+                    source.setdefault("enable", True)
+                    source.setdefault("oauth_routing_mode", "fixed")
             if planned != sources:
                 sources[:] = planned
                 await self._save(previous)
@@ -159,7 +191,10 @@ class ProviderRegistry:
                     raise CredentialSourceError("Provider ID already exists.")
                 source = self.coordinator._default_source_factory()
                 source.update(
-                    id=source_id, name=self.name(name), credential_mode=DEVICE
+                    id=source_id,
+                    name=self.name(name),
+                    credential_mode=DEVICE,
+                    oauth_routing_mode="fixed",
                 )
             else:
                 source = self.coordinator._source(source_id)
@@ -176,8 +211,24 @@ class ProviderRegistry:
             self.coordinator._usage_cache.pop(source_id, None)
 
     async def edit(
-        self, source_id: str, *, name: str | None = None, delete: bool = False
+        self,
+        source_id: str,
+        *,
+        name: Any = UNSET,
+        enabled: Any = UNSET,
+        routing_mode: Any = UNSET,
+        delete: bool = False,
     ) -> None:
+        if name is not UNSET:
+            name = self.name(name)
+        if enabled is not UNSET and type(enabled) is not bool:
+            raise CredentialSourceError("enabled must be a boolean.")
+        if routing_mode is not UNSET and routing_mode not in ("fixed", "auto"):
+            raise CredentialSourceError("routing_mode must be fixed or auto.")
+        if not delete and name is UNSET and enabled is UNSET and routing_mode is UNSET:
+            raise CredentialSourceError(
+                "Provide name, enabled or routing_mode to update."
+            )
         async with self.lock, self.coordinator._source_lock(source_id):
             source = self.coordinator._source(source_id)
             sources = self.sources()
@@ -202,7 +253,13 @@ class ProviderRegistry:
                     )
                 sources.remove(source)
             else:
-                source["name"] = self.name(name)
+                if name is not UNSET:
+                    source["name"] = name
+                if enabled is not UNSET:
+                    source["enable"] = enabled
+                if routing_mode is not UNSET:
+                    source["oauth_routing_mode"] = routing_mode
             await self._save(previous)
-            self.coordinator._states.pop(source_id, None)
-            self.coordinator._usage_cache.pop(source_id, None)
+            if delete:
+                self.coordinator._states.pop(source_id, None)
+                self.coordinator._usage_cache.pop(source_id, None)

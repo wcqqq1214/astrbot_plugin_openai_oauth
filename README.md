@@ -1,7 +1,7 @@
 <h1 align="center">OpenAI 订阅登录</h1>
 
 <p align="center">
-  <a href="https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/releases/tag/v1.3.2"><img src="https://img.shields.io/badge/version-1.3.2-4b8bbe?style=flat-square" alt="Version 1.3.2"></a>
+  <a href="https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/releases/tag/v2.0.0"><img src="https://img.shields.io/badge/version-2.0.0-4b8bbe?style=flat-square" alt="Version 2.0.0"></a>
   <a href="https://github.com/AstrBotDevs/AstrBot"><img src="https://img.shields.io/badge/AstrBot-%E2%89%A54.27.1-4b8bbe?style=flat-square" alt="AstrBot ≥ 4.27.1"></a>
   <img src="https://img.shields.io/badge/Python-%E2%89%A53.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python ≥ 3.12">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="License: AGPL-3.0"></a>
@@ -107,7 +107,7 @@ Docker 需要在容器中安装并登录 Claude Code；宿主机 Mac 的钥匙�
 
 ## 新增 Provider：设备码登录
 
-1. 打开插件详情页的 **Plugin Views**，点击 **新增 Provider**，输入名称，再点击 **开始登录**。
+1. 打开插件详情页的 **Plugin Views → providers**，点击 **新增 Provider**，输入名称，再点击 **开始登录**。
 2. 在 OpenAI 验证网址登录 ChatGPT，输入设备码并确认授权。
 3. 回到 AstrBot，等待“Provider 已保存”。每次新增都会创建独立模型来源，不覆盖已有登录。
 4. 在 AstrBot 模型配置中选择对应来源（页面详情显示其 ID），添加或绑定模型后使用。
@@ -201,3 +201,9 @@ Docker 需要在容器中安装并登录 Claude Code；宿主机 Mac 的钥匙�
 ## License / 许可证
 
 AGPL-3.0。
+
+## 发布流程
+
+推送 `main` 仅更新代码并运行测试，不发布 Release。准备发布时，将
+`metadata.yaml`、项目版本和更新日志保持一致，创建并推送对应的 `vX.Y.Z` 标签。
+发布流程会校验标签与插件版本一致后打包发布；仅创建本地标签不会触发发布。

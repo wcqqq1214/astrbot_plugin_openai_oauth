@@ -11,7 +11,8 @@ import json
 import math
 import secrets
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
+from contextlib import aclosing, asynccontextmanager
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
@@ -47,6 +48,7 @@ from .credential_store import (
     CredentialSnapshot,
     CredentialsNotConfiguredError,
     CredentialSourceError,
+    ProviderDisabledError,
     ReauthenticationRequiredError,
     parse_credentials,
 )
@@ -71,6 +73,13 @@ from .oauth import (
     poll_device_authorization,
     refresh_access_token,
     request_device_user_code,
+)
+from .provider_routing import (
+    ROUTING_TIMEOUT_SECONDS,
+    SOURCE_ATTEMPTS,
+    RequestBudget,
+    RoutingBudgetError,
+    RoutingExhaustedError,
 )
 
 _REFRESH_SKEW_SECONDS = 120
@@ -204,7 +213,7 @@ def _get_credential_coordinator() -> CredentialCoordinator:
     "astrbot_plugin_openai_oauth",
     "wcqqq1214",
     "ChatGPT 订阅 (Codex OAuth) provider 插件",
-    "1.3.2",
+    "2.0.0",
 )
 class OpenAI_OAuth_Plugin(Star):
     def __init__(
@@ -563,14 +572,63 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         self.api_keys = [self._bootstrap_access_token]
         self.chosen_api_key = self._bootstrap_access_token
 
-    def _request_client(self, snapshot: CredentialSnapshot) -> Any:
-        headers = dict(self._static_headers)
+    def _request_client(
+        self,
+        snapshot: CredentialSnapshot,
+        *,
+        headers: dict[str, str] | None = None,
+        http_client: Any = None,
+    ) -> Any:
+        headers = dict(self._static_headers if headers is None else headers)
         if snapshot.account_id:
             headers["chatgpt-account-id"] = snapshot.account_id
         return self.client.with_options(
+            # The plugin owns retries, cooldowns and the cross-provider budget.
+            max_retries=0,
             api_key=snapshot.access_token,
             set_default_headers=headers,
+            **({"http_client": http_client} if http_client is not None else {}),
         )
+
+    @asynccontextmanager
+    async def _source_client(self, snapshot: CredentialSnapshot):
+        """Own the selected source's transport for this request, never globally."""
+        coordinator = _get_credential_coordinator()
+        source = coordinator._source(snapshot.source_id)
+        settings = coordinator.source_settings(snapshot.source_id)
+        # Model headers remain useful on the preferred source. Never carry another
+        # source's headers or proxy into a fallback account.
+        raw = (
+            self._static_headers
+            if snapshot.source_id == self._source_id
+            else source.get("custom_headers", {})
+        )
+        headers = (
+            {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+        )
+        reserved = {"authorization", "chatgpt-account-id", "originator", "user-agent"}
+        headers = {k: v for k, v in headers.items() if k.lower() not in reserved}
+        headers.update(
+            {
+                "originator": settings["originator"] or DEFAULT_ORIGINATOR,
+                "User-Agent": settings["user_agent"] or DEFAULT_USER_AGENT,
+                "OpenAI-Beta": "responses=experimental",
+            }
+        )
+        if snapshot.account_id:
+            headers["chatgpt-account-id"] = snapshot.account_id
+        transport = self._create_http_client(
+            {**self.provider_config, "proxy": settings["proxy"]}
+        )
+        try:
+            async with self._request_client(
+                snapshot,
+                headers=headers,
+                http_client=transport,
+            ) as client:
+                yield client
+        finally:
+            await transport.aclose()
 
     def _convert_chat_messages_to_response_input(
         self, messages: list[dict]
@@ -591,6 +649,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         *,
         request_max_retries: int | None = None,
         session_effort: str | None = None,
+        before_attempt: Callable[[], None] | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
         """Stream from the Codex backend, which completes with an empty response
         object: the content only arrives as deltas. Assemble the final response
@@ -649,6 +708,8 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
 
         async def create_stream():
             nonlocal attempts
+            if before_attempt is not None:
+                before_attempt()
             attempts += 1
             return await request_client.responses.create(
                 **payloads,
@@ -910,13 +971,14 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         self,
         snapshot: CredentialSnapshot,
     ) -> dict[str, Any]:
+        settings = _get_credential_coordinator().source_settings(snapshot.source_id)
         return await retry_provider_request(
             "OpenAI Codex",
             lambda: fetch_rate_limits(
                 snapshot.access_token,
                 snapshot.account_id,
-                self._request_proxy(),
-                self._user_agent,
+                settings["proxy"],
+                settings["user_agent"] or DEFAULT_USER_AGENT,
             ),
             retry_rate_limits=False,
             max_attempts=2,
@@ -927,10 +989,17 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         snapshot: CredentialSnapshot,
     ) -> CredentialCooldownError:
         coordinator = _get_credential_coordinator()
+        # Retain a conservative cooldown even if the quota lookup times out or
+        # the caller cancels while fetching a more precise reset time.
+        provisional = await coordinator.mark_cooling(
+            snapshot.source_id,
+            int(time.time()) + 300,
+            expected_access_token=snapshot.access_token,
+        )
         cooldown_until: int | None = None
         try:
             usage = await coordinator.get_usage(
-                self._source_id,
+                snapshot.source_id,
                 self._fetch_usage_for_snapshot,
             )
             cooldown_until = _cooldown_until_from_usage(usage)
@@ -940,9 +1009,9 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                 type(exc).__name__,
             )
         if cooldown_until is None:
-            cooldown_until = int(time.time()) + 300
+            cooldown_until = provisional.cooldown_until or int(time.time()) + 300
         persisted = await coordinator.mark_cooling(
-            self._source_id,
+            snapshot.source_id,
             cooldown_until,
             expected_access_token=snapshot.access_token,
         )
@@ -960,23 +1029,155 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         session_effort: str | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
         coordinator = _get_credential_coordinator()
-        retry_after_credential_error = True
-        emitted_chunk = False
-        base_payloads = deepcopy(payloads)
-
-        while True:
-            snapshot = await coordinator.get_snapshot(self._source_id)
-            request_client = self._request_client(snapshot)
-            try:
-                async for response in self._query_stream(
-                    request_client,
-                    deepcopy(base_payloads),
+        candidates = coordinator.providers.candidates(self._source_id)
+        automatic = coordinator.providers.routing_mode(self._source_id) == "auto"
+        if not automatic:
+            async with aclosing(
+                self._stream_from_source(
+                    self._source_id,
+                    payloads,
                     tools,
                     request_max_retries=request_max_retries,
                     session_effort=session_effort,
-                ):
-                    emitted_chunk = True
+                )
+            ) as stream:
+                async for response in stream:
                     yield response
+            return
+
+        budget = RequestBudget(
+            coerce_int_config(
+                request_max_retries,
+                default=REQUEST_RETRY_ATTEMPTS,
+                min_value=1,
+                field_name="request_max_retries",
+                source="OpenAI Codex",
+                warn=request_max_retries is not None,
+            )
+        )
+        failures: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        emitted = False
+        try:
+            async with asyncio.timeout(ROUTING_TIMEOUT_SECONDS) as deadline:
+                for source_id in candidates:
+                    try:
+                        coordinator.ensure_inference_available(source_id)
+                        initial = coordinator._read_snapshot(source_id)
+                        identity = initial.account_id or initial.access_token
+                        if identity and identity in seen:
+                            failures.append((source_id, "duplicate_account"))
+                            continue
+                        if budget.remaining <= 0:
+                            raise RoutingBudgetError()
+                        async with aclosing(
+                            self._stream_from_source(
+                                source_id,
+                                payloads,
+                                tools,
+                                request_max_retries=min(
+                                    SOURCE_ATTEMPTS, budget.remaining
+                                ),
+                                session_effort=session_effort,
+                                budget=budget,
+                                seen=seen,
+                            )
+                        ) as stream:
+                            async for response in stream:
+                                emitted = True
+                                # Disable the startup deadline before yielding to the consumer.
+                                deadline.reschedule(None)
+                                yield response
+                        return
+                    except RoutingBudgetError:
+                        failures.append((source_id, "attempt_limit"))
+                        raise RoutingExhaustedError(failures, "attempt_limit") from None
+                    except Exception as exc:
+                        if emitted:
+                            raise
+                        reasons = (
+                            (ProviderDisabledError, "disabled"),
+                            (CredentialCooldownError, "cooling"),
+                            (ReauthenticationRequiredError, "reauth_required"),
+                            (CredentialsNotConfiguredError, "not_logged_in"),
+                            (CredentialSchemaError, "invalid_credentials"),
+                        )
+                        reason = next(
+                            (value for cls, value in reasons if isinstance(exc, cls)),
+                            None,
+                        )
+                        if reason is None:
+                            if isinstance(exc, CredentialError):
+                                raise
+                            kind = classify_codex_error(exc)
+                            if kind not in {"temporary", "rate_limit"}:
+                                raise
+                            reason = kind
+                        failures.append((source_id, reason))
+                raise RoutingExhaustedError(failures) from None
+        except TimeoutError:
+            if emitted:
+                raise
+            raise RoutingExhaustedError(failures, "startup_timeout") from None
+
+    async def _stream_from_source(
+        self,
+        source_id: str,
+        payloads: dict[str, Any],
+        tools: Any,
+        *,
+        request_max_retries: int | None,
+        session_effort: str | None = None,
+        budget: RequestBudget | None = None,
+        seen: set[str] | None = None,
+    ) -> AsyncGenerator[LLMResponse, None]:
+        coordinator = _get_credential_coordinator()
+        retry_after_credential_error = True
+        emitted_chunk = False
+        base_payloads = deepcopy(payloads)
+        selected_identity: str | None = None
+
+        def guard():
+            current = coordinator.ensure_inference_available(source_id)
+            if (
+                current.access_token != snapshot.access_token
+                or current.account_id != snapshot.account_id
+            ):
+                raise CredentialSourceError(
+                    "The Provider login changed before dispatch. Retry the request."
+                )
+            if budget is not None:
+                budget.consume()
+
+        while True:
+            coordinator.ensure_inference_available(source_id)
+            snapshot = await coordinator.get_snapshot(source_id)
+            coordinator.ensure_inference_available(source_id)
+            identity = snapshot.account_id or snapshot.access_token
+            if seen is not None and identity != selected_identity:
+                if identity in seen:
+                    raise CredentialSourceError(
+                        "The selected account changed to an already attempted account."
+                    )
+                seen.add(identity)
+                selected_identity = identity
+            try:
+                async with (
+                    self._source_client(snapshot) as request_client,
+                    aclosing(
+                        self._query_stream(
+                            request_client,
+                            deepcopy(base_payloads),
+                            tools,
+                            request_max_retries=request_max_retries,
+                            session_effort=session_effort,
+                            before_attempt=guard,
+                        )
+                    ) as stream,
+                ):
+                    async for response in stream:
+                        emitted_chunk = True
+                        yield response
                 return
             except Exception as exc:
                 error_kind = classify_codex_error(exc)
@@ -989,12 +1190,20 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                     and not emitted_chunk
                 ):
                     retry_after_credential_error = False
+                    coordinator.providers.ensure_enabled(source_id)
+                    if budget is not None and budget.remaining <= 0:
+                        raise RoutingBudgetError() from None
                     await coordinator.get_snapshot(
-                        self._source_id,
+                        source_id,
                         force_refresh=True,
                         check_cooldown=False,
                     )
                     continue
+                if error_kind == "credential" and not emitted_chunk:
+                    coordinator.mark_reauthentication(snapshot)
+                    raise ReauthenticationRequiredError(
+                        "Sign in to this Provider again."
+                    ) from None
                 raise
 
     async def text_chat(
@@ -1065,13 +1274,28 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         if func_tool and not func_tool.empty():
             payloads["tool_choice"] = tool_choice
         session_effort = await _get_session_effort(session_id)
-        async for item in self._stream_with_current_credentials(
-            payloads,
-            func_tool,
-            request_max_retries=request_max_retries,
-            session_effort=session_effort,
-        ):
-            yield item
+        emitted = False
+        try:
+            async with aclosing(
+                self._stream_with_current_credentials(
+                    payloads,
+                    func_tool,
+                    request_max_retries=request_max_retries,
+                    session_effort=session_effort,
+                )
+            ) as stream:
+                async for item in stream:
+                    emitted = True
+                    yield item
+        except Exception:
+            if not emitted:
+                raise
+            # AstrBot can fall back after an exception even after a stream chunk.
+            # A terminal error response preserves its no-replay branch instead.
+            yield LLMResponse(
+                role="err",
+                completion_text="The response was interrupted after output; it was not replayed.",
+            )
 
 
 # ---- 订阅额度查询（/usage 聊天命令） ----
@@ -1657,12 +1881,17 @@ async def _edit_provider(*, delete: bool) -> Any:
         body = await request.json(default={}) or {}
         if "source_id" not in body:
             raise CredentialSourceError("Provider ID is required.")
+        if set(body) - {"source_id", "name", "enabled", "routing_mode"}:
+            raise CredentialSourceError("Unknown provider update field.")
+        coordinator = _get_credential_coordinator()
         if _claude_source(source_id) is not None:
             if delete:
                 raise CredentialSourceError(
                     "The local Claude provider cannot be deleted."
                 )
-            registry = _get_credential_coordinator().providers
+            if set(body) != {"source_id", "name"}:
+                raise CredentialSourceError("Local Claude supports renaming only.")
+            registry = coordinator.providers
             async with registry.lock:
                 source = _claude_source(source_id)
                 if source is None:
@@ -1670,17 +1899,30 @@ async def _edit_provider(*, delete: bool) -> Any:
                 previous = deepcopy(registry.sources())
                 source["name"] = registry.name(body.get("name"))
                 await registry._save(previous)
-            return json_response({"status": "success"}, headers=_NO_STORE_HEADERS)
-        await _get_credential_coordinator().providers.edit(
+            return json_response(
+                {
+                    "status": "success",
+                    "provider": await claude_provider.account_view(source),
+                },
+                headers=_NO_STORE_HEADERS,
+            )
+        await coordinator.providers.edit(
             source_id,
-            name=body.get("name"),
             delete=delete,
+            **{
+                key: body[key]
+                for key in ("name", "enabled", "routing_mode")
+                if key in body
+            },
         )
         if delete:
             for session_id, session in list(_login_sessions.items()):
                 if session.get("source_id") == source_id:
                     _discard_login_session(session_id)
-        return json_response({"status": "success"}, headers=_NO_STORE_HEADERS)
+        result = {"status": "success"}
+        if not delete:
+            result["provider"] = coordinator.account_view(source_id)
+        return json_response(result, headers=_NO_STORE_HEADERS)
     except CredentialError as exc:
         return _login_error_response(str(exc), 400)
 

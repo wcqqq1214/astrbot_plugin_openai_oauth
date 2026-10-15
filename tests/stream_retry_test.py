@@ -36,7 +36,7 @@ SUCCESS = [
 
 
 class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
-    async def run_stream(self, attempts, *, limit=None):
+    async def run_stream(self, attempts, *, limit=None, before_attempt=None):
         requests = []
         responses = []
         output = []
@@ -87,9 +87,14 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
                         None,
                         request_max_retries=limit,
                         session_effort="high",
+                        before_attempt=before_attempt,
                     ):
                         output.append(item)
-                except (APIError, asyncio.CancelledError) as exc:
+                except (
+                    APIError,
+                    asyncio.CancelledError,
+                    module.CredentialError,
+                ) as exc:
                     error = exc
         self.assertTrue(all(response.is_closed for response in responses))
         return requests, output, error, [call.args[0] for call in sleep.await_args_list]
@@ -103,6 +108,22 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(requests[1]["store"])
         self.assertEqual(output[-1].completion_text, "ok")
         self.assertEqual(delays, [1])
+
+    async def test_disabled_before_retry_prevents_another_http_request(self):
+        count = 0
+
+        def guard():
+            nonlocal count
+            count += 1
+            if count > 1:
+                raise module.CredentialSourceError("Provider disabled")
+
+        requests, output, error, _ = await self.run_stream(
+            [[OVERLOAD], SUCCESS], before_attempt=guard
+        )
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(output, [])
+        self.assertIsInstance(error, module.CredentialSourceError)
 
     async def test_exhaustion_preserves_api_error(self):
         requests, output, error, delays = await self.run_stream([[OVERLOAD]], limit=3)

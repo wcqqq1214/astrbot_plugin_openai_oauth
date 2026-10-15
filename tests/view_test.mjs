@@ -42,17 +42,8 @@ class Element {
   }
 }
 const html = readFileSync(
-  new URL("../pages/login/index.html", import.meta.url),
+  new URL("../pages/providers/index.html", import.meta.url),
   "utf8",
-);
-const prototypeHtml = readFileSync(
-  new URL("../pages/login/prototype.html", import.meta.url),
-  "utf8",
-);
-assert.equal(
-  prototypeHtml,
-  html.replace('/api/plugin/page/bridge-sdk.js', './prototype.js'),
-  "Offline preview must retain the production page structure",
 );
 const ids = new Map(
   [...html.matchAll(/id="([^"]+)"/g)].map((x) => [x[1], new Element()]),
@@ -82,19 +73,33 @@ let claude = null;
 let deviceBody;
 const usageBodies = [];
 const providerUpdates = [];
+// Provider writes and list reads can be held or redirected by a test.
+let updateHandler = null;
+let listCalls = 0;
+let listGate = null;
+let deviceUsage = {windows: [{label_seconds: 604800, used_percent: 60}]};
+const editable = ["name", "enabled", "routing_mode"];
 const bridge = {
   ready: async () => ({ locale: "zh-CN" }),
   getLocale: () => "zh-CN",
   apiPost: async (endpoint, body) => {
     if (endpoint === "providers/update") {
       providerUpdates.push(body);
-      device.name = body.name;
-      return { status: "success" };
+      if (updateHandler) return updateHandler(body);
+      const target = [account, device, claude].filter(Boolean).find((p) => p.id === body.source_id);
+      for (const key of editable) if (key in body) target[key] = body[key];
+      return { status: "success", provider: { ...target } };
     }
-    if (endpoint === "providers/list") return { providers: [account, device, claude].filter(Boolean) };
+    if (endpoint === "providers/list") {
+      listCalls += 1;
+      // Snapshot at request time, so a held response can be stale.
+      const snapshot = { providers: [account, device, claude].filter(Boolean).map((p) => ({ ...p })) };
+      if (listGate) await listGate.promise;
+      return snapshot;
+    }
     if (endpoint === "account/usage") {
       usageBodies.push(body);
-      if (body.source_id === "device") return {status: "success", account: device, usage: {windows: [{label_seconds: 604800, used_percent: 60}]}};
+      if (body.source_id === "device") return {status: "success", account: {...device}, usage: deviceUsage};
       if (slowUsage) return slowUsage;
       if (usage instanceof Error) throw usage;
       return usage;
@@ -135,7 +140,7 @@ const window = {
   clearTimeout() {},
 };
 const source = readFileSync(
-  new URL("../pages/login/app.js", import.meta.url),
+  new URL("../pages/providers/app.js", import.meta.url),
   "utf8",
 );
 const page = await vm.runInNewContext(
@@ -267,6 +272,279 @@ await new Promise((resolve) => setImmediate(resolve));
 assert.equal(providerUpdates.length, 1);
 assert.equal(providerUpdates[0].source_id, "device");
 assert.equal(providerUpdates[0].name, "工作");
+// Rename sends only the ID and the edited field.
+assert.deepEqual({...providerUpdates[0]}, {source_id: "device", name: "工作"});
+
+// ---------- Enable switch and routing mode ----------
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+const visibleText = (node) =>
+  node.hidden ? "" : [node._text, ...node.children.map(visibleText)].join(" ");
+const rowFor = (name) =>
+  ids.get("providers").children.find(
+    (child) => String(child.className).startsWith("provider-row") &&
+      child.children[0].textContent.includes(name),
+  );
+const switchFor = (name) => rowFor(name).children[1];
+const checked = (name) => switchFor(name).attributes["aria-checked"];
+const click = async (node) => { node.handlers.click(); await tick(); };
+const deferred = () => {
+  let resolve, reject;
+  const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; });
+  return {promise, resolve, reject};
+};
+document.activeElement = null;
+account.status = "ready";
+device.status = "ready";
+await page.queryUsage();
+
+// Legacy sources without the new fields read as enabled and fixed.
+assert.equal(switchFor("本地 Codex").attributes.role, "switch");
+assert.equal(checked("本地 Codex"), "true");
+assert.equal(checked("工作"), "true");
+assert.equal(ids.get("routing-fixed").attributes["aria-pressed"], "true");
+assert.match(read("routing-help"), /仅使用此 Provider/);
+
+// Local Codex can be disabled; only the changed field is sent and the
+// returned provider is applied. Health is still shown beside the switch.
+providerUpdates.length = 0;
+await click(switchFor("本地 Codex"));
+assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "local", enabled: false});
+assert.equal(checked("本地 Codex"), "false");
+assert.match(visibleText(rowFor("本地 Codex")), /已停用/);
+assert.match(visibleText(rowFor("本地 Codex")), /已登录/);
+assert.doesNotMatch(visibleText(rowFor("工作")), /已停用/);
+
+// A disabled device source keeps its allowance, rename, login and removal.
+await click(switchFor("工作"));
+assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "device", enabled: false});
+await page.queryUsage();
+assert.equal(checked("工作"), "false");
+assert.match(read("usage-result"), /40%/);
+assert.equal(ids.get("open-login").hidden, false);
+assert.equal(ids.get("delete-row").hidden, false);
+assert.equal(ids.get("routing-auto").disabled, false);
+assert.match(visibleText(rowFor("工作")), /已登录/);
+
+// Reauthorizing a disabled source never enables it.
+page.openLogin("device");
+const relogin = page.startLogin();
+await tick();
+assert.deepEqual({...deviceBody}, {source_id: "device"});
+pollResult({status: "success", source_id: "device"});
+await relogin;
+await tick();
+assert.equal(checked("工作"), "false");
+assert.ok(providerUpdates.every((body) => !("enabled" in body) || body.source_id !== "device" || body.enabled === false));
+
+// Routing mode is a per-provider choice sent on its own.
+await click(ids.get("routing-auto"));
+assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "device", routing_mode: "auto"});
+assert.equal(ids.get("routing-auto").attributes["aria-pressed"], "true");
+assert.equal(ids.get("routing-fixed").attributes["aria-pressed"], "false");
+assert.match(read("routing-help"), /先用它.*列表顺序.*已启用且可用.*同一账号只尝试一次.*开始输出后不再切换/);
+assert.match(visibleText(rowFor("工作")), /自动回退/);
+assert.doesNotMatch(visibleText(rowFor("本地 Codex")), /自动回退/);
+const sentBefore = providerUpdates.length;
+await click(ids.get("routing-auto"));
+assert.equal(providerUpdates.length, sentBefore, "choosing the current mode sends nothing");
+
+// The exhausted notice follows the selected provider's routing mode.
+deviceUsage = {limit_reached: true, windows: [{label_seconds: 604800, used_percent: 100}]};
+await page.queryUsage();
+assert.match(read("notice-text"), /已开启自动回退/);
+await click(ids.get("routing-fixed"));
+assert.match(read("notice-text"), /不会自动切换账号/);
+deviceUsage = {windows: [{label_seconds: 604800, used_percent: 60}]};
+await page.queryUsage();
+
+// Rapid clicks while a save is in flight send one request; the controls
+// for that provider are locked, other providers stay independent.
+let held = deferred();
+updateHandler = () => held.promise;
+providerUpdates.length = 0;
+await click(switchFor("工作"));
+await click(switchFor("工作"));
+await click(ids.get("routing-auto"));
+assert.equal(providerUpdates.length, 1);
+assert.deepEqual({...providerUpdates[0]}, {source_id: "device", enabled: true});
+assert.equal(switchFor("工作").disabled, true);
+assert.equal(switchFor("工作").attributes["aria-busy"], "true");
+assert.equal(checked("工作"), "true", "the switch shows the requested value while saving");
+assert.equal(ids.get("routing-auto").disabled, true);
+assert.equal(ids.get("rename-provider").disabled, true);
+assert.equal(switchFor("本地 Codex").disabled, false);
+const otherHeld = deferred();
+updateHandler = (body) => body.source_id === "local" ? otherHeld.promise : held.promise;
+await click(switchFor("本地 Codex"));
+assert.equal(providerUpdates.length, 2);
+device.enabled = true;
+held.resolve({status: "success", provider: {...device}});
+account.enabled = true;
+otherHeld.resolve({status: "success", provider: {...account}});
+await tick();
+assert.equal(checked("工作"), "true");
+assert.equal(checked("本地 Codex"), "true");
+assert.equal(switchFor("工作").disabled, false);
+assert.equal(ids.get("routing-auto").disabled, false);
+updateHandler = null;
+
+// The server's provider object wins over the requested value.
+updateHandler = (body) => ({status: "success", provider: {...device, name: "Server Name"}});
+const nameField = ids.get("provider-name");
+nameField.value = " 新名称 ";
+nameField.handlers.input();
+await click(ids.get("rename-provider"));
+assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "device", name: "新名称"});
+assert.equal(read("source-name"), "Server Name");
+device.name = "Server Name";
+updateHandler = null;
+
+// A list issued before a save settles must not paint the old value back.
+listGate = deferred();
+const staleRefresh = page.queryUsage();
+await tick();
+await click(switchFor("本地 Codex"));
+assert.equal(checked("本地 Codex"), "false");
+const gate = listGate;
+listGate = null;
+gate.resolve();
+await staleRefresh;
+assert.equal(checked("本地 Codex"), "false");
+assert.equal(account.enabled, false);
+
+// A failed save keeps the previous state, shows the error and reloads.
+let listsBefore = listCalls;
+updateHandler = () => { throw new Error("enabled must be a boolean."); };
+await click(switchFor("Server Name"));
+await tick();
+assert.equal(checked("Server Name"), "true");
+assert.equal(ids.get("save-error").hidden, false);
+assert.match(read("save-error"), /Server Name.*enabled must be a boolean/);
+assert.equal(listCalls, listsBefore + 1);
+assert.equal(switchFor("Server Name").disabled, false);
+
+// When the transport fails after the write landed, the reload shows it.
+listsBefore = listCalls;
+updateHandler = (body) => { device.enabled = body.enabled; throw new Error("Network Error"); };
+await click(switchFor("Server Name"));
+await tick();
+assert.equal(listCalls, listsBefore + 1);
+assert.equal(checked("Server Name"), "false");
+assert.match(read("save-error"), /Network Error/);
+
+// A success without a provider object is unclear and also reloads.
+listsBefore = listCalls;
+updateHandler = (body) => { device.routing_mode = body.routing_mode; return {status: "success"}; };
+await click(ids.get("routing-auto"));
+await tick();
+assert.equal(listCalls, listsBefore + 1);
+assert.match(read("save-error"), /保存结果未知/);
+assert.equal(ids.get("routing-auto").attributes["aria-pressed"], "true");
+updateHandler = null;
+
+// A later successful save clears the earlier error.
+await click(switchFor("Server Name"));
+assert.equal(ids.get("save-error").hidden, true);
+assert.equal(checked("Server Name"), "true");
+
+// Deleting sends only the ID.
+const deleteButton = ids.get("delete-provider");
+const bodies = [];
+const originalPost = bridge.apiPost;
+bridge.apiPost = async (endpoint, body) => {
+  if (endpoint === "providers/delete") { bodies.push(body); return {status: "success"}; }
+  return originalPost(endpoint, body);
+};
+await click(deleteButton);
+await click(deleteButton);
+assert.deepEqual({...bodies[0]}, {source_id: "device"});
+bridge.apiPost = originalPost;
+
+// A reconciliation started after a failed save must not replace a newer view.
+await page.selectProvider("device");
+updateHandler = () => { throw new Error("Network Error"); };
+listGate = deferred();
+await click(switchFor("Server Name"));
+const oldReconcile = listGate;
+listGate = null;
+device.name = "Newer device";
+await page.selectProvider("local");
+assert.ok(rowFor("Newer device"));
+oldReconcile.resolve();
+await tick();
+assert.ok(rowFor("Newer device"), "a stale reconciliation must not overwrite the newer list");
+updateHandler = null;
+
+// A local account may change while saving controls. Never relabel its old quota.
+await page.selectProvider("device");
+assert.match(read("usage-result"), /40%/);
+const oldAccount = {...device};
+const oldDeviceUsage = deviceUsage;
+const oldQuota = deferred();
+let holdNextQuota = true;
+bridge.apiPost = async (endpoint, body) => {
+  if (endpoint === "account/usage" && body.source_id === "device" && holdNextQuota) {
+    holdNextQuota = false;
+    return oldQuota.promise;
+  }
+  return originalPost(endpoint, body);
+};
+const staleQuotaRefresh = page.queryUsage();
+await tick();
+updateHandler = (body) => {
+  Object.assign(device, {enabled: body.enabled, email: "new@example.com", account_revision: "device-two"});
+  deviceUsage = {windows: [{label_seconds: 604800, used_percent: 5}]};
+  return {status: "success", provider: {...device}};
+};
+await click(switchFor("Newer device"));
+assert.doesNotMatch(read("usage-result"), /40%/, "a new account must clear the previous account's quota");
+assert.match(visibleText(rowFor("Newer device")), /new@example.com/);
+oldQuota.resolve({status: "success", account: oldAccount, usage: oldDeviceUsage});
+await staleQuotaRefresh;
+assert.match(visibleText(rowFor("Newer device")), /new@example.com/, "old quota replies must not restore the previous account");
+assert.doesNotMatch(read("usage-result"), /40%/);
+assert.match(read("usage-result"), /95%/);
+bridge.apiPost = originalPost;
+updateHandler = null;
+
+// A server-confirmed routing mode must also win in the quota notice.
+device.routing_mode = "fixed";
+deviceUsage = {limit_reached: true, windows: [{label_seconds: 604800, used_percent: 100}]};
+await page.queryUsage();
+updateHandler = () => ({status: "success", provider: {...device}});
+await click(ids.get("routing-auto"));
+assert.equal(ids.get("routing-fixed").attributes["aria-pressed"], "true");
+assert.match(read("notice-text"), /不会自动切换账号/, "the notice must use the confirmed mode after pending state is removed");
+updateHandler = null;
+
+// A delayed recovery read cannot resurrect a provider deleted in the meantime.
+const delayedRecovery = deferred();
+let delayRecovery = true;
+let removed = false;
+bridge.apiPost = async (endpoint, body) => {
+  if (endpoint === "providers/delete") {
+    removed = true;
+    return {status: "success"};
+  }
+  if (endpoint === "providers/list") {
+    const snapshot = {providers: (removed ? [account] : [account, device]).map((p) => ({...p}))};
+    if (delayRecovery) { delayRecovery = false; await delayedRecovery.promise; }
+    return snapshot;
+  }
+  return originalPost(endpoint, body);
+};
+updateHandler = () => { throw new Error("Network Error"); };
+await click(switchFor("Newer device"));
+await click(deleteButton);
+await click(deleteButton);
+assert.equal(rowFor("Newer device"), undefined);
+delayedRecovery.resolve();
+await tick();
+assert.equal(rowFor("Newer device"), undefined, "a stale recovery read must not resurrect a deleted provider");
+bridge.apiPost = originalPost;
+updateHandler = null;
+console.log("View regressions passed: quota windows, provider selection, stale-result isolation, login and cancellation races, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");
+
 claude = {id: "Claude Subscribe", name: "Local Claude", credential_mode: "local_claude", status: "ready", plan_type: "max"};
 await page.queryUsage();
 const quotaCalls = usageBodies.length;
@@ -276,7 +554,8 @@ assert.match(read("usage-result"), /已检测到本地登录/);
 assert.match(read("providers"), /Claude Max/);
 assert.equal(ids.get("open-login").hidden, true);
 assert.equal(ids.get("delete-row").hidden, true);
-assert.equal(ids.get("source-caption").hidden, false);
+assert.equal(ids.get("routing-row").hidden, true);
+assert.equal(rowFor("本地 Claude").children[1].hidden, true);
 for (const [state, hint] of [["not_logged_in", /claude auth login/], ["cli_missing", /安装 Claude Code/], ["wrong_auth", /API Key/], ["unknown", /无法检查/]]) {
   claude.status = state;
   await page.queryUsage();
