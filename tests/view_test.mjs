@@ -469,4 +469,88 @@ await click(deleteButton);
 await click(deleteButton);
 assert.deepEqual({...bodies[0]}, {source_id: "device"});
 bridge.apiPost = originalPost;
-console.log("View regressions passed: preview parity, quota windows, provider selection, stale-result isolation, login and cancellation races, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves.");
+
+// A reconciliation started after a failed save must not replace a newer view.
+await page.selectProvider("device");
+updateHandler = () => { throw new Error("Network Error"); };
+listGate = deferred();
+await click(switchFor("Server Name"));
+const oldReconcile = listGate;
+listGate = null;
+device.name = "Newer device";
+await page.selectProvider("local");
+assert.ok(rowFor("Newer device"));
+oldReconcile.resolve();
+await tick();
+assert.ok(rowFor("Newer device"), "a stale reconciliation must not overwrite the newer list");
+updateHandler = null;
+
+// A local account may change while saving controls. Never relabel its old quota.
+await page.selectProvider("device");
+assert.match(read("usage-result"), /40%/);
+const oldAccount = {...device};
+const oldDeviceUsage = deviceUsage;
+const oldQuota = deferred();
+let holdNextQuota = true;
+bridge.apiPost = async (endpoint, body) => {
+  if (endpoint === "account/usage" && body.source_id === "device" && holdNextQuota) {
+    holdNextQuota = false;
+    return oldQuota.promise;
+  }
+  return originalPost(endpoint, body);
+};
+const staleQuotaRefresh = page.queryUsage();
+await tick();
+updateHandler = (body) => {
+  Object.assign(device, {enabled: body.enabled, email: "new@example.com", account_revision: "device-two"});
+  deviceUsage = {windows: [{label_seconds: 604800, used_percent: 5}]};
+  return {status: "success", provider: {...device}};
+};
+await click(switchFor("Newer device"));
+assert.doesNotMatch(read("usage-result"), /40%/, "a new account must clear the previous account's quota");
+assert.match(visibleText(rowFor("Newer device")), /new@example.com/);
+oldQuota.resolve({status: "success", account: oldAccount, usage: oldDeviceUsage});
+await staleQuotaRefresh;
+assert.match(visibleText(rowFor("Newer device")), /new@example.com/, "old quota replies must not restore the previous account");
+assert.doesNotMatch(read("usage-result"), /40%/);
+assert.match(read("usage-result"), /95%/);
+bridge.apiPost = originalPost;
+updateHandler = null;
+
+// A server-confirmed routing mode must also win in the quota notice.
+device.routing_mode = "fixed";
+deviceUsage = {limit_reached: true, windows: [{label_seconds: 604800, used_percent: 100}]};
+await page.queryUsage();
+updateHandler = () => ({status: "success", provider: {...device}});
+await click(ids.get("routing-auto"));
+assert.equal(ids.get("routing-fixed").attributes["aria-pressed"], "true");
+assert.match(read("notice-text"), /不会自动切换账号/, "the notice must use the confirmed mode after pending state is removed");
+updateHandler = null;
+
+// A delayed recovery read cannot resurrect a provider deleted in the meantime.
+const delayedRecovery = deferred();
+let delayRecovery = true;
+let removed = false;
+bridge.apiPost = async (endpoint, body) => {
+  if (endpoint === "providers/delete") {
+    removed = true;
+    return {status: "success"};
+  }
+  if (endpoint === "providers/list") {
+    const snapshot = {providers: (removed ? [account] : [account, device]).map((p) => ({...p}))};
+    if (delayRecovery) { delayRecovery = false; await delayedRecovery.promise; }
+    return snapshot;
+  }
+  return originalPost(endpoint, body);
+};
+updateHandler = () => { throw new Error("Network Error"); };
+await click(switchFor("Newer device"));
+await click(deleteButton);
+await click(deleteButton);
+assert.equal(rowFor("Newer device"), undefined);
+delayedRecovery.resolve();
+await tick();
+assert.equal(rowFor("Newer device"), undefined, "a stale recovery read must not resurrect a deleted provider");
+bridge.apiPost = originalPost;
+updateHandler = null;
+console.log("View regressions passed: preview parity, quota windows, provider selection, stale-result isolation, login and cancellation races, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");

@@ -31,6 +31,7 @@ node tests/view_test.mjs
 The view regression covers weekly-only quota, unavailable usage, independent
 provider selection, stale results after selection changes, login cancellation,
 the enable switch and routing mode, serialized per-provider saves, stale list
-responses during a save, and failed or unclear saves.
+responses during a save, failed or unclear saves, delayed recovery after selection
+or deletion, account identity changes during saves, and confirmed routing notices.
 The Python scripts cover migration, credential isolation, refresh, provider
 lifecycle, device sessions and the authenticated WebUI boundary.

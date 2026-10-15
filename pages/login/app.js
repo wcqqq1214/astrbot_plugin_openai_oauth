@@ -463,7 +463,17 @@ function statusClass(state) {
 }
 
 function renderAccountStatus(result) {
+  const previous = account;
   account = result || {};
+  const identityChanged =
+    (previous.id === account.id &&
+      (previous.account_revision ?? null) !== (account.account_revision ?? null)) ||
+    (lastUsage && shownRevision !== (account.account_revision ?? null));
+  if (identityChanged) {
+    clearUsage("changed");
+    lastUpdated = null;
+    byId("updated").textContent = "";
+  }
   const state = String(account.status || "unknown");
   accountStatus.textContent = t.states[state] || t.states.unknown;
   accountStatus.setAttribute("title", t.details[state] || t.details.unknown);
@@ -480,6 +490,7 @@ function renderAccountStatus(result) {
   byId("delete-row").hidden = local;
   renderControls();
   updateNotice();
+  return Boolean(identityChanged);
 }
 
 // Enabled and routing mode are separate from the health status above: a
@@ -853,7 +864,12 @@ async function queryUsage() {
       if (generation !== viewGeneration) return;
       if (result?.status === "account_changed") result = await bridge.apiPost("account/usage", body);
       if (generation !== viewGeneration) return;
-      if (result?.account) result.account = keepNewerEdits(result.account, since);
+      if (result?.account) {
+        const current = keepNewerEdits(result.account, since);
+        // Never attach an old quota payload to a newer confirmed identity.
+        if (current.account_revision !== result.account.account_revision) return;
+        result.account = current;
+      }
       renderUsage(result);
       providers = providers.map((p) => p.id === selectedSourceId ? account : p);
       renderProviders();
@@ -884,6 +900,7 @@ function keepNewerEdits(next, since) {
   if (!isSaving(id) && (lastMutation.get(id) ?? 0) <= since) return next;
   const local = providers.find((p) => p.id === id);
   if (!local) return next;
+  if (local.account_revision !== next.account_revision) return local;
   const kept = { ...next };
   for (const key of editableFields) if (key in local) kept[key] = local[key];
   return kept;
@@ -902,14 +919,18 @@ function runInChain(sourceId, task) {
 
 function renderSourceState(sourceId) {
   renderProviders();
-  if (sourceId === selectedSourceId) renderControls();
+  if (sourceId === selectedSourceId) {
+    renderControls();
+    updateNotice();
+  }
 }
 
 function applyProvider(provider) {
   const index = providers.findIndex((p) => p.id === provider.id);
   if (index < 0) return;
   providers[index] = provider;
-  if (provider.id === selectedSourceId) renderAccountStatus(provider);
+  if (provider.id === selectedSourceId) return renderAccountStatus(provider);
+  return false;
 }
 
 function showSaveError(message) {
@@ -927,13 +948,14 @@ async function saveProvider(sourceId, changes) {
   showSaveError("");
   renderSourceState(sourceId);
   let reconcile = false;
+  let refreshIdentity = false;
   try {
     const result = await runInChain(sourceId, () =>
       bridge.apiPost("providers/update", { source_id: sourceId, ...changes }),
     );
     const provider = result?.provider;
     if (result?.status === "success" && provider?.id === sourceId) {
-      applyProvider(provider);
+      refreshIdentity = applyProvider(provider);
     } else {
       reconcile = true;
       showSaveError(t.saveUnknown);
@@ -955,13 +977,23 @@ async function saveProvider(sourceId, changes) {
     renderSourceState(sourceId);
   }
   if (reconcile) await reloadProviders();
+  else if (refreshIdentity) await refreshAccountUsage();
 }
 
-// Refetch the provider list without touching the selected allowance.
+async function refreshAccountUsage() {
+  // A lookup for the previous identity may still be in flight. queryUsage's
+  // generation fence will discard it while this new lookup owns the spinner.
+  refreshPromise = null;
+  await queryUsage();
+}
+
+// Refetch the provider list, retaining quota only for the same account identity.
 async function reloadProviders() {
   const since = mutationSeq;
+  const generation = viewGeneration;
   try {
     const list = await bridge.apiPost("providers/list", {});
+    if (generation !== viewGeneration) return;
     if (!Array.isArray(list?.providers)) return;
     providers = list.providers.map((p) => keepNewerEdits(p, since));
     const selected = providers.find((p) => p.id === selectedSourceId);
@@ -970,7 +1002,7 @@ async function reloadProviders() {
       return;
     }
     renderProviders();
-    renderAccountStatus(selected);
+    if (renderAccountStatus(selected)) await refreshAccountUsage();
   } catch {
     // The save error stays visible; the next refresh retries the list.
   }
