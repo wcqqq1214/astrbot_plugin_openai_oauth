@@ -62,19 +62,6 @@
             </div>
           </div>
           <div class="editor-row">
-            <span id="source-label" class="editor-label">来源</span>
-            <div class="editor-body editor-inline">
-              <span id="source-caption" class="editor-text"></span>
-              <button id="open-login" class="button small" type="button">重新授权</button>
-            </div>
-          </div>
-          <div class="editor-row">
-            <span id="enabled-label" class="editor-label">启用</span>
-            <div class="editor-body">
-              <p id="enabled-note" class="editor-note"></p>
-            </div>
-          </div>
-          <div class="editor-row">
             <span id="routing-label" class="editor-label">路由</span>
             <div class="editor-body">
               <div class="segmented" role="group" aria-labelledby="routing-label">
@@ -85,8 +72,11 @@
             </div>
           </div>
           <div id="delete-row" class="editor-foot">
-            <button id="delete-provider" class="link-button danger" type="button">移除此 Provider</button>
-            <span id="delete-hint" class="editor-hint"></span>
+            <button id="open-login" class="button small" type="button">重新授权</button>
+            <div class="editor-inline">
+              <button id="delete-provider" class="link-button danger" type="button">移除此 Provider</button>
+              <span id="delete-hint" class="editor-hint"></span>
+            </div>
           </div>
         </section>
       </div>

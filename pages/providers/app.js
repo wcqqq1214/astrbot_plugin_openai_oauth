@@ -6,11 +6,7 @@ const strings = {
     title: "Providers",
     refresh: "Refresh status",
     providerHelp: "Choose the provider to use in AstrBot model settings.",
-    enabledLabel: "Enabled",
     enable: (name) => `Use ${name} for new requests`,
-    enabledOn: "Available to bound models and automatic fallback.",
-    enabledOff:
-      "Skipped for new requests and fallback. Sign-in and model bindings are kept. Re-enabling does not clear cooldowns or fix authentication.",
     disabledTag: "Disabled",
     autoTag: "Fallback",
     routingLabel: "Routing",
@@ -27,7 +23,6 @@ const strings = {
     nameShort: "Name",
     saveName: "Save",
     quotaLabel: "Allowance",
-    sourceLabel: "Source",
     removeHint: "Its saved login is deleted too.",
     confirmHint: "Click again to delete permanently.",
     localShort: "Follows the host Codex login",
@@ -62,7 +57,6 @@ const strings = {
       unknown: "Account status is unavailable.",
     },
     local: "Local Codex",
-    follow: "Follows the active Codex account on the AstrBot host",
     add: "Add provider",
     renew: "Authorize again",
     noHelp: "Sign in to this provider to view its allowance.",
@@ -122,11 +116,7 @@ const strings = {
     title: "Providers",
     refresh: "刷新状态",
     providerHelp: "在 AstrBot 模型配置中选择要使用的 Provider。",
-    enabledLabel: "启用",
     enable: (name) => `新请求使用 ${name}`,
-    enabledOn: "已启用，可供绑定的模型和自动回退使用。",
-    enabledOff:
-      "已停用，新请求与自动回退均跳过。保留登录和模型绑定；重新启用不会清除冷却，也不会修复认证。",
     disabledTag: "已停用",
     autoTag: "自动回退",
     routingLabel: "路由",
@@ -143,7 +133,6 @@ const strings = {
     nameShort: "名称",
     saveName: "保存",
     quotaLabel: "额度",
-    sourceLabel: "来源",
     removeHint: "会同时删除它保存的登录凭据。",
     confirmHint: "再次点击即永久删除。",
     localShort: "跟随主机上的 Codex 登录",
@@ -176,7 +165,6 @@ const strings = {
       unknown: "账号状态暂不可用。",
     },
     local: "本地 Codex",
-    follow: "自动跟随 AstrBot 主机上当前激活的 Codex 账号",
     add: "新增 Provider",
     renew: "重新授权",
     noHelp: "登录此 Provider 后可查看额度。",
@@ -325,8 +313,6 @@ function applyLocale(locale) {
     "rename-label": t.nameShort,
     "rename-provider": t.saveName,
     "quota-label": t.quotaLabel,
-    "source-label": t.sourceLabel,
-    "enabled-label": t.enabledLabel,
     "routing-label": t.routingLabel,
     "routing-fixed": t.routingFixed,
     "routing-auto": t.routingAuto,
@@ -476,7 +462,6 @@ function renderAccountStatus(result) {
 
   const local = account.credential_mode === "local_codex";
   byId("source-name").textContent = providerName(account);
-  byId("source-caption").textContent = local ? t.follow : t.deviceShort;
   if (document.activeElement !== providerNameInput)
     providerNameInput.value = account.name || "";
   syncRename();
@@ -493,7 +478,6 @@ function renderAccountStatus(result) {
 function renderControls() {
   const view = effective(account);
   const busy = isSaving(account.id);
-  byId("enabled-note").textContent = isEnabled(view) ? t.enabledOn : t.enabledOff;
   const mode = routingMode(view);
   for (const [key, button] of Object.entries(routingButtons)) {
     button.setAttribute("aria-pressed", String(key === mode));

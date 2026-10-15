@@ -927,11 +927,6 @@ dialog::backdrop {
 .editor-inline .text-input {
   max-width: 320px;
 }
-.editor-text {
-  min-width: 0;
-  font-size: 13px;
-  color: var(--secondary);
-}
 .editor-foot {
   display: flex;
   align-items: center;

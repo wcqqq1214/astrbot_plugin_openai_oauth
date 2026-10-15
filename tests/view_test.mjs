@@ -302,7 +302,6 @@ assert.equal(checked("本地 Codex"), "true");
 assert.equal(checked("工作"), "true");
 assert.equal(ids.get("routing-fixed").attributes["aria-pressed"], "true");
 assert.match(read("routing-help"), /仅使用此 Provider/);
-assert.match(read("enabled-note"), /已启用/);
 
 // Local Codex can be disabled; only the changed field is sent and the
 // returned provider is applied. Health is still shown beside the switch.
@@ -323,7 +322,6 @@ assert.match(read("usage-result"), /40%/);
 assert.equal(ids.get("open-login").hidden, false);
 assert.equal(ids.get("delete-row").hidden, false);
 assert.equal(ids.get("routing-auto").disabled, false);
-assert.match(read("enabled-note"), /已停用.*不会修复认证/);
 assert.match(visibleText(rowFor("工作")), /已登录/);
 
 // Reauthorizing a disabled source never enables it.
