@@ -680,6 +680,14 @@ dialog::backdrop {
   background: var(--primary-soft);
   color: var(--primary);
 }
+.provider-icon.claude {
+  background: #d977571a;
+  color: #d97757;
+}
+.provider-icon.claude svg {
+  fill: currentColor;
+  stroke: none;
+}
 .provider-icon svg {
   width: 18px;
   height: 18px;
