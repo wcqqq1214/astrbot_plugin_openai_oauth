@@ -17,11 +17,17 @@ from unittest.mock import AsyncMock, patch
 ASTRBOT_ROOT = Path(__file__).resolve().parents[2] / "AstrBot"
 sys.path.insert(0, str(ASTRBOT_ROOT))
 os.chdir(ASTRBOT_ROOT)
-local = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.local_codex")
+local = importlib.import_module(
+    "data.plugins.astrbot_plugin_openai_oauth.src.local_codex"
+)
 store = importlib.import_module(
-    "data.plugins.astrbot_plugin_openai_oauth.credential_store"
+    "data.plugins.astrbot_plugin_openai_oauth.src.credential_store"
 )
 plugin = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.main")
+oauth = importlib.import_module(f"{plugin.__package__}.src.oauth")
+runtime = importlib.import_module(f"{plugin.__package__}.src.runtime")
+usage_service = importlib.import_module(f"{plugin.__package__}.src.usage")
+web_api = importlib.import_module(f"{plugin.__package__}.src.web_api")
 
 
 def jwt(account="one", expires=9999999999, generation=0):
@@ -82,7 +88,7 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
         }
         self.conf = Config(provider_sources=[self.source, self.device])
         requested = patch.object(
-            plugin,
+            web_api,
             "_requested_source_id",
             new=AsyncMock(return_value="OpenAI Subscribe"),
         )
@@ -293,22 +299,24 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
                     ],
                 }
                 with (
-                    patch.object(plugin.time, "time", return_value=now),
-                    patch.object(plugin, "_login_request_error", return_value=None),
+                    patch.object(usage_service.time, "time", return_value=now),
+                    patch.object(web_api, "_login_request_error", return_value=None),
                     patch.object(
-                        plugin,
+                        runtime,
                         "_get_credential_coordinator",
                         return_value=self.coordinator,
                     ),
                     patch.object(
-                        plugin, "fetch_rate_limits", new=AsyncMock(return_value=usage)
+                        oauth, "fetch_rate_limits", new=AsyncMock(return_value=usage)
                     ),
                 ):
-                    data = json.loads((await plugin._handle_account_usage()).body)
+                    data = json.loads((await web_api._handle_account_usage()).body)
                     self.assertEqual(data["account"]["cooldown_until"], expected)
                     with self.assertRaises(store.CredentialCooldownError):
                         await self.coordinator.get_snapshot()
-                with patch.object(plugin.time, "time", return_value=expected + 1):
+                with patch.object(
+                    usage_service.time, "time", return_value=expected + 1
+                ):
                     self.assertFalse(
                         (await self.coordinator.get_snapshot()).is_cooling_down()
                     )
@@ -316,13 +324,13 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
     def test_cooldown_without_exhausted_window_has_no_invented_reset(self):
         for used in (40, None, True, float("nan")):
             self.assertIsNone(
-                plugin._cooldown_until_from_usage(
+                usage_service._cooldown_until_from_usage(
                     {"windows": [{"used_percent": used, "reset_at": 9999999999}]}
                 )
             )
-        with patch.object(plugin.time, "time", return_value=2000000000):
+        with patch.object(usage_service.time, "time", return_value=2000000000):
             self.assertEqual(
-                plugin._cooldown_until_from_usage(
+                usage_service._cooldown_until_from_usage(
                     {"windows": [{"used_percent": 100, "reset_after_seconds": 60}]}
                 ),
                 2000000060,
@@ -399,9 +407,9 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
         self.write(auth())
         with (
             patch.dict(os.environ, {"CODEX_HOME": self.tmp.name}),
-            patch.object(plugin, "_config_mgr", None),
-            patch.object(plugin, "_local_codex_store", None),
-            patch.object(plugin, "_credential_coordinator", None),
+            patch.object(runtime, "_config_mgr", None),
+            patch.object(runtime, "_local_codex_store", None),
+            patch.object(runtime, "_credential_coordinator", None),
         ):
             context = SimpleNamespace(
                 astrbot_config_mgr=SimpleNamespace(default_conf=self.conf),
@@ -409,12 +417,12 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
             )
             instance = plugin.OpenAI_OAuth_Plugin(context, config={})
             await instance.initialize()
-            coordinator = plugin._get_credential_coordinator()
+            coordinator = runtime._get_credential_coordinator()
             self.assertEqual((await coordinator.get_snapshot()).account_id, "one")
             provider = plugin.ProviderOpenAICodex(dict(self.source), {})
             try:
                 with patch.object(
-                    plugin, "fetch_models", new=AsyncMock(return_value=["test-model"])
+                    oauth, "fetch_models", new=AsyncMock(return_value=["test-model"])
                 ) as fetch:
                     self.assertEqual(await provider.get_models(), ["test-model"])
                     self.assertEqual(fetch.call_args.args[:2], (jwt(), "one"))
@@ -423,8 +431,8 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(fetch.call_args.args[:2], (jwt("two"), "two"))
             finally:
                 await provider.client.close()
-            with patch.object(plugin, "_login_request_error", return_value=None):
-                response = await plugin._handle_account_status()
+            with patch.object(web_api, "_login_request_error", return_value=None):
+                response = await web_api._handle_account_status()
             data = json.loads(response.body)
             self.assertEqual(data["status"], "ready")
             self.assertEqual(data["credential_source"], "local_codex")
@@ -454,13 +462,13 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
             return {"allowed": True, "windows": [{"used_percent": 99}]}
 
         with (
-            patch.object(plugin, "_login_request_error", return_value=None),
+            patch.object(web_api, "_login_request_error", return_value=None),
             patch.object(
-                plugin, "_get_credential_coordinator", return_value=self.coordinator
+                runtime, "_get_credential_coordinator", return_value=self.coordinator
             ),
-            patch.object(plugin, "fetch_rate_limits", new=switched_usage),
+            patch.object(oauth, "fetch_rate_limits", new=switched_usage),
         ):
-            response = await plugin._handle_account_usage()
+            response = await web_api._handle_account_usage()
         data = json.loads(response.body)
         self.assertEqual(data["status"], "account_changed")
         self.assertNotIn("usage", data)
@@ -474,13 +482,13 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
             return {"windows": [{"used_percent": 99}]}
 
         with (
-            patch.object(plugin, "_login_request_error", return_value=None),
+            patch.object(web_api, "_login_request_error", return_value=None),
             patch.object(
-                plugin, "_get_credential_coordinator", return_value=self.coordinator
+                runtime, "_get_credential_coordinator", return_value=self.coordinator
             ),
-            patch.object(plugin, "_fetch_source_usage", new=switched_usage),
+            patch.object(usage_service, "_fetch_source_usage", new=switched_usage),
         ):
-            response = await plugin._handle_account_usage()
+            response = await web_api._handle_account_usage()
         data = json.loads(response.body)
         self.assertEqual(data["status"], "account_changed")
         self.assertNotIn("usage", data)

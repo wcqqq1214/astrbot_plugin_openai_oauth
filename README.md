@@ -147,6 +147,17 @@ Plugin Views 统一展示 Provider，本地 Codex 默认排在第一项，即使
 
 ## 开发验证
 
+`main.py` 只保留 AstrBot 插件入口、生命周期和命令注册；核心代码位于 `src/`：
+
+- `runtime.py`：共享配置和凭据协调器。
+- `provider.py`：模型适配、流式响应、重试和来源路由。
+- `oauth.py`、`login.py`：OAuth 协议、登录会话和任务清理。
+- `web_api.py`：WebUI 接口；`usage.py`、`effort.py`：额度和会话推理强度。
+- `credential_store.py`、`local_codex.py`、`provider_registry.py`、`provider_routing.py`：凭据、账号来源和路由规则。
+
+`src` 是插件内部包，使用相对导入，由 AstrBot 加载，无需单独安装。
+`pages/` 保留 WebUI 静态资源；插件元数据和配置描述保留在根目录。
+
 使用本地 AstrBot 的解释器执行 `tests/run_tests.py`。它会测试当前插件仓库而非
 已部署的插件副本，并使用临时 Codex 目录，避免读取或刷新真实账号凭据。
 

@@ -18,9 +18,12 @@ sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)
 
 module = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.main")
-oauth = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.oauth")
+effort = importlib.import_module(f"{module.__package__}.src.effort")
+oauth = importlib.import_module(f"{module.__package__}.src.oauth")
+provider_module = importlib.import_module(f"{module.__package__}.src.provider")
+runtime = importlib.import_module(f"{module.__package__}.src.runtime")
 store = importlib.import_module(
-    "data.plugins.astrbot_plugin_openai_oauth.credential_store"
+    "data.plugins.astrbot_plugin_openai_oauth.src.credential_store"
 )
 ProviderOpenAICodex = module.ProviderOpenAICodex
 
@@ -62,8 +65,8 @@ def credentials(*, expires: int = 9999999999) -> dict:
 
 def make_source(creds: dict) -> dict:
     return {
-        "id": module._PROVIDER_TYPE,
-        "type": module._PROVIDER_TYPE,
+        "id": runtime._PROVIDER_TYPE,
+        "type": runtime._PROVIDER_TYPE,
         "provider": "openai",
         "provider_type": "chat_completion",
         "key": json.dumps(creds),
@@ -76,8 +79,8 @@ def make_source(creds: dict) -> dict:
 
 def make_config(creds: dict, **overrides) -> dict:
     config = {
-        "type": module._PROVIDER_TYPE,
-        "provider_source_id": module._PROVIDER_TYPE,
+        "type": runtime._PROVIDER_TYPE,
+        "provider_source_id": runtime._PROVIDER_TYPE,
         "key": json.dumps(creds),
         "model": "gpt-5.4-mini",
         "proxy": "",
@@ -116,7 +119,7 @@ def test_provider_initialization_and_request_client() -> None:
     check("OpenAI-Beta" in root_headers, "static Responses beta header is set")
 
     snapshot = store.CredentialSnapshot(
-        source_id=module._PROVIDER_TYPE,
+        source_id=runtime._PROVIDER_TYPE,
         access_token="sk-ant-oat01-new.new.new",
         refresh_token="rt-new",
         expires=9999999999,
@@ -156,7 +159,7 @@ def test_provider_initialization_and_request_client() -> None:
 
 def test_hot_reload_and_offline_models() -> None:
     print("\n=== Hot reload and offline models ===")
-    metadata = module.provider_cls_map[module._PROVIDER_TYPE]
+    metadata = provider_module.provider_cls_map[runtime._PROVIDER_TYPE]
     original = metadata.cls_type
 
     class _StaleProvider:
@@ -164,7 +167,9 @@ def test_hot_reload_and_offline_models() -> None:
 
     metadata.cls_type = _StaleProvider
     try:
-        returned = module._register_provider_adapter_if_absent(ProviderOpenAICodex)
+        returned = provider_module._register_provider_adapter_if_absent(
+            ProviderOpenAICodex
+        )
         check(returned is ProviderOpenAICodex, "hot reload returns the new class")
         check(
             metadata.cls_type is ProviderOpenAICodex, "hot reload replaces stale class"
@@ -172,13 +177,13 @@ def test_hot_reload_and_offline_models() -> None:
     finally:
         metadata.cls_type = original
 
-    old_manager = module._config_mgr
-    module._config_mgr = None
+    old_manager = runtime._config_mgr
+    runtime._config_mgr = None
     try:
         provider = ProviderOpenAICodex(make_config({"refresh_token": "rt-only"}), {})
         models = asyncio.run(provider.get_models())
     finally:
-        module._config_mgr = old_manager
+        runtime._config_mgr = old_manager
     check(
         models == list(oauth.CODEX_FALLBACK_MODELS),
         "missing credentials use offline models",
@@ -198,9 +203,9 @@ def test_source_model_listing_preserves_credentials() -> None:
 
     async def run() -> None:
         with (
-            mock.patch.object(module, "_config_mgr", manager),
-            mock.patch.object(module, "_credential_coordinator", None),
-            mock.patch.object(module, "fetch_models", fetch),
+            mock.patch.object(runtime, "_config_mgr", manager),
+            mock.patch.object(runtime, "_credential_coordinator", None),
+            mock.patch.object(oauth, "fetch_models", fetch),
         ):
             # The dashboard passes the actual shared source to the constructor.
             for _ in range(2):
@@ -290,7 +295,7 @@ def test_payload_conversion_and_stream_usage() -> None:
         return await factory()
 
     async def collect():
-        with mock.patch.object(module, "retry_provider_request", new=retry):
+        with mock.patch.object(provider_module, "retry_provider_request", new=retry):
             return [
                 response
                 async for response in provider._query_stream(
@@ -342,7 +347,7 @@ def test_session_effort_request_override() -> None:
         async def retry(_label, factory, **_kwargs):
             return await factory()
 
-        with mock.patch.object(module, "retry_provider_request", new=retry):
+        with mock.patch.object(provider_module, "retry_provider_request", new=retry):
             _ = [
                 item
                 async for item in provider._query_stream(
@@ -401,11 +406,11 @@ def test_session_effort_request_override() -> None:
     )
 
     async def read_session_overrides() -> tuple[str | None, str | None, str | None]:
-        with mock.patch.object(module, "sp", fake_sp):
+        with mock.patch.object(effort, "sp", fake_sp):
             return (
-                await module._get_session_effort("umo-a"),
-                await module._get_session_effort("umo-b"),
-                await module._get_session_effort("umo-c"),
+                await effort._get_session_effort("umo-a"),
+                await effort._get_session_effort("umo-b"),
+                await effort._get_session_effort("umo-c"),
             )
 
     session_values = asyncio.run(read_session_overrides())
@@ -426,16 +431,16 @@ def test_session_effort_request_override() -> None:
         session_effort=None,
     ):
         captured_efforts.append(session_effort)
-        yield module.LLMResponse(
+        yield provider_module.LLMResponse(
             "assistant",
-            result_chain=module.MessageChain().message("ok"),
+            result_chain=provider_module.MessageChain().message("ok"),
         )
 
     provider._stream_with_current_credentials = stream_with_captured_effort
     request_sp = SimpleNamespace(get_async=mock.AsyncMock(side_effect=["low", "max"]))
 
     async def run_provider_sessions() -> None:
-        with mock.patch.object(module, "sp", request_sp):
+        with mock.patch.object(effort, "sp", request_sp):
             _ = [
                 item
                 async for item in provider.text_chat_stream(
@@ -460,7 +465,7 @@ def test_session_effort_request_override() -> None:
 
 def _provider_with_source(creds: dict) -> tuple[ProviderOpenAICodex, _FakeConfig]:
     conf = _FakeConfig({"provider_sources": [make_source(creds)]})
-    module._config_mgr = _FakeConfigManager(conf)
+    runtime._config_mgr = _FakeConfigManager(conf)
     return ProviderOpenAICodex(make_config(creds), {}), conf
 
 
@@ -485,8 +490,8 @@ def test_pre_stream_credential_recovery() -> None:
         calls += 1
         if calls == 1:
             raise _UnauthorizedError()
-        yield module.LLMResponse(
-            "assistant", result_chain=module.MessageChain().message("ok")
+        yield provider_module.LLMResponse(
+            "assistant", result_chain=provider_module.MessageChain().message("ok")
         )
 
     async def refresh(creds: dict, proxy: str | None) -> dict:
@@ -500,7 +505,7 @@ def test_pre_stream_credential_recovery() -> None:
     provider._query_stream = query
 
     async def run():
-        with mock.patch.object(module, "refresh_access_token", new=refresh):
+        with mock.patch.object(oauth, "refresh_access_token", new=refresh):
             return [
                 response
                 async for response in provider._stream_with_current_credentials(
@@ -539,9 +544,9 @@ def test_stream_is_not_replayed_after_output() -> None:
     ):
         nonlocal calls
         calls += 1
-        yield module.LLMResponse(
+        yield provider_module.LLMResponse(
             "assistant",
-            result_chain=module.MessageChain().message("partial"),
+            result_chain=provider_module.MessageChain().message("partial"),
             is_chunk=True,
         )
         raise _UnauthorizedError()
@@ -604,7 +609,7 @@ def test_usage_limit_enters_cooldown() -> None:
     provider._query_stream = query
 
     async def run():
-        with mock.patch.object(module, "fetch_rate_limits", new=usage):
+        with mock.patch.object(oauth, "fetch_rate_limits", new=usage):
             try:
                 async for _ in provider._stream_with_current_credentials(
                     {"model": "gpt-5.4-mini", "input": []},
@@ -623,7 +628,7 @@ def test_usage_limit_enters_cooldown() -> None:
 
 
 def main() -> int:
-    old_manager = module._config_mgr
+    old_manager = runtime._config_mgr
     try:
         test_provider_initialization_and_request_client()
         test_hot_reload_and_offline_models()
@@ -634,7 +639,7 @@ def main() -> int:
         test_stream_is_not_replayed_after_output()
         test_usage_limit_enters_cooldown()
     finally:
-        module._config_mgr = old_manager
+        runtime._config_mgr = old_manager
     print()
     if FAILED:
         print(f"=== Provider wiring failed: {len(FAILED)} assertion(s) ===")

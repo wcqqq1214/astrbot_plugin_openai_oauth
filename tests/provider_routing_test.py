@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import sys
 import unittest
@@ -16,6 +17,12 @@ import httpx
 from local_codex_test import Config, jwt, local, store
 from login_test import payload, plugin, request_context
 from openai import BadRequestError
+
+oauth = importlib.import_module(f"{plugin.__package__}.src.oauth")
+provider_module = importlib.import_module(f"{plugin.__package__}.src.provider")
+provider_routing = importlib.import_module(f"{plugin.__package__}.src.provider_routing")
+runtime = importlib.import_module(f"{plugin.__package__}.src.runtime")
+web_api = importlib.import_module(f"{plugin.__package__}.src.web_api")
 
 
 class RoutingTests(unittest.IsolatedAsyncioTestCase):
@@ -80,7 +87,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.registry = self.coordinator.providers
         patcher = patch.object(
-            plugin, "_get_credential_coordinator", return_value=self.coordinator
+            runtime, "_get_credential_coordinator", return_value=self.coordinator
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -161,11 +168,11 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
             if self.on_sleep:
                 await self.on_sleep()
 
-        patcher = patch.object(plugin.asyncio, "sleep", new=sleep)
+        patcher = patch.object(provider_module.asyncio, "sleep", new=sleep)
         patcher.start()
         self.addCleanup(patcher.stop)
         patcher = patch.object(
-            plugin,
+            oauth,
             "fetch_rate_limits",
             new=AsyncMock(
                 return_value={
@@ -226,7 +233,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_all_disabled_is_actionable_without_reenabling(self):
         for sid in ("local", "same", "other"):
             await self.registry.edit(sid, enabled=False)
-        with self.assertRaises(plugin.RoutingExhaustedError) as ctx:
+        with self.assertRaises(provider_routing.RoutingExhaustedError) as ctx:
             await self.collect()
         self.assertEqual(
             [reason for _, reason in ctx.exception.failures], ["disabled"] * 3
@@ -264,7 +271,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_network_retries_share_budget_across_accounts(self):
         self.outcomes = {"local": ["network"] * 4, "other": ["network"] * 4}
-        with self.assertRaises(plugin.RoutingExhaustedError):
+        with self.assertRaises(provider_routing.RoutingExhaustedError):
             await self.collect(limit=3)
         self.assertEqual(self.requested(), ["local", "local", "other"])
 
@@ -278,7 +285,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_credential_refresh_cannot_reset_the_attempt_budget(self):
         await self.registry.edit("local", enabled=False)
         self.outcomes["same"] = [401]
-        with self.assertRaises(plugin.RoutingExhaustedError) as ctx:
+        with self.assertRaises(provider_routing.RoutingExhaustedError) as ctx:
             await self.collect(limit=1)
         self.assertEqual(ctx.exception.reason, "attempt_limit")
         self.assertEqual(self.requested(), ["same"])
@@ -292,8 +299,8 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.usage.side_effect = wait_for_usage
         with (
-            patch.object(plugin, "ROUTING_TIMEOUT_SECONDS", 0.02),
-            self.assertRaises(plugin.RoutingExhaustedError),
+            patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", 0.02),
+            self.assertRaises(provider_routing.RoutingExhaustedError),
         ):
             await self.collect()
         self.assertEqual(self.coordinator.account_view("local")["status"], "cooling")
@@ -363,7 +370,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.provider._prepare_chat_payload = AsyncMock(
             return_value=({"model": "test-model", "input": []}, None)
         )
-        with patch.object(plugin, "ROUTING_TIMEOUT_SECONDS", 0.02):
+        with patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", 0.02):
             stream = self.provider.text_chat_stream(prompt="test")
             await anext(stream)
             done = asyncio.Event()
@@ -401,8 +408,8 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_startup_timeout_is_shared_and_closes_transport(self):
         self.outcomes["local"] = ["wait"]
         with (
-            patch.object(plugin, "ROUTING_TIMEOUT_SECONDS", 0.02),
-            self.assertRaises(plugin.RoutingExhaustedError) as ctx,
+            patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", 0.02),
+            self.assertRaises(provider_routing.RoutingExhaustedError) as ctx,
         ):
             await self.collect()
         self.assertEqual(ctx.exception.reason, "startup_timeout")
@@ -447,12 +454,12 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_routing_api_validates_and_rolls_back(self):
         with request_context({"source_id": "other", "routing_mode": "auto"}):
-            result = payload(await plugin._handle_provider_update())
+            result = payload(await web_api._handle_provider_update())
         self.assertEqual(result["provider"]["routing_mode"], "auto")
         for value in (None, False, 1, [], {}, "random"):
             with request_context({"source_id": "other", "routing_mode": value}):
                 self.assertEqual(
-                    (await plugin._handle_provider_update()).status_code, 400
+                    (await web_api._handle_provider_update()).status_code, 400
                 )
         with (
             patch.object(

@@ -18,7 +18,11 @@ sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)
 
 plugin = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.main")
-oauth = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.oauth")
+effort = importlib.import_module(f"{plugin.__package__}.src.effort")
+login = importlib.import_module(f"{plugin.__package__}.src.login")
+oauth = importlib.import_module(f"{plugin.__package__}.src.oauth")
+runtime = importlib.import_module(f"{plugin.__package__}.src.runtime")
+web_api = importlib.import_module(f"{plugin.__package__}.src.web_api")
 from astrbot.api.web import PluginRequest, bind_request_context
 from astrbot.core.star.filter.permission import PermissionType, PermissionTypeFilter
 from astrbot.core.star.register.star_handler import star_handlers_registry
@@ -104,8 +108,8 @@ class _FakeConfigManager:
 
 def source(*, key: str = "", proxy: str = "") -> dict:
     return {
-        "id": plugin._PROVIDER_TYPE,
-        "type": plugin._PROVIDER_TYPE,
+        "id": runtime._PROVIDER_TYPE,
+        "type": runtime._PROVIDER_TYPE,
         "provider": "openai",
         "provider_type": "chat_completion",
         "key": key,
@@ -118,7 +122,7 @@ def source(*, key: str = "", proxy: str = "") -> dict:
 
 def set_config(sources: list[dict]) -> _FakeConfig:
     conf = _FakeConfig({"provider_sources": sources})
-    plugin._config_mgr = _FakeConfigManager(conf)
+    runtime._config_mgr = _FakeConfigManager(conf)
     return conf
 
 
@@ -192,7 +196,7 @@ def test_oauth_protocol_helpers() -> None:
 
 def test_server_owned_web_login_and_source_proxy() -> None:
     print("\n=== Server-owned web login and source proxy ===")
-    plugin._discard_all_login_sessions()
+    login._discard_all_login_sessions()
     conf = set_config([source(key="old", proxy="http://source-proxy:8080")])
     observed_proxy: list[str | None] = []
 
@@ -202,14 +206,14 @@ def test_server_owned_web_login_and_source_proxy() -> None:
 
     async def run():
         with (
-            mock.patch.object(plugin, "request_device_user_code", new=request_code),
+            mock.patch.object(oauth, "request_device_user_code", new=request_code),
             mock.patch.object(
-                plugin,
+                oauth,
                 "poll_device_authorization",
                 new=mock.AsyncMock(return_value=("authorization", "verifier")),
             ),
             mock.patch.object(
-                plugin,
+                oauth,
                 "exchange_authorization_code",
                 new=mock.AsyncMock(
                     return_value={
@@ -222,19 +226,19 @@ def test_server_owned_web_login_and_source_proxy() -> None:
         ):
             with request_context(
                 {
-                    "source_id": plugin._PROVIDER_TYPE,
+                    "source_id": runtime._PROVIDER_TYPE,
                     "proxy": "http://browser-controlled:8080",
                 }
             ):
-                started = await plugin._handle_device_start()
+                started = await web_api._handle_device_start()
             start = payload(started)
             for _ in range(20):
                 await asyncio.sleep(0)
-                session = plugin._login_sessions.get(start["session_id"])
+                session = login._login_sessions.get(start["session_id"])
                 if session and session["status"] not in {"pending", "saving"}:
                     break
             with request_context({"session_id": start["session_id"]}):
-                completed = await plugin._handle_device_poll()
+                completed = await web_api._handle_device_poll()
             return started, completed
 
     started, completed = asyncio.run(run())
@@ -245,7 +249,7 @@ def test_server_owned_web_login_and_source_proxy() -> None:
     check(start["user_code"] == "CODE-1234", "device code is returned to its owner")
     check(
         done
-        == {"status": "success", "error": None, "source_id": plugin._PROVIDER_TYPE},
+        == {"status": "success", "error": None, "source_id": runtime._PROVIDER_TYPE},
         "completed poll returns no credential",
     )
     check(
@@ -261,19 +265,19 @@ def test_server_owned_web_login_and_source_proxy() -> None:
 
 def test_login_error_and_cancel() -> None:
     print("\n=== Login errors and cancellation ===")
-    plugin._discard_all_login_sessions()
+    login._discard_all_login_sessions()
     set_config([source()])
 
     async def failed_start():
         with (
             mock.patch.object(
-                plugin,
+                oauth,
                 "request_device_user_code",
                 new=mock.AsyncMock(side_effect=oauth.DeviceAuthError("not enabled")),
             ),
             request_context(),
         ):
-            return await plugin._handle_device_start()
+            return await web_api._handle_device_start()
 
     response = asyncio.run(failed_start())
     check(response.status_code == 400, "device-code setup errors are reported safely")
@@ -284,23 +288,23 @@ def test_login_error_and_cancel() -> None:
     async def run_cancel():
         with (
             mock.patch.object(
-                plugin,
+                oauth,
                 "request_device_user_code",
                 new=mock.AsyncMock(return_value=("device", "CODE", 5)),
             ),
-            mock.patch.object(plugin, "_run_device_login", side_effect=wait_forever),
+            mock.patch.object(login, "_run_device_login", side_effect=wait_forever),
         ):
             with request_context(username="owner-a"):
-                started = await plugin._handle_device_start()
+                started = await web_api._handle_device_start()
             session_id = payload(started)["session_id"]
             with request_context({"session_id": session_id}, username="owner-b"):
-                stolen = await plugin._handle_device_cancel()
+                stolen = await web_api._handle_device_cancel()
             check(
-                plugin._login_sessions[session_id]["status"] == "pending",
+                login._login_sessions[session_id]["status"] == "pending",
                 "another WebUI user leaves the owner's session unchanged",
             )
             with request_context({"session_id": session_id}, username="owner-a"):
-                cancelled = await plugin._handle_device_cancel()
+                cancelled = await web_api._handle_device_cancel()
             await asyncio.sleep(0)
             return stolen, cancelled, session_id
 
@@ -314,7 +318,7 @@ def test_login_error_and_cancel() -> None:
         "owner can cancel a login session",
     )
     check(
-        session_id not in plugin._login_sessions, "cancelling removes the login session"
+        session_id not in login._login_sessions, "cancelling removes the login session"
     )
 
 
@@ -352,12 +356,12 @@ def test_account_status_and_usage_api() -> None:
 
     async def run():
         with request_context():
-            status = await plugin._handle_account_status()
+            status = await web_api._handle_account_status()
         with (
-            mock.patch.object(plugin, "fetch_rate_limits", new=usage),
+            mock.patch.object(oauth, "fetch_rate_limits", new=usage),
             request_context(),
         ):
-            quota = await plugin._handle_account_usage()
+            quota = await web_api._handle_account_usage()
         return status, quota
 
     status, quota = asyncio.run(run())
@@ -417,17 +421,17 @@ def test_private_command_fallback() -> None:
         event = _Event()
         with (
             mock.patch.object(
-                plugin,
+                oauth,
                 "request_device_user_code",
                 new=mock.AsyncMock(return_value=("device", "CODE", 0)),
             ),
             mock.patch.object(
-                plugin,
+                oauth,
                 "poll_device_authorization",
                 new=mock.AsyncMock(return_value=("authorization", "verifier")),
             ),
             mock.patch.object(
-                plugin,
+                oauth,
                 "exchange_authorization_code",
                 new=mock.AsyncMock(
                     return_value={
@@ -451,7 +455,7 @@ def test_private_command_fallback() -> None:
         "rt-command" not in sent and "command.command.command" not in sent,
         "command never sends tokens",
     )
-    plugin._cancel_all_command_login_tasks()
+    login._cancel_all_command_login_tasks()
 
 
 def test_effort_command() -> None:
@@ -509,7 +513,7 @@ def test_effort_command() -> None:
         async def send(self, message) -> None:
             self.sent.append(message)
 
-    provider = _Provider(plugin._PROVIDER_TYPE)
+    provider = _Provider(runtime._PROVIDER_TYPE)
     context = _Context(provider)
     plugin_instance = SimpleNamespace(context=context)
     event = _Event()
@@ -520,7 +524,7 @@ def test_effort_command() -> None:
     )
 
     async def run() -> None:
-        with mock.patch.object(plugin, "sp", fake_sp):
+        with mock.patch.object(effort, "sp", fake_sp):
             await plugin.OpenAI_OAuth_Plugin.effort(plugin_instance, event, "max")
             await plugin.OpenAI_OAuth_Plugin.effort(plugin_instance, event)
             await plugin.OpenAI_OAuth_Plugin.effort(
@@ -543,13 +547,13 @@ def test_effort_command() -> None:
     fake_sp.put_async.assert_awaited_once_with(
         "umo",
         event.unified_msg_origin,
-        plugin._SESSION_EFFORT_KEY,
+        effort._SESSION_EFFORT_KEY,
         "max",
     )
     fake_sp.remove_async.assert_awaited_once_with(
         "umo",
         event.unified_msg_origin,
-        plugin._SESSION_EFFORT_KEY,
+        effort._SESSION_EFFORT_KEY,
     )
     text = sent_text(event)
     check("high" in text, "/effort shows the current session override")
@@ -559,7 +563,7 @@ def test_effort_command() -> None:
     selected_event.extras["selected_provider"] = "OpenAI Subscribe/gpt-5.6-luna"
     selected_context = _Context(
         _Provider("openai"),
-        _Provider(plugin._PROVIDER_TYPE),
+        _Provider(runtime._PROVIDER_TYPE),
     )
     selected_instance = SimpleNamespace(context=selected_context)
     selected_sp = SimpleNamespace(
@@ -569,7 +573,7 @@ def test_effort_command() -> None:
     )
 
     async def run_selected_provider() -> None:
-        with mock.patch.object(plugin, "sp", selected_sp):
+        with mock.patch.object(effort, "sp", selected_sp):
             await plugin.OpenAI_OAuth_Plugin.effort(
                 selected_instance,
                 selected_event,
@@ -588,7 +592,7 @@ def test_effort_command() -> None:
     selected_sp.put_async.assert_awaited_once_with(
         "umo",
         selected_event.unified_msg_origin,
-        plugin._SESSION_EFFORT_KEY,
+        effort._SESSION_EFFORT_KEY,
         "high",
     )
 
@@ -602,7 +606,7 @@ def test_effort_command() -> None:
     )
 
     async def run_other_provider() -> None:
-        with mock.patch.object(plugin, "sp", other_sp):
+        with mock.patch.object(effort, "sp", other_sp):
             await plugin.OpenAI_OAuth_Plugin.effort(
                 other_instance,
                 other_event,
@@ -646,8 +650,55 @@ def test_plugin_page_assets() -> None:
     )
 
 
+def test_entry_point_terminates_login_tasks() -> None:
+    print("\n=== Entry-point unload cancels command and WebUI login ===")
+    set_config([source()])
+
+    async def run():
+        event = SimpleNamespace(
+            should_call_llm=lambda _value: None,
+            is_private_chat=lambda: True,
+            unified_msg_origin="private:unload-test",
+            send=mock.AsyncMock(),
+        )
+        pending = asyncio.Event()
+
+        async def wait_for_authorization(*_args, **_kwargs):
+            await pending.wait()
+
+        with (
+            mock.patch.object(
+                oauth,
+                "request_device_user_code",
+                new=mock.AsyncMock(return_value=("device", "CODE", 1)),
+            ),
+            mock.patch.object(
+                oauth, "poll_device_authorization", new=wait_for_authorization
+            ),
+        ):
+            with request_context():
+                response = await web_api._handle_device_start()
+            session = login._login_sessions[payload(response)["session_id"]]
+            web_task = session["task"]
+            expiry = session["expiry_handle"]
+            await plugin.OpenAI_OAuth_Plugin.openai_login(None, event)
+            command_task = login._command_login_tasks[event.unified_msg_origin]
+            await asyncio.sleep(0)
+            await plugin.OpenAI_OAuth_Plugin.terminate(None)
+            await asyncio.gather(web_task, command_task, return_exceptions=True)
+            check(web_task.cancelled(), "unload cancels the pending WebUI login")
+            check(command_task.cancelled(), "unload cancels the pending command login")
+            check(expiry.cancelled(), "unload cancels the session expiry callback")
+            check(
+                not login._login_sessions and not login._command_login_tasks,
+                "unload clears both login registries",
+            )
+
+    asyncio.run(run())
+
+
 def main() -> int:
-    old_manager = plugin._config_mgr
+    old_manager = runtime._config_mgr
     try:
         test_oauth_protocol_helpers()
         test_server_owned_web_login_and_source_proxy()
@@ -656,10 +707,11 @@ def main() -> int:
         test_private_command_fallback()
         test_effort_command()
         test_plugin_page_assets()
+        test_entry_point_terminates_login_tasks()
     finally:
-        plugin._discard_all_login_sessions()
-        plugin._cancel_all_command_login_tasks()
-        plugin._config_mgr = old_manager
+        login._discard_all_login_sessions()
+        login._cancel_all_command_login_tasks()
+        runtime._config_mgr = old_manager
     print()
     if FAILED:
         print(f"=== Login regressions failed: {len(FAILED)} assertion(s) ===")

@@ -8,8 +8,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
+from pathlib import Path
 
 # 解析 AstrBot 仓库根（本文件位于 Project/astrbot_plugin_openai_oauth/tests/ 下）
 REPO_ROOT = os.path.abspath(
@@ -28,8 +30,7 @@ from astrbot.dashboard.services.config_service import (
 
 FAILED = []
 
-# 步骤 1 在导入前就需要该类型名，因此静态声明；步骤 2 导入后会校验与
-# module._PROVIDER_TYPE 一致，避免改名后测试静默失联。
+# Check this pre-import constant against the runtime after loading the plugin.
 PROVIDER_TYPE = "OpenAI Subscribe"
 
 
@@ -38,6 +39,40 @@ def check(cond: bool, msg: str) -> None:
     print(f"[{tag}] {msg}")
     if not cond:
         FAILED.append(msg)
+
+
+def check_entry_point(module) -> None:
+    from astrbot.core.star.register.star_handler import star_handlers_registry
+    from astrbot.core.star.star import star_map
+
+    prefix = module.__package__
+    registered = [name for name in star_map if name.startswith(prefix + ".")]
+    check(registered == [module.__name__], "the plugin is registered only at main")
+    check(
+        star_map[module.__name__].star_cls_type is module.OpenAI_OAuth_Plugin,
+        "AstrBot resolves the current entry-point class",
+    )
+    handlers = [
+        item
+        for item in star_handlers_registry
+        if item.handler_module_path.startswith(prefix + ".")
+    ]
+    check(
+        {item.handler_name for item in handlers} == {"usage", "effort", "openai_login"}
+        and len(handlers) == 3
+        and all(
+            item.handler_module_path == module.__name__
+            and item.handler is getattr(module.OpenAI_OAuth_Plugin, item.handler_name)
+            for item in handlers
+        ),
+        "all commands belong to the current entry point without duplicates",
+    )
+    check(
+        sys.modules[prefix].ProviderOpenAICodex is module.ProviderOpenAICodex
+        and module.ProviderOpenAICodex
+        is sys.modules[f"{prefix}.src.provider"].ProviderOpenAICodex,
+        "package and main preserve the provider export",
+    )
 
 
 def main() -> int:
@@ -49,10 +84,11 @@ def main() -> int:
     import importlib
 
     module = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.main")
+    runtime = importlib.import_module(f"{module.__package__}.src.runtime")
     check(module is not None, "data.plugins.astrbot_plugin_openai_oauth.main 导入成功")
     check(
-        PROVIDER_TYPE == module._PROVIDER_TYPE,
-        f"测试常量与 module._PROVIDER_TYPE 一致（{module._PROVIDER_TYPE}）",
+        PROVIDER_TYPE == runtime._PROVIDER_TYPE,
+        f"test constant matches the runtime provider type ({runtime._PROVIDER_TYPE})",
     )
 
     print("\n=== 3. provider 已进入注册表 ===")
@@ -96,18 +132,27 @@ def main() -> int:
 
     registered = [k for k in star_map if "astrbot_plugin_openai_oauth" in k]
     check(bool(registered), f"star_map 含插件注册项: {registered}")
+    check_entry_point(module)
 
     print(
         "\n=== 6. Hot reload: provider registration is idempotent and refreshes class ==="
     )
-    # AstrBot plugin hot reload clears the plugin modules from sys.modules but keeps
-    # provider_cls_map. Re-importing must not raise and must replace stale metadata.
+    # Exercise AstrBot's actual unbinding and nested-module cleanup before reload.
+    from astrbot.core.star.star_manager import PluginManager
+
     first_cls = provider_cls_map[PROVIDER_TYPE].cls_type
     prefix = "data.plugins.astrbot_plugin_openai_oauth"
-    for key in [m for m in sys.modules if m == prefix or m.startswith(prefix + ".")]:
-        del sys.modules[key]
+    metadata = star_map[module.__name__]
+    metadata.root_dir_name = "astrbot_plugin_openai_oauth"
+    metadata.reserved = False
+    manager = object.__new__(PluginManager)
+    asyncio.run(manager._unbind_plugin(metadata.name, module.__name__))
+    check(
+        not any(key == prefix or key.startswith(prefix + ".") for key in sys.modules),
+        "AstrBot unload removes the entry point and all src modules",
+    )
     try:
-        importlib.import_module(f"{prefix}.main")
+        reloaded = importlib.import_module(f"{prefix}.main")
         reload_ok = True
     except ValueError as exc:
         reload_ok = False
@@ -119,16 +164,21 @@ def main() -> int:
         provider_cls_map[PROVIDER_TYPE].cls_type is not first_cls,
         "provider metadata points to the newly imported class after reload",
     )
+    if reload_ok:
+        check_entry_point(reloaded)
 
     print("\n=== 7. Native Plugin Page and server-side persistence ===")
-    main_py = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "main.py"))
-    with open(main_py, encoding="utf-8") as fh:
-        main_src = fh.read()
+    root = Path(__file__).resolve().parents[1]
+    login_src = (root / "src" / "login.py").read_text(encoding="utf-8")
+    plugin_src = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in [root / "main.py", *sorted((root / "src").glob("*.py"))]
+    )
     check(
-        "_persist_login_credentials" in main_src and "save_creds" not in main_src,
+        "_persist_login_credentials" in login_src and "save_creds" not in plugin_src,
         "credentials are written back only by the server-side device session",
     )
-    check("_LOGIN_PAGE_HTML" not in main_src, "standalone login HTML is removed")
+    check("_LOGIN_PAGE_HTML" not in plugin_src, "standalone login HTML is removed")
 
     print("\n=== 8. README documents the Plugin Page workflow ===")
     repo_root = os.path.join(os.path.dirname(__file__), "..")

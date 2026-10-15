@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import sys
 import unittest
@@ -14,6 +15,12 @@ from unittest.mock import AsyncMock, patch
 sys.path.insert(0, str(Path(__file__).parent))
 from local_codex_test import Config, jwt, local, store
 from login_test import payload, plugin, request_context
+
+login = importlib.import_module(f"{plugin.__package__}.src.login")
+oauth = importlib.import_module(f"{plugin.__package__}.src.oauth")
+runtime = importlib.import_module(f"{plugin.__package__}.src.runtime")
+usage_service = importlib.import_module(f"{plugin.__package__}.src.usage")
+web_api = importlib.import_module(f"{plugin.__package__}.src.web_api")
 
 
 class RegistryTests(unittest.IsolatedAsyncioTestCase):
@@ -56,11 +63,11 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.registry = self.coordinator.providers
         patcher = patch.object(
-            plugin, "_get_credential_coordinator", return_value=self.coordinator
+            runtime, "_get_credential_coordinator", return_value=self.coordinator
         )
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.addCleanup(plugin._discard_all_login_sessions)
+        self.addCleanup(login._discard_all_login_sessions)
 
     async def test_local_active_migration_preserves_model_and_saved_login(self):
         model = deepcopy(self.conf["provider"])
@@ -96,7 +103,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         models = deepcopy(self.conf["provider"])
         for enabled in (False, False, True):
             with request_context({"source_id": sid, "enabled": enabled}):
-                result = payload(await plugin._handle_provider_update())
+                result = payload(await web_api._handle_provider_update())
             self.assertEqual(result["provider"]["enabled"], enabled)
             self.assertEqual(result["provider"]["status"], "cooling")
             self.assertEqual(device, {**before, "enable": enabled})
@@ -125,7 +132,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
             {"enable": False},
         ):
             with request_context({"source_id": "OpenAI Subscribe", **values}):
-                response = await plugin._handle_provider_update()
+                response = await web_api._handle_provider_update()
             self.assertEqual(response.status_code, 400)
             self.assertEqual(self.conf, before)
 
@@ -293,20 +300,20 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
 
         async def complete(body):
             with request_context(body):
-                started = payload(await plugin._handle_device_start())
-            session = plugin._login_sessions[started["session_id"]]
+                started = payload(await web_api._handle_device_start())
+            session = login._login_sessions[started["session_id"]]
             await session["task"]
             with request_context({"session_id": started["session_id"]}):
-                return payload(await plugin._handle_device_poll())
+                return payload(await web_api._handle_device_poll())
 
         with (
             patch.object(
-                plugin,
+                oauth,
                 "request_device_user_code",
                 new=AsyncMock(return_value=("d", "code", 1)),
             ),
             patch.object(
-                plugin, "_complete_device_login", new=AsyncMock(return_value=self.creds)
+                login, "_complete_device_login", new=AsyncMock(return_value=self.creds)
             ),
         ):
             one = await complete({"name": "One"})
@@ -318,23 +325,25 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.coordinator._source(one["source_id"])["name"], "One")
             self.assertEqual(len(self.registry.owned()), 4)
             with request_context({"source_id": "OpenAI Subscribe"}):
-                self.assertEqual((await plugin._handle_device_start()).status_code, 400)
+                self.assertEqual(
+                    (await web_api._handle_device_start()).status_code, 400
+                )
 
     async def test_listing_and_usage_are_scoped_and_do_not_expose_tokens(self):
         await self.registry.migrate()
         with request_context():
-            listing = payload(await plugin._handle_providers_list())
+            listing = payload(await web_api._handle_providers_list())
         self.assertEqual(listing["providers"][0]["credential_mode"], "local_codex")
         for secret in (self.creds["access_token"], self.creds["refresh_token"]):
             self.assertNotIn(secret, json.dumps(listing))
         device_id = listing["providers"][1]["id"]
         with (
             patch.object(
-                plugin, "fetch_rate_limits", new=AsyncMock(return_value={"windows": []})
+                oauth, "fetch_rate_limits", new=AsyncMock(return_value={"windows": []})
             ) as fetch,
             request_context({"source_id": device_id}),
         ):
-            result = payload(await plugin._handle_account_usage())
+            result = payload(await web_api._handle_account_usage())
         self.assertEqual(
             fetch.call_args.args[:2], (self.creds["access_token"], "device")
         )
@@ -353,27 +362,27 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(
-                plugin,
+                oauth,
                 "request_device_user_code",
                 new=AsyncMock(return_value=("d", "code", 1)),
             ),
             patch.object(
-                plugin, "_complete_device_login", new=AsyncMock(return_value=self.creds)
+                login, "_complete_device_login", new=AsyncMock(return_value=self.creds)
             ),
             patch.object(self.registry, "save_login", new=delayed),
         ):
             with request_context({"name": "Saving"}):
-                started = payload(await plugin._handle_device_start())
-            task = plugin._login_sessions[started["session_id"]]["task"]
+                started = payload(await web_api._handle_device_start())
+            task = login._login_sessions[started["session_id"]]["task"]
             await entered.wait()
             with request_context({"session_id": started["session_id"]}):
                 self.assertEqual(
-                    (await plugin._handle_device_cancel()).status_code, 409
+                    (await web_api._handle_device_cancel()).status_code, 409
                 )
             release.set()
             await task
             with request_context({"session_id": started["session_id"]}):
-                result = payload(await plugin._handle_device_poll())
+                result = payload(await web_api._handle_device_poll())
             self.assertEqual(result["status"], "success")
             self.assertEqual(
                 self.coordinator._source(result["source_id"])["name"], "Saving"
@@ -387,14 +396,14 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
             send=AsyncMock(),
         )
         provider = SimpleNamespace(
-            meta=lambda: SimpleNamespace(type=plugin._PROVIDER_TYPE),
+            meta=lambda: SimpleNamespace(type=runtime._PROVIDER_TYPE),
             _source_id="selected-source",
         )
         instance = SimpleNamespace(
             context=SimpleNamespace(get_provider_by_id=lambda value: provider)
         )
         with patch.object(
-            plugin, "build_usage_message", new=AsyncMock(return_value="quota")
+            usage_service, "build_usage_message", new=AsyncMock(return_value="quota")
         ) as usage:
             await plugin.OpenAI_OAuth_Plugin.usage(instance, event)
         usage.assert_awaited_once_with("selected-source")
@@ -404,21 +413,22 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         before = deepcopy(self.conf)
         with (
             patch.object(
-                plugin,
+                oauth,
                 "request_device_user_code",
                 new=AsyncMock(return_value=("d", "code", 1)),
             ),
             patch.object(
-                plugin, "_complete_device_login", side_effect=lambda **kwargs: None
+                login, "_complete_device_login", side_effect=lambda **kwargs: None
             ),
         ):
             # Reserve and cancel before the worker gets its first event-loop turn.
             with request_context({"name": "Cancelled"}):
-                started = payload(await plugin._handle_device_start())
-            task = plugin._login_sessions[started["session_id"]]["task"]
+                started = payload(await web_api._handle_device_start())
+            task = login._login_sessions[started["session_id"]]["task"]
             with request_context({"session_id": started["session_id"]}):
                 self.assertEqual(
-                    payload(await plugin._handle_device_cancel())["status"], "cancelled"
+                    payload(await web_api._handle_device_cancel())["status"],
+                    "cancelled",
                 )
             await asyncio.gather(task, return_exceptions=True)
         self.assertEqual(self.conf, before)

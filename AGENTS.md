@@ -42,5 +42,5 @@ The Codex OAuth flow and the `chatgpt.com/backend-api/codex` endpoint shape
 follow the implementations in opencode (`sst/opencode`), openclaw
 (`openclaw/openclaw`) and hermes-agent (`NousResearch/hermes-agent`). The
 device-code flow is the one to embed in a WebUI; the token is a JWT (possibly
-with an `sk-ant-oat01-` prefix glued to the header). See `main.py` for the
+with an `sk-ant-oat01-` prefix glued to the header). See `src/oauth.py` for the
 constants.

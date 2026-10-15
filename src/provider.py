@@ -1,0 +1,879 @@
+"""Codex provider adapter, response streaming, retries, and source routing."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+from collections.abc import AsyncGenerator, Callable
+from contextlib import aclosing, asynccontextmanager
+from copy import deepcopy
+from typing import Any
+
+import astrbot.core.message.components as Comp
+from astrbot import logger
+from astrbot.api.event import MessageChain
+from astrbot.core.exceptions import EmptyModelOutputError
+from astrbot.core.provider.entities import LLMResponse, TokenUsage
+from astrbot.core.provider.register import (
+    provider_cls_map,
+    register_provider_adapter,
+)
+from astrbot.core.provider.sources.openai_responses_source import (
+    ProviderOpenAIResponses,
+)
+from astrbot.core.provider.sources.request_retry import (
+    REQUEST_RETRY_ATTEMPTS,
+    REQUEST_RETRY_WAIT_MAX_S,
+    retry_provider_request,
+)
+from astrbot.core.utils.config_number import coerce_int_config
+
+from . import effort, oauth, runtime
+from . import usage as usage_service
+from .credential_store import (
+    CredentialCooldownError,
+    CredentialError,
+    CredentialSchemaError,
+    CredentialSnapshot,
+    CredentialsNotConfiguredError,
+    CredentialSourceError,
+    ProviderDisabledError,
+    ReauthenticationRequiredError,
+    parse_credentials,
+)
+from .oauth import (
+    CODEX_BASE,
+    CODEX_FALLBACK_MODELS,
+    DEFAULT_ORIGINATOR,
+    DEFAULT_USER_AGENT,
+    CredentialExpiredError,
+)
+from .provider_routing import (
+    ROUTING_TIMEOUT_SECONDS,
+    SOURCE_ATTEMPTS,
+    RequestBudget,
+    RoutingBudgetError,
+    RoutingExhaustedError,
+)
+
+
+def _register_provider_adapter_if_absent(cls: type) -> type:
+    """Register the provider once and refresh its class on plugin reload.
+
+    AstrBot keeps ``provider_cls_map`` when a plugin module is reloaded. Avoiding
+    duplicate registration is necessary, but the metadata must still point to the
+    newly imported class or provider instances will continue using stale code.
+    """
+    if runtime._PROVIDER_TYPE not in provider_cls_map:
+        return register_provider_adapter(
+            runtime._PROVIDER_TYPE,
+            "OpenAI 订阅登录 (Codex OAuth) Provider",
+            provider_display_name="OpenAI Subscribe",
+            default_config_tmpl=runtime._default_provider_template(),
+        )(cls)
+    provider_cls_map[runtime._PROVIDER_TYPE].cls_type = cls
+    return cls
+
+
+@_register_provider_adapter_if_absent
+class ProviderOpenAICodex(ProviderOpenAIResponses):
+    """ChatGPT subscription provider backed by the Codex OAuth flow.
+
+    The key field holds a credential JSON blob:
+    ``{"access_token", "refresh_token", "expires", "account_id"}``
+    """
+
+    def __init__(self, provider_config: dict, provider_settings: dict) -> None:
+        # The dashboard passes its shared source config when listing models.
+        # Keep client placeholders and SDK mutations out of the credential store.
+        provider_config = deepcopy(provider_config)
+        raw_key = provider_config.get("key")
+        try:
+            bootstrap_creds = parse_credentials(raw_key)
+        except CredentialSchemaError:
+            bootstrap_creds = {}
+        self._bootstrap_access_token = str(
+            bootstrap_creds.get("access_token", "") or ""
+        )
+        source_id = provider_config.get("provider_source_id")
+        if not source_id and runtime._config_mgr is not None:
+            sources = runtime._config_mgr.default_conf.get("provider_sources", [])
+            source_id = next(
+                (
+                    s["id"]
+                    for s in sources
+                    if s.get("id") == provider_config.get("id")
+                    and s.get("type") == runtime._PROVIDER_TYPE
+                ),
+                None,
+            )
+        self._source_id = str(source_id or runtime._PROVIDER_TYPE)
+        self._originator = str(provider_config.get("originator", DEFAULT_ORIGINATOR))
+        self._user_agent = str(provider_config.get("user_agent", DEFAULT_USER_AGENT))
+        raw_headers = provider_config.get("custom_headers")
+        self._static_headers = (
+            {
+                str(key): str(value)
+                for key, value in raw_headers.items()
+                if isinstance(key, str)
+            }
+            if isinstance(raw_headers, dict)
+            else {}
+        )
+        for header_name in list(self._static_headers):
+            if header_name.lower() == "chatgpt-account-id":
+                self._static_headers.pop(header_name)
+        self._static_headers.setdefault("originator", self._originator)
+        self._static_headers.setdefault("OpenAI-Beta", "responses=experimental")
+        self._static_headers.setdefault("User-Agent", self._user_agent)
+        provider_config["api_base"] = CODEX_BASE
+        provider_config["key"] = "openai-oauth-request-scoped"
+        provider_config["custom_headers"] = dict(self._static_headers)
+
+        super().__init__(provider_config, provider_settings)
+        self.api_keys = [self._bootstrap_access_token]
+        self.chosen_api_key = self._bootstrap_access_token
+        self.set_model(provider_config.get("model", "gpt-5.4-mini"))
+
+    def get_keys(self) -> list[str]:
+        return [self._bootstrap_access_token]
+
+    def get_current_key(self) -> str:
+        return self._bootstrap_access_token
+
+    def set_key(self, key: str) -> None:
+        try:
+            creds = parse_credentials(key)
+        except CredentialSchemaError:
+            creds = {}
+        self._bootstrap_access_token = str(creds.get("access_token", "") or "")
+        self.api_keys = [self._bootstrap_access_token]
+        self.chosen_api_key = self._bootstrap_access_token
+
+    def _request_client(
+        self,
+        snapshot: CredentialSnapshot,
+        *,
+        headers: dict[str, str] | None = None,
+        http_client: Any = None,
+    ) -> Any:
+        headers = dict(self._static_headers if headers is None else headers)
+        if snapshot.account_id:
+            headers["chatgpt-account-id"] = snapshot.account_id
+        return self.client.with_options(
+            # The plugin owns retries, cooldowns and the cross-provider budget.
+            max_retries=0,
+            api_key=snapshot.access_token,
+            set_default_headers=headers,
+            **({"http_client": http_client} if http_client is not None else {}),
+        )
+
+    @asynccontextmanager
+    async def _source_client(self, snapshot: CredentialSnapshot):
+        """Own the selected source's transport for this request, never globally."""
+        coordinator = runtime._get_credential_coordinator()
+        source = coordinator._source(snapshot.source_id)
+        settings = coordinator.source_settings(snapshot.source_id)
+        # Model headers remain useful on the preferred source. Never carry another
+        # source's headers or proxy into a fallback account.
+        raw = (
+            self._static_headers
+            if snapshot.source_id == self._source_id
+            else source.get("custom_headers", {})
+        )
+        headers = (
+            {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+        )
+        reserved = {"authorization", "chatgpt-account-id", "originator", "user-agent"}
+        headers = {k: v for k, v in headers.items() if k.lower() not in reserved}
+        headers.update(
+            {
+                "originator": settings["originator"] or DEFAULT_ORIGINATOR,
+                "User-Agent": settings["user_agent"] or DEFAULT_USER_AGENT,
+                "OpenAI-Beta": "responses=experimental",
+            }
+        )
+        if snapshot.account_id:
+            headers["chatgpt-account-id"] = snapshot.account_id
+        transport = self._create_http_client(
+            {**self.provider_config, "proxy": settings["proxy"]}
+        )
+        try:
+            async with self._request_client(
+                snapshot,
+                headers=headers,
+                http_client=transport,
+            ) as client:
+                yield client
+        finally:
+            await transport.aclose()
+
+    def _convert_chat_messages_to_response_input(
+        self, messages: list[dict]
+    ) -> list[dict]:
+        # The ChatGPT Codex backend rejects role:"system" items in input and
+        # only accepts the Responses API roles (user/assistant/developer).
+        response_input = super()._convert_chat_messages_to_response_input(messages)
+        for item in response_input:
+            if item.get("type") == "message" and item.get("role") == "system":
+                item["role"] = "developer"
+        return response_input
+
+    async def _query_stream(
+        self,
+        request_client: Any,
+        payloads: dict,
+        tools,
+        *,
+        request_max_retries: int | None = None,
+        session_effort: str | None = None,
+        before_attempt: Callable[[], None] | None = None,
+    ) -> AsyncGenerator[LLMResponse, None]:
+        """Stream from the Codex backend, which completes with an empty response
+        object: the content only arrives as deltas. Assemble the final response
+        from them instead of parsing the terminal event."""
+        if tools:
+            response_tools = []
+            for tool in tools.openai_schema():
+                function = tool.get("function", {})
+                response_tools.append({"type": "function", **function})
+            if response_tools:
+                payloads["tools"] = response_tools
+                payloads["tool_choice"] = payloads.get("tool_choice", "auto")
+
+        extra_body: dict[str, Any] = {}
+        custom_extra_body = self.provider_config.get("custom_extra_body", {})
+        if isinstance(custom_extra_body, dict):
+            extra_body.update(custom_extra_body)
+
+        for key in list(payloads):
+            if key not in self.default_params:
+                extra_body[key] = payloads.pop(key)
+
+        max_tokens = extra_body.pop("max_tokens", None)
+        if max_tokens is not None and "max_output_tokens" not in extra_body:
+            extra_body["max_output_tokens"] = max_tokens
+        effective_session_effort = effort._normalize_effort(session_effort)
+        if effective_session_effort:
+            existing_reasoning = extra_body.get("reasoning")
+            reasoning = (
+                dict(existing_reasoning) if isinstance(existing_reasoning, dict) else {}
+            )
+            reasoning["effort"] = effective_session_effort
+            extra_body["reasoning"] = reasoning
+            extra_body.pop("reasoning_effort", None)
+        else:
+            reasoning_effort = extra_body.pop("reasoning_effort", None)
+            if reasoning_effort is not None and "reasoning" not in extra_body:
+                extra_body["reasoning"] = {"effort": reasoning_effort}
+        extra_body.pop("previous_response_id", None)
+        extra_body.pop("conversation", None)
+        extra_body.pop("store", None)
+        payloads.pop("previous_response_id", None)
+        payloads.pop("conversation", None)
+        payloads["store"] = False
+
+        max_attempts = coerce_int_config(
+            request_max_retries,
+            default=REQUEST_RETRY_ATTEMPTS,
+            min_value=1,
+            field_name="request_max_retries",
+            source="OpenAI Codex",
+            warn=request_max_retries is not None,
+        )
+        attempts = 0
+        emitted_response = False
+
+        async def create_stream():
+            nonlocal attempts
+            if before_attempt is not None:
+                before_attempt()
+            attempts += 1
+            return await request_client.responses.create(
+                **payloads,
+                stream=True,
+                extra_body=extra_body,
+            )
+
+        while attempts < max_attempts:
+            # Creation and stream iteration share one request-attempt budget.
+            stream = await retry_provider_request(
+                "OpenAI Responses",
+                create_stream,
+                retry_rate_limits=False,
+                max_attempts=max_attempts - attempts,
+            )
+            try:
+                async for response in self._consume_stream(stream, tools):
+                    emitted_response = True
+                    yield response
+                return
+            except Exception as exc:
+                if (
+                    emitted_response
+                    or attempts >= max_attempts
+                    or oauth.classify_codex_error(exc) != "temporary"
+                ):
+                    raise
+            finally:
+                await stream.close()
+
+            delay = min(2 ** min(attempts - 1, 5), REQUEST_RETRY_WAIT_MAX_S)
+            logger.warning(
+                "OpenAI Codex stream failed before output; retrying (%s/%s) in %ss.",
+                attempts + 1,
+                max_attempts,
+                delay,
+            )
+            await asyncio.sleep(delay)
+
+    async def _consume_stream(
+        self, stream: Any, tools: Any
+    ) -> AsyncGenerator[LLMResponse, None]:
+        """Keep partial response state scoped to a single stream attempt."""
+        response_id: str | None = None
+        text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        function_calls: list[dict] = []
+
+        async for event in stream:
+            event_type = self._field(event, "type", "")
+            event_response = self._field(event, "response")
+            if event_response is not None:
+                response_id = self._field(event_response, "id", response_id)
+
+            if event_type == "error":
+                code = self._field(event, "code", "stream_error")
+                raise RuntimeError(
+                    f"Responses API stream failed: {code}. response_id={response_id}"
+                )
+
+            if event_type in {"response.output_text.delta", "response.refusal.delta"}:
+                delta = self._field(event, "delta", "")
+                if delta:
+                    text_parts.append(str(delta))
+                    yield LLMResponse(
+                        "assistant",
+                        result_chain=MessageChain(chain=[Comp.Plain(str(delta))]),
+                        is_chunk=True,
+                        id=response_id,
+                    )
+                continue
+
+            if event_type in {
+                "response.reasoning_text.delta",
+                "response.reasoning_summary_text.delta",
+            }:
+                delta = self._field(event, "delta", "")
+                if delta:
+                    reasoning_parts.append(str(delta))
+                    yield LLMResponse(
+                        "assistant",
+                        reasoning_content=str(delta),
+                        is_chunk=True,
+                        id=response_id,
+                    )
+                continue
+
+            if event_type == "response.output_item.added":
+                item = self._field(event, "item")
+                if self._field(item, "type") == "function_call":
+                    arguments = self._field(item, "arguments", "")
+                    if isinstance(arguments, dict):
+                        arguments = json.dumps(arguments, ensure_ascii=False)
+                    function_calls.append(
+                        {
+                            "call_id": str(self._field(item, "call_id", "") or ""),
+                            "name": str(self._field(item, "name", "") or ""),
+                            "arguments": str(arguments or ""),
+                        }
+                    )
+                continue
+
+            if event_type == "response.function_call_arguments.delta":
+                if function_calls:
+                    function_calls[-1]["arguments"] += str(
+                        self._field(event, "delta", "") or ""
+                    )
+                continue
+
+            if event_type in {
+                "response.completed",
+                "response.incomplete",
+                "response.failed",
+            }:
+                if event_response is not None:
+                    status = self._field(event_response, "status")
+                    if status == "failed":
+                        error = self._field(event_response, "error")
+                        code = self._field(error, "code", "unknown_error")
+                        raise RuntimeError(
+                            f"Responses API request failed: {code}. "
+                            f"response_id={response_id}"
+                        )
+                    if (
+                        self._field(
+                            self._field(event_response, "incomplete_details"),
+                            "reason",
+                        )
+                        == "content_filter"
+                    ):
+                        raise RuntimeError(
+                            "Responses API output was rejected by the provider "
+                            f"content filter. response_id={response_id}"
+                        )
+                    if self._field(event_response, "output"):
+                        yield await self._parse_response(event_response, tools)
+                        return
+                final = self._assemble_streamed_response(
+                    response_id,
+                    text_parts,
+                    reasoning_parts,
+                    function_calls,
+                    usage=self._extract_response_usage(event_response),
+                )
+                if final is not None:
+                    yield final
+                    return
+                raise EmptyModelOutputError(
+                    f"Responses stream returned no usable output. "
+                    f"response_id={response_id}"
+                )
+
+        raise EmptyModelOutputError(
+            f"Responses stream ended without a terminal event. response_id={response_id}"
+        )
+
+    def _assemble_streamed_response(
+        self,
+        response_id: str | None,
+        text_parts: list[str],
+        reasoning_parts: list[str],
+        function_calls: list[dict],
+        usage: TokenUsage | None = None,
+    ) -> LLMResponse | None:
+        """Build a final LLMResponse from streamed deltas like ``_parse_response``."""
+        llm_response = LLMResponse("assistant", id=response_id)
+        llm_response.usage = usage if usage is not None else TokenUsage()
+        completion_text = "".join(text_parts)
+        if completion_text:
+            llm_response.result_chain = MessageChain().message(completion_text)
+        if reasoning_parts:
+            llm_response.reasoning_content = "\n".join(reasoning_parts)
+        for call in function_calls:
+            arguments = call["arguments"]
+            if isinstance(arguments, str):
+                try:
+                    parsed = json.loads(arguments)
+                except json.JSONDecodeError:
+                    parsed = {}
+            elif arguments is None:
+                parsed = {}
+            else:
+                parsed = arguments
+            llm_response.tools_call_args.append(parsed)
+            llm_response.tools_call_name.append(call["name"])
+            llm_response.tools_call_ids.append(call["call_id"])
+        if llm_response.tools_call_args:
+            llm_response.role = "tool"
+        has_text = bool((llm_response.completion_text or "").strip())
+        has_reasoning = bool((llm_response.reasoning_content or "").strip())
+        if not has_text and not has_reasoning and not llm_response.tools_call_args:
+            return None
+        return llm_response
+
+    def _extract_response_usage(self, response: Any) -> TokenUsage | None:
+        """Extract usage from a terminal Responses event.
+
+        Codex may send the completed response with an empty ``output`` list while
+        the actual text arrived through delta events. In that case the base
+        Responses parser is intentionally skipped, so preserve the usage here.
+        """
+        usage = self._field(response, "usage")
+        if usage is None:
+            return None
+
+        input_details = self._field(usage, "input_tokens_details")
+        cached_tokens = self._field(input_details, "cached_tokens", 0) or 0
+        input_tokens = self._field(usage, "input_tokens", 0) or 0
+        output_tokens = self._field(usage, "output_tokens", 0) or 0
+        return TokenUsage(
+            input_other=max(input_tokens - cached_tokens, 0),
+            input_cached=cached_tokens,
+            output=output_tokens,
+        )
+
+    async def get_models(self) -> list[str]:
+        try:
+            coordinator = runtime._get_credential_coordinator()
+            snapshot = await coordinator.get_snapshot(self._source_id)
+            try:
+                models = await oauth.fetch_models(
+                    snapshot.access_token,
+                    snapshot.account_id,
+                    self._request_proxy(),
+                    self._originator,
+                    self._user_agent,
+                )
+            except CredentialExpiredError:
+                snapshot = await coordinator.get_snapshot(
+                    self._source_id,
+                    force_refresh=True,
+                    check_cooldown=False,
+                )
+                models = await oauth.fetch_models(
+                    snapshot.access_token,
+                    snapshot.account_id,
+                    self._request_proxy(),
+                    self._originator,
+                    self._user_agent,
+                )
+            if models:
+                return models
+            logger.warning("OpenAI Codex model catalog contained no model IDs.")
+        except (CredentialError, CredentialExpiredError):
+            return list(CODEX_FALLBACK_MODELS)
+        except Exception as exc:  # noqa: BLE001 - catalog failure uses offline fallback
+            logger.error("OpenAI Codex model catalog failed: %s", type(exc).__name__)
+        return list(CODEX_FALLBACK_MODELS)
+
+    def _request_proxy(self) -> str:
+        try:
+            return runtime._get_credential_coordinator().source_settings(
+                self._source_id
+            )["proxy"]
+        except CredentialSourceError:
+            return str(self.provider_config.get("proxy", "") or "")
+
+    async def _fetch_usage_for_snapshot(
+        self,
+        snapshot: CredentialSnapshot,
+    ) -> dict[str, Any]:
+        settings = runtime._get_credential_coordinator().source_settings(
+            snapshot.source_id
+        )
+        return await retry_provider_request(
+            "OpenAI Codex",
+            lambda: oauth.fetch_rate_limits(
+                snapshot.access_token,
+                snapshot.account_id,
+                settings["proxy"],
+                settings["user_agent"] or DEFAULT_USER_AGENT,
+            ),
+            retry_rate_limits=False,
+            max_attempts=2,
+        )
+
+    async def _subscription_cooldown_error(
+        self,
+        snapshot: CredentialSnapshot,
+    ) -> CredentialCooldownError:
+        coordinator = runtime._get_credential_coordinator()
+        # Retain a conservative cooldown even if the quota lookup times out or
+        # the caller cancels while fetching a more precise reset time.
+        provisional = await coordinator.mark_cooling(
+            snapshot.source_id,
+            int(time.time()) + 300,
+            expected_access_token=snapshot.access_token,
+        )
+        cooldown_until: int | None = None
+        try:
+            usage = await coordinator.get_usage(
+                snapshot.source_id,
+                self._fetch_usage_for_snapshot,
+            )
+            cooldown_until = usage_service._cooldown_until_from_usage(usage)
+        except Exception as exc:  # noqa: BLE001 - a failed usage lookup is non-fatal
+            logger.warning(
+                "OpenAI Codex quota lookup after rate limit failed: %s",
+                type(exc).__name__,
+            )
+        if cooldown_until is None:
+            cooldown_until = provisional.cooldown_until or int(time.time()) + 300
+        persisted = await coordinator.mark_cooling(
+            snapshot.source_id,
+            cooldown_until,
+            expected_access_token=snapshot.access_token,
+        )
+        return CredentialCooldownError(
+            persisted.cooldown_until,
+            persisted.cooldown_reason,
+        )
+
+    async def _stream_with_current_credentials(
+        self,
+        payloads: dict[str, Any],
+        tools: Any,
+        *,
+        request_max_retries: int | None,
+        session_effort: str | None = None,
+    ) -> AsyncGenerator[LLMResponse, None]:
+        coordinator = runtime._get_credential_coordinator()
+        candidates = coordinator.providers.candidates(self._source_id)
+        automatic = coordinator.providers.routing_mode(self._source_id) == "auto"
+        if not automatic:
+            async with aclosing(
+                self._stream_from_source(
+                    self._source_id,
+                    payloads,
+                    tools,
+                    request_max_retries=request_max_retries,
+                    session_effort=session_effort,
+                )
+            ) as stream:
+                async for response in stream:
+                    yield response
+            return
+
+        budget = RequestBudget(
+            coerce_int_config(
+                request_max_retries,
+                default=REQUEST_RETRY_ATTEMPTS,
+                min_value=1,
+                field_name="request_max_retries",
+                source="OpenAI Codex",
+                warn=request_max_retries is not None,
+            )
+        )
+        failures: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        emitted = False
+        try:
+            async with asyncio.timeout(ROUTING_TIMEOUT_SECONDS) as deadline:
+                for source_id in candidates:
+                    try:
+                        coordinator.ensure_inference_available(source_id)
+                        initial = coordinator._read_snapshot(source_id)
+                        identity = initial.account_id or initial.access_token
+                        if identity and identity in seen:
+                            failures.append((source_id, "duplicate_account"))
+                            continue
+                        if budget.remaining <= 0:
+                            raise RoutingBudgetError()
+                        async with aclosing(
+                            self._stream_from_source(
+                                source_id,
+                                payloads,
+                                tools,
+                                request_max_retries=min(
+                                    SOURCE_ATTEMPTS, budget.remaining
+                                ),
+                                session_effort=session_effort,
+                                budget=budget,
+                                seen=seen,
+                            )
+                        ) as stream:
+                            async for response in stream:
+                                emitted = True
+                                # Disable the startup deadline before yielding to the consumer.
+                                deadline.reschedule(None)
+                                yield response
+                        return
+                    except RoutingBudgetError:
+                        failures.append((source_id, "attempt_limit"))
+                        raise RoutingExhaustedError(failures, "attempt_limit") from None
+                    except Exception as exc:
+                        if emitted:
+                            raise
+                        reasons = (
+                            (ProviderDisabledError, "disabled"),
+                            (CredentialCooldownError, "cooling"),
+                            (ReauthenticationRequiredError, "reauth_required"),
+                            (CredentialsNotConfiguredError, "not_logged_in"),
+                            (CredentialSchemaError, "invalid_credentials"),
+                        )
+                        reason = next(
+                            (value for cls, value in reasons if isinstance(exc, cls)),
+                            None,
+                        )
+                        if reason is None:
+                            if isinstance(exc, CredentialError):
+                                raise
+                            kind = oauth.classify_codex_error(exc)
+                            if kind not in {"temporary", "rate_limit"}:
+                                raise
+                            reason = kind
+                        failures.append((source_id, reason))
+                raise RoutingExhaustedError(failures) from None
+        except TimeoutError:
+            if emitted:
+                raise
+            raise RoutingExhaustedError(failures, "startup_timeout") from None
+
+    async def _stream_from_source(
+        self,
+        source_id: str,
+        payloads: dict[str, Any],
+        tools: Any,
+        *,
+        request_max_retries: int | None,
+        session_effort: str | None = None,
+        budget: RequestBudget | None = None,
+        seen: set[str] | None = None,
+    ) -> AsyncGenerator[LLMResponse, None]:
+        coordinator = runtime._get_credential_coordinator()
+        retry_after_credential_error = True
+        emitted_chunk = False
+        base_payloads = deepcopy(payloads)
+        selected_identity: str | None = None
+
+        def guard():
+            current = coordinator.ensure_inference_available(source_id)
+            if (
+                current.access_token != snapshot.access_token
+                or current.account_id != snapshot.account_id
+            ):
+                raise CredentialSourceError(
+                    "The Provider login changed before dispatch. Retry the request."
+                )
+            if budget is not None:
+                budget.consume()
+
+        while True:
+            coordinator.ensure_inference_available(source_id)
+            snapshot = await coordinator.get_snapshot(source_id)
+            coordinator.ensure_inference_available(source_id)
+            identity = snapshot.account_id or snapshot.access_token
+            if seen is not None and identity != selected_identity:
+                if identity in seen:
+                    raise CredentialSourceError(
+                        "The selected account changed to an already attempted account."
+                    )
+                seen.add(identity)
+                selected_identity = identity
+            try:
+                async with (
+                    self._source_client(snapshot) as request_client,
+                    aclosing(
+                        self._query_stream(
+                            request_client,
+                            deepcopy(base_payloads),
+                            tools,
+                            request_max_retries=request_max_retries,
+                            session_effort=session_effort,
+                            before_attempt=guard,
+                        )
+                    ) as stream,
+                ):
+                    async for response in stream:
+                        emitted_chunk = True
+                        yield response
+                return
+            except Exception as exc:
+                error_kind = oauth.classify_codex_error(exc)
+                if error_kind == "usage_limit":
+                    cooldown_error = await self._subscription_cooldown_error(snapshot)
+                    raise cooldown_error from exc
+                if (
+                    error_kind == "credential"
+                    and retry_after_credential_error
+                    and not emitted_chunk
+                ):
+                    retry_after_credential_error = False
+                    coordinator.providers.ensure_enabled(source_id)
+                    if budget is not None and budget.remaining <= 0:
+                        raise RoutingBudgetError() from None
+                    await coordinator.get_snapshot(
+                        source_id,
+                        force_refresh=True,
+                        check_cooldown=False,
+                    )
+                    continue
+                if error_kind == "credential" and not emitted_chunk:
+                    coordinator.mark_reauthentication(snapshot)
+                    raise ReauthenticationRequiredError(
+                        "Sign in to this Provider again."
+                    ) from None
+                raise
+
+    async def text_chat(
+        self,
+        prompt=None,
+        session_id=None,
+        image_urls=None,
+        audio_urls=None,
+        func_tool=None,
+        contexts=None,
+        system_prompt=None,
+        tool_calls_result=None,
+        model=None,
+        extra_user_content_parts=None,
+        tool_choice="auto",
+        request_max_retries: int | None = None,
+        **kwargs,
+    ) -> LLMResponse:
+        final_response = None
+        async for chunk in self.text_chat_stream(
+            prompt=prompt,
+            session_id=session_id,
+            image_urls=image_urls,
+            audio_urls=audio_urls,
+            func_tool=func_tool,
+            contexts=contexts,
+            system_prompt=system_prompt,
+            tool_calls_result=tool_calls_result,
+            model=model,
+            extra_user_content_parts=extra_user_content_parts,
+            tool_choice=tool_choice,
+            request_max_retries=request_max_retries,
+            **kwargs,
+        ):
+            if not chunk.is_chunk:
+                final_response = chunk
+        if final_response is None:
+            raise RuntimeError("OpenAI Codex returned no complete response.")
+        return final_response
+
+    async def text_chat_stream(
+        self,
+        prompt=None,
+        session_id=None,
+        image_urls=None,
+        audio_urls=None,
+        func_tool=None,
+        contexts=None,
+        system_prompt=None,
+        tool_calls_result=None,
+        model=None,
+        extra_user_content_parts=None,
+        tool_choice="auto",
+        request_max_retries: int | None = None,
+        **kwargs,
+    ) -> AsyncGenerator[LLMResponse, None]:
+        payloads, _ = await self._prepare_chat_payload(
+            prompt,
+            image_urls,
+            audio_urls,
+            contexts,
+            system_prompt,
+            tool_calls_result,
+            model=model,
+            extra_user_content_parts=extra_user_content_parts,
+            **kwargs,
+        )
+        if func_tool and not func_tool.empty():
+            payloads["tool_choice"] = tool_choice
+        session_effort = await effort._get_session_effort(session_id)
+        emitted = False
+        try:
+            async with aclosing(
+                self._stream_with_current_credentials(
+                    payloads,
+                    func_tool,
+                    request_max_retries=request_max_retries,
+                    session_effort=session_effort,
+                )
+            ) as stream:
+                async for item in stream:
+                    emitted = True
+                    yield item
+        except Exception:
+            if not emitted:
+                raise
+            # AstrBot can fall back after an exception even after a stream chunk.
+            # A terminal error response preserves its no-replay branch instead.
+            yield LLMResponse(
+                role="err",
+                completion_text="The response was interrupted after output; it was not replayed.",
+            )

@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -24,6 +25,10 @@ sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)
 
 plugin = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.main")
+login = importlib.import_module(f"{plugin.__package__}.src.login")
+oauth = importlib.import_module(f"{plugin.__package__}.src.oauth")
+runtime = importlib.import_module(f"{plugin.__package__}.src.runtime")
+web_api = importlib.import_module(f"{plugin.__package__}.src.web_api")
 from astrbot.api.web import PluginRequest, bind_request_context
 
 
@@ -99,15 +104,15 @@ class _FakeContext:
 
 class LoginBoundaryTests(unittest.TestCase):
     def setUp(self) -> None:
-        plugin._config_mgr = _FakeConfigManager()
+        runtime._config_mgr = _FakeConfigManager()
 
     def tearDown(self) -> None:
-        discard = getattr(plugin, "_discard_all_login_sessions", None)
+        discard = getattr(login, "_discard_all_login_sessions", None)
         if discard is not None:
             discard()
         else:
-            plugin._login_sessions.clear()
-        plugin._config_mgr = None
+            login._login_sessions.clear()
+        runtime._config_mgr = None
 
     def test_authenticated_public_http_start_is_allowed(self) -> None:
         async def run():
@@ -115,14 +120,14 @@ class LoginBoundaryTests(unittest.TestCase):
             remote_request.headers["x-forwarded-proto"] = "https"
             with (
                 mock.patch.object(
-                    plugin,
+                    oauth,
                     "request_device_user_code",
                     new=mock.AsyncMock(return_value=("device", "CODE", 5)),
                 ),
-                mock.patch.object(plugin, "_run_device_login", new=mock.AsyncMock()),
+                mock.patch.object(login, "_run_device_login", new=mock.AsyncMock()),
                 bind_request_context(remote_request),
             ):
-                return await plugin._handle_device_start()
+                return await web_api._handle_device_start()
 
         response = asyncio.run(run())
         self.assertEqual(response.status_code, 200)
@@ -131,13 +136,13 @@ class LoginBoundaryTests(unittest.TestCase):
         async def run():
             with (
                 mock.patch.object(
-                    plugin,
+                    oauth,
                     "request_device_user_code",
                     new=mock.AsyncMock(return_value=("device", "CODE", 5)),
                 ) as request_code,
                 bind_request_context(_plugin_request(username=None)),
             ):
-                response = await plugin._handle_device_start()
+                response = await web_api._handle_device_start()
             return response, request_code
 
         response, request_code = asyncio.run(run())
@@ -147,19 +152,19 @@ class LoginBoundaryTests(unittest.TestCase):
     def test_api_key_cannot_enter_account_or_login_boundaries(self) -> None:
         async def run():
             with bind_request_context(_plugin_request(username="api_key:key-1")):
-                start = await plugin._handle_device_start()
+                start = await web_api._handle_device_start()
             with bind_request_context(_plugin_request(username="api_key:key-1")):
-                status = await plugin._handle_account_status()
+                status = await web_api._handle_account_status()
             with bind_request_context(_plugin_request(username="api_key:key-1")):
-                usage = await plugin._handle_account_usage()
+                usage = await web_api._handle_account_usage()
             with bind_request_context(_plugin_request(username="api_key:key-1")):
-                listing = await plugin._handle_providers_list()
-                update = await plugin._handle_provider_update()
-                delete = await plugin._handle_provider_delete()
+                listing = await web_api._handle_providers_list()
+                update = await web_api._handle_provider_update()
+                delete = await web_api._handle_provider_delete()
             return start, status, usage, listing, update, delete
 
         with mock.patch.object(
-            plugin,
+            oauth,
             "request_device_user_code",
             new=mock.AsyncMock(return_value=("device", "CODE", 5)),
         ) as request_code:
@@ -169,11 +174,11 @@ class LoginBoundaryTests(unittest.TestCase):
 
     def test_standalone_login_route_is_not_registered(self) -> None:
         context = _FakeContext()
-        original_manager = plugin._config_mgr
+        original_manager = runtime._config_mgr
         try:
             plugin.OpenAI_OAuth_Plugin(context, config={})
         finally:
-            plugin._config_mgr = original_manager
+            runtime._config_mgr = original_manager
         routes = [route[0] for route in context.routes]
         self.assertNotIn("/astrbot_plugin_openai_oauth/login", routes)
         self.assertEqual(
@@ -196,27 +201,25 @@ class LoginBoundaryTests(unittest.TestCase):
 
         async def run():
             with (
-                mock.patch.object(plugin, "_MAX_LOGIN_SESSIONS", 1),
+                mock.patch.object(web_api, "_MAX_LOGIN_SESSIONS", 1),
                 mock.patch.object(
-                    plugin,
+                    oauth,
                     "request_device_user_code",
                     new=mock.AsyncMock(return_value=("device", "CODE", 5)),
                 ),
-                mock.patch.object(
-                    plugin, "_run_device_login", side_effect=wait_forever
-                ),
+                mock.patch.object(login, "_run_device_login", side_effect=wait_forever),
             ):
                 with bind_request_context(_plugin_request(username="owner-a")):
-                    first = await plugin._handle_device_start()
+                    first = await web_api._handle_device_start()
                 first_data = _payload(first)
                 with bind_request_context(_plugin_request(username="owner-b")):
-                    second = await plugin._handle_device_start()
+                    second = await web_api._handle_device_start()
                 with bind_request_context(
                     _plugin_request(
                         {"session_id": first_data["session_id"]}, username="owner-b"
                     )
                 ):
-                    stolen_poll = await plugin._handle_device_poll()
+                    stolen_poll = await web_api._handle_device_poll()
                 return first, second, stolen_poll
 
         first, second, stolen_poll = asyncio.run(run())
@@ -227,10 +230,10 @@ class LoginBoundaryTests(unittest.TestCase):
 
     def test_missing_and_expired_sessions_return_a_terminal_status(self) -> None:
         async def run():
-            for handler in (plugin._handle_device_poll, plugin._handle_device_cancel):
+            for handler in (web_api._handle_device_poll, web_api._handle_device_cancel):
                 for session_id in ("missing", "expired"):
                     if session_id == "expired":
-                        plugin._login_sessions[session_id] = {
+                        login._login_sessions[session_id] = {
                             "owner": "owner-a",
                             "status": "pending",
                             "expires_at": 0,
@@ -242,7 +245,7 @@ class LoginBoundaryTests(unittest.TestCase):
                     self.assertEqual(response.status_code, 200)
                     self.assertEqual(_payload(response), {"status": "expired"})
                     self.assertEqual(response.headers["cache-control"], "no-store")
-                    self.assertNotIn(session_id, plugin._login_sessions)
+                    self.assertNotIn(session_id, login._login_sessions)
 
         asyncio.run(run())
 
@@ -254,20 +257,18 @@ class LoginBoundaryTests(unittest.TestCase):
             with bind_request_context(
                 _plugin_request({"name": name}, username=username)
             ):
-                return await plugin._handle_device_start()
+                return await web_api._handle_device_start()
 
         async def run():
             with (
-                mock.patch.object(plugin, "_MAX_LOGIN_SESSIONS", 3),
-                mock.patch.object(plugin, "_MAX_LOGIN_SESSIONS_PER_USER", 1),
+                mock.patch.object(web_api, "_MAX_LOGIN_SESSIONS", 3),
+                mock.patch.object(web_api, "_MAX_LOGIN_SESSIONS_PER_USER", 1),
                 mock.patch.object(
-                    plugin,
+                    oauth,
                     "request_device_user_code",
                     new=mock.AsyncMock(return_value=("device", "CODE", 5)),
                 ),
-                mock.patch.object(
-                    plugin, "_run_device_login", side_effect=wait_forever
-                ),
+                mock.patch.object(login, "_run_device_login", side_effect=wait_forever),
             ):
                 first = await start("owner-a")
                 same_owner = await start("owner-a")
@@ -295,38 +296,38 @@ class LoginBoundaryTests(unittest.TestCase):
 
             task = asyncio.create_task(pending())
             await started.wait()
-            plugin._login_sessions["expiring"] = {
+            login._login_sessions["expiring"] = {
                 "owner": "owner-a",
                 "status": "pending",
                 "task": task,
             }
-            plugin._schedule_login_session_expiry("expiring", 0)
+            login._schedule_login_session_expiry("expiring", 0)
             await asyncio.sleep(0)
             await asyncio.sleep(0)
             return task
 
         task = asyncio.run(run())
-        self.assertNotIn("expiring", plugin._login_sessions)
+        self.assertNotIn("expiring", login._login_sessions)
         self.assertTrue(task.cancelled())
 
     def test_success_is_server_persisted_without_returning_credentials(self) -> None:
         fake_manager = _FakeConfigManager()
-        plugin._config_mgr = fake_manager
+        runtime._config_mgr = fake_manager
 
         async def run():
             with (
                 mock.patch.object(
-                    plugin,
+                    oauth,
                     "request_device_user_code",
                     new=mock.AsyncMock(return_value=("device", "CODE", 1)),
                 ),
                 mock.patch.object(
-                    plugin,
+                    oauth,
                     "poll_device_authorization",
                     new=mock.AsyncMock(return_value=("auth-code", "verifier")),
                 ),
                 mock.patch.object(
-                    plugin,
+                    oauth,
                     "exchange_authorization_code",
                     new=mock.AsyncMock(
                         return_value={
@@ -338,21 +339,21 @@ class LoginBoundaryTests(unittest.TestCase):
                 ),
             ):
                 with bind_request_context(_plugin_request(username="owner-a")):
-                    start = await plugin._handle_device_start()
+                    start = await web_api._handle_device_start()
                 session_id = _payload(start)["session_id"]
                 for _ in range(20):
-                    session = plugin._login_sessions.get(session_id)
+                    session = login._login_sessions.get(session_id)
                     if session and session.get("status") not in {"pending", "saving"}:
                         break
                     await asyncio.sleep(0)
                 with bind_request_context(
                     _plugin_request({"session_id": session_id}, username="owner-a")
                 ):
-                    first_poll = await plugin._handle_device_poll()
+                    first_poll = await web_api._handle_device_poll()
                 with bind_request_context(
                     _plugin_request({"session_id": session_id}, username="owner-a")
                 ):
-                    replay = await plugin._handle_device_poll()
+                    replay = await web_api._handle_device_poll()
                 return first_poll, replay
 
         first_poll, replay = asyncio.run(run())
@@ -366,42 +367,42 @@ class LoginBoundaryTests(unittest.TestCase):
         source = fake_manager.default_conf["provider_sources"][0]
         self.assertEqual(json.loads(source["key"])["access_token"], "fake-access")
         self.assertEqual(fake_manager.default_conf.saved, 1)
-        self.assertFalse(hasattr(plugin, "_handle_save_creds"))
+        self.assertFalse(hasattr(web_api, "_handle_save_creds"))
 
     def test_exchange_failure_does_not_persist_partial_credentials(self) -> None:
         fake_manager = _FakeConfigManager()
-        plugin._config_mgr = fake_manager
+        runtime._config_mgr = fake_manager
 
         async def run():
             with (
                 mock.patch.object(
-                    plugin,
+                    oauth,
                     "request_device_user_code",
                     new=mock.AsyncMock(return_value=("device", "CODE", 1)),
                 ),
                 mock.patch.object(
-                    plugin,
+                    oauth,
                     "poll_device_authorization",
                     new=mock.AsyncMock(return_value=("auth-code", "verifier")),
                 ),
                 mock.patch.object(
-                    plugin,
+                    oauth,
                     "exchange_authorization_code",
                     new=mock.AsyncMock(side_effect=RuntimeError("network failed")),
                 ),
             ):
                 with bind_request_context(_plugin_request(username="owner-a")):
-                    start = await plugin._handle_device_start()
+                    start = await web_api._handle_device_start()
                 session_id = _payload(start)["session_id"]
                 for _ in range(20):
-                    session = plugin._login_sessions.get(session_id)
+                    session = login._login_sessions.get(session_id)
                     if session and session.get("status") not in {"pending", "saving"}:
                         break
                     await asyncio.sleep(0)
                 with bind_request_context(
                     _plugin_request({"session_id": session_id}, username="owner-a")
                 ):
-                    return await plugin._handle_device_poll()
+                    return await web_api._handle_device_poll()
 
         response = asyncio.run(run())
         self.assertEqual(_payload(response)["status"], "error")
@@ -415,10 +416,13 @@ class StaticSecurityTests(unittest.TestCase):
         with open(schema_path, encoding="utf-8") as source:
             schema = json.load(source)
         self.assertNotIn("allow_insecure_local_http", schema)
-        self.assertFalse(hasattr(plugin, "_allow_insecure_local_http"))
-        main_path = os.path.join(PLUGIN_ROOT, "main.py")
-        with open(main_path, encoding="utf-8") as source:
-            self.assertNotIn("allow_insecure_local_http", source.read())
+        self.assertFalse(hasattr(web_api, "_allow_insecure_local_http"))
+        root = Path(PLUGIN_ROOT)
+        for path in [root / "main.py", *sorted((root / "src").glob("*.py"))]:
+            with self.subTest(path=path.name):
+                self.assertNotIn(
+                    "allow_insecure_local_http", path.read_text(encoding="utf-8")
+                )
 
     def test_release_actions_are_pinned_to_full_commit_shas(self) -> None:
         workflow = os.path.join(PLUGIN_ROOT, ".github", "workflows", "release.yml")

@@ -15,7 +15,7 @@ sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)
 
 store = importlib.import_module(
-    "data.plugins.astrbot_plugin_openai_oauth.credential_store"
+    "data.plugins.astrbot_plugin_openai_oauth.src.credential_store"
 )
 
 FAILED: list[str] = []

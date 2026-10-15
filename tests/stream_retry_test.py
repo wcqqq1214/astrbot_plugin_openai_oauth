@@ -20,6 +20,9 @@ import httpx
 from openai import APIError, AsyncOpenAI
 
 module = importlib.import_module(f"{PLUGIN_ROOT.name}.main")
+credential_store = importlib.import_module(f"{module.__package__}.src.credential_store")
+oauth = importlib.import_module(f"{module.__package__}.src.oauth")
+provider_module = importlib.import_module(f"{module.__package__}.src.provider")
 
 OVERLOAD = {
     "error": {
@@ -93,7 +96,7 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
                 except (
                     APIError,
                     asyncio.CancelledError,
-                    module.CredentialError,
+                    credential_store.CredentialError,
                 ) as exc:
                     error = exc
         self.assertTrue(all(response.is_closed for response in responses))
@@ -116,14 +119,14 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
             nonlocal count
             count += 1
             if count > 1:
-                raise module.CredentialSourceError("Provider disabled")
+                raise credential_store.CredentialSourceError("Provider disabled")
 
         requests, output, error, _ = await self.run_stream(
             [[OVERLOAD], SUCCESS], before_attempt=guard
         )
         self.assertEqual(len(requests), 1)
         self.assertEqual(output, [])
-        self.assertIsInstance(error, module.CredentialSourceError)
+        self.assertIsInstance(error, credential_store.CredentialSourceError)
 
     async def test_exhaustion_preserves_api_error(self):
         requests, output, error, delays = await self.run_stream([[OVERLOAD]], limit=3)
@@ -141,7 +144,7 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_default_attempt_limit(self):
         requests, _, error, delays = await self.run_stream([[OVERLOAD]])
-        self.assertEqual(len(requests), module.REQUEST_RETRY_ATTEMPTS)
+        self.assertEqual(len(requests), provider_module.REQUEST_RETRY_ATTEMPTS)
         self.assertIsInstance(error, APIError)
         self.assertEqual(delays, [1, 2, 4, 8])
 
@@ -182,9 +185,9 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(error is None, retryable)
                 self.assertEqual(bool(delays), retryable)
                 if code == "invalid_token":
-                    self.assertEqual(module.classify_codex_error(error), "credential")
+                    self.assertEqual(oauth.classify_codex_error(error), "credential")
                 elif code == "usage_limit_reached":
-                    self.assertEqual(module.classify_codex_error(error), "usage_limit")
+                    self.assertEqual(oauth.classify_codex_error(error), "usage_limit")
 
     async def test_unknown_error_does_not_retry(self):
         requests, _, error, delays = await self.run_stream(

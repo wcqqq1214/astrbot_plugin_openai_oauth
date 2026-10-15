@@ -178,6 +178,19 @@ service.
 
 ## Development checks
 
+`main.py` contains the AstrBot entry point, lifecycle hooks, and command registration.
+The implementation lives in `src/`:
+
+- `runtime.py`: shared configuration and credential coordination.
+- `provider.py`: model adaptation, streaming, retries, and source routing.
+- `oauth.py` and `login.py`: OAuth protocol, login sessions, and task cleanup.
+- `web_api.py`: WebUI endpoints; `usage.py` and `effort.py`: quota and session reasoning settings.
+- `credential_store.py`, `local_codex.py`, `provider_registry.py`, and `provider_routing.py`: credentials, account sources, and routing rules.
+
+`src` is an internal package loaded through relative imports by AstrBot; it needs no
+separate installation. WebUI assets stay in `pages/`, with plugin metadata and the
+configuration schema at the repository root.
+
 Run `tests/run_tests.py` with the local AstrBot virtualenv's Python. It tests this
 checkout rather than a deployed plugin copy and uses a temporary Codex directory
 to avoid reading or refreshing real account credentials.

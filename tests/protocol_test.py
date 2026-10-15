@@ -13,8 +13,9 @@ REPO_ROOT = os.path.abspath(
 sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)
 
-oauth = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.oauth")
+oauth = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.src.oauth")
 plugin = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.main")
+usage_service = importlib.import_module(f"{plugin.__package__}.src.usage")
 
 FAILED: list[str] = []
 
@@ -160,7 +161,7 @@ def test_usage_schemas() -> None:
             "invalid usage remains unknown rather than zero used",
         )
         check(
-            "100%" not in plugin.format_usage(parsed),
+            "100%" not in usage_service.format_usage(parsed),
             "unknown usage never advertises a full allowance",
         )
 
