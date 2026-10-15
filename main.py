@@ -578,6 +578,8 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         if snapshot.account_id:
             headers["chatgpt-account-id"] = snapshot.account_id
         return self.client.with_options(
+            # The plugin owns retries, cooldowns and the cross-provider budget.
+            max_retries=0,
             api_key=snapshot.access_token,
             set_default_headers=headers,
             **({"http_client": http_client} if http_client is not None else {}),

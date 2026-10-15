@@ -96,6 +96,9 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
             {},
         )
         self.addAsyncCleanup(self.provider.terminate)
+        # Older AstrBot versions leave the SDK default retries enabled.
+        # Routing must own every HTTP attempt regardless of the root client.
+        self.provider.client.max_retries = 2
         self.outcomes = {}
         self.requests = []
         self.transports = []

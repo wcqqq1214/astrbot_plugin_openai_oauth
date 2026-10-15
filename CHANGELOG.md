@@ -20,6 +20,8 @@
 
 ### Fixed
 
+- Disable SDK retries explicitly so older AstrBot versions preserve quota fallback,
+  cooldown handling and the shared request-attempt budget.
 - Preserve provider identity and saved settings across concurrent updates and
   stale list or quota responses.
 - Align quota labels and reset times, including narrow layouts and weekly-only plans.
