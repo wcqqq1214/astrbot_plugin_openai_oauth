@@ -618,11 +618,6 @@ dialog::backdrop {
   white-space: nowrap;
   border: 0;
 }
-.page-help {
-  margin-top: 2px;
-  font-size: 12.5px;
-  color: var(--muted);
-}
 .button.with-icon {
   display: inline-flex;
   align-items: center;

@@ -5,7 +5,6 @@ const strings = {
   en: {
     title: "Providers",
     refresh: "Refresh status",
-    providerHelp: "Choose the provider to use in AstrBot model settings.",
     enable: (name) => `Use ${name} for new requests`,
     disabledTag: "Disabled",
     autoTag: "Fallback",
@@ -116,7 +115,6 @@ const strings = {
   zh: {
     title: "Providers",
     refresh: "刷新状态",
-    providerHelp: "在 AstrBot 模型配置中选择要使用的 Provider。",
     enable: (name) => `新请求使用 ${name}`,
     disabledTag: "已停用",
     autoTag: "自动回退",
@@ -311,7 +309,6 @@ function applyLocale(locale) {
   for (const [id, value] of Object.entries({
     title: t.title,
     "add-provider-label": t.add,
-    "provider-help": t.providerHelp,
     "rename-label": t.nameShort,
     "rename-provider": t.saveName,
     "quota-label": t.quotaLabel,
