@@ -83,7 +83,7 @@ const strings = {
     shortWindows: { 18000: "5 hours", 604800: "Weekly", 2592000: "30 days" },
     week: "Weekly allowance",
     month: "30-day allowance",
-    hours: "hours",
+    windowHours: (n) => `${n}-hour window`,
     window: "window",
     today: "Today",
     soon: "Resets soon",
@@ -210,7 +210,7 @@ const strings = {
     shortWindows: { 18000: "5 小时", 604800: "每周", 2592000: "30 天" },
     week: "每周额度",
     month: "30 天额度",
-    hours: "小时",
+    windowHours: (n) => `${n} 小时窗口`,
     window: "窗口",
     today: "今天",
     soon: "即将重置",
@@ -255,6 +255,235 @@ const strings = {
     sessionExpired: "登录会话已失效",
     sessionExpiredDetail: "如已完成授权，请在列表中确认；否则请重新登录。",
   },
+  ru: {
+    title: "Провайдеры",
+    refresh: "Обновить статус",
+    enable: (name) => `Использовать ${name} для новых запросов`,
+    disabledTag: "Отключён",
+    autoTag: "Автопереход",
+    routingLabel: "Маршрутизация",
+    routingFixed: "Один провайдер",
+    routingAuto: "Автопереход",
+    routingFixedHelp: "Привязанные модели используют только этого провайдера. Если он отключён или недоступен, запрос завершится ошибкой.",
+    routingAutoHelp: "Привязанные модели сначала используют этого провайдера, затем пробуют других включённых и доступных провайдеров по порядку. Каждый аккаунт проверяется один раз. После начала ответа переключения нет.",
+    saving: "Сохранение…",
+    saveFailed: (name, message) => `Не удалось сохранить «${name}»: ${message}`,
+    saveUnknown: "Результат сохранения неизвестен. Загружено актуальное состояние.",
+    name: "Название провайдера",
+    nameShort: "Название",
+    saveName: "Сохранить",
+    settingsFor: (name) => `Настройки: ${name}`,
+    settingsTitle: "Настройки провайдера",
+    cancelEdit: "Отмена",
+    nameRequired: "Введите название.",
+    settingsGone: "Провайдер больше не существует. Его настройки закрыты.",
+    quotaLabel: "Лимит",
+    removeHint: "Сохранённые данные входа также будут удалены.",
+    confirmHint: "Нажмите ещё раз для окончательного удаления.",
+    accountLabel: "Аккаунт",
+    removeTitle: "Удалить провайдера",
+    keep: "Оставить",
+    removing: "Удаление…",
+    removeFailed: (name, message) => `Не удалось удалить «${name}»: ${message}`,
+    localShort: "Использует вход в Codex на сервере",
+    deviceShort: "Вход по коду устройства",
+    remove: "Удалить",
+    confirmRemove: "Подтвердить",
+    listFailed: "Не удалось загрузить провайдеров. Попробуйте обновить страницу.",
+    localMissing: "Локальный вход в Codex не найден. Войдите в Codex на сервере AstrBot.",
+    refreshing: "Обновление…",
+    updated: "Обновлено",
+    automatic: "Обновляется каждые 30 секунд, пока страница видна",
+    states: {
+      ready: "Вход выполнен", refreshing: "Обновление", cooling: "Ожидание сброса",
+      degraded: "Требует внимания", reauth_required: "Нужен повторный вход",
+      not_logged_in: "Вход не выполнен", invalid: "Недействительные данные входа", unknown: "Статус неизвестен",
+    },
+    details: {
+      ready: "Вход выполнен. Можно использовать.",
+      refreshing: "Обновление данных входа…",
+      cooling: "Лимит подписки временно недоступен до сброса.",
+      degraded: "Текущие данные входа ещё действуют, но их обновление требует внимания.",
+      reauth_required: "Войдите снова, чтобы обновить данные входа OpenAI.",
+      not_logged_in: "Вход ещё не выполнен.",
+      invalid: "Формат сохранённых данных входа не поддерживается. Обновите плагин и войдите снова.",
+      unknown: "Статус аккаунта недоступен.",
+    },
+    local: "Локальный Codex",
+    add: "Добавить провайдера",
+    renew: "Войти снова",
+    noHelp: "Войдите в аккаунт этого провайдера, чтобы увидеть лимит.",
+    privacy: "Данные входа хранятся только на сервере.",
+    loading: "Загрузка лимита",
+    noWindows: "Данные о периодах лимита не получены. Это не означает отсутствие ограничений.",
+    failed: "Не удалось загрузить лимит. Попробуйте обновить.",
+    changed: "Аккаунт изменился. Обновляем лимит",
+    unknown: "Недоступно",
+    remaining: "осталось",
+    usedUp: "исчерпано",
+    fiveHour: "Лимит на 5 часов",
+    shortWindows: { 18000: "5 ч", 604800: "Неделя", 2592000: "30 дней" },
+    week: "Недельный лимит",
+    month: "Лимит на 30 дней",
+    windowHours: (n) => `Период: ${n} ч`,
+    window: "Период",
+    today: "Сегодня",
+    soon: "Скоро сброс",
+    resetIn: (n, unit) => `Сброс через ${n} ${{ m: "мин.", h: "ч", d: "дн." }[unit]}`,
+    weeklyOnly: "Получен только недельный лимит. Отсутствие других периодов не означает отсутствие ограничений.",
+    exhausted: "Лимит исчерпан. Проверьте время сброса.",
+    exhaustedUntil: (when) => `Лимит исчерпан. Восстановление: ${when}.`,
+    noSwitch: "Привязанные модели не будут автоматически менять аккаунт.",
+    willFallback: "Для привязанных моделей включён автопереход.",
+    coolingUntil: (when) => `Лимит подписки недоступен до ${when}.`,
+    denied: "По данным сервиса, этот лимит сейчас недоступен.",
+    close: "Закрыть",
+    intro: "Войдите в аккаунт ChatGPT с помощью кода устройства.",
+    introRenew: (name) => `Войдите в ChatGPT снова для «${name}». Название и настройки сохранятся.`,
+    optional: "Необязательно",
+    codeLabel: "Код устройства",
+    deviceHint: "Откройте ссылку в браузере и введите код устройства для авторизации.",
+    verifyLink: "Ссылка для авторизации OpenAI",
+    copyUrl: "Копировать ссылку",
+    copyCode: "Копировать код",
+    copiedShort: "Скопировано",
+    copiedCode: "Код устройства скопирован.",
+    copiedUrl: "Ссылка скопирована. Откройте её в любом браузере или аккаунте.",
+    copyFailed: "Не удалось скопировать. Выделите текст и скопируйте вручную.",
+    start: "Получить код",
+    restartCode: "Получить новый код",
+    restart: "Войти снова",
+    cancel: "Отменить вход",
+    done: "Готово",
+    requesting: "Получение кода устройства",
+    waiting: "Ожидание авторизации",
+    retrying: "Соединение прервано. Повторная попытка",
+    retryStatus: "Проверить снова",
+    savingLogin: "Вход подтверждён. Сохранение провайдера",
+    success: "Провайдер сохранён",
+    successDetail: "Выберите его в настройках моделей AstrBot, чтобы начать использовать.",
+    renewedDetail: "Данные входа обновлены.",
+    cancelled: "Вход отменён",
+    failedLogin: "Не удалось войти.",
+    expired: "Срок действия кода истёк",
+    sessionExpired: "Срок действия сеанса входа истёк",
+    sessionExpiredDetail: "Если вы уже подтвердили вход, проверьте список провайдеров. Иначе войдите снова.",
+  },
+  ja: {
+    title: "プロバイダー",
+    refresh: "状態を更新",
+    enable: (name) => `新しいリクエストに ${name} を使用`,
+    disabledTag: "無効",
+    autoTag: "自動切替",
+    routingLabel: "ルーティング",
+    routingFixed: "プロバイダー固定",
+    routingAuto: "自動切替",
+    routingFixedHelp: "紐づけたモデルはこのプロバイダーのみを使用します。無効または利用不可の場合、リクエストは失敗します。",
+    routingAutoHelp: "紐づけたモデルは最初にこのプロバイダーを使い、次に有効で利用可能な他のプロバイダーをリスト順に試します。同じアカウントは一度だけ試行し、出力開始後は切り替えません。",
+    saving: "保存中…",
+    saveFailed: (name, message) => `「${name}」を保存できませんでした：${message}`,
+    saveUnknown: "保存結果を確認できません。最新の状態を取得しました。",
+    name: "プロバイダー名",
+    nameShort: "名前",
+    saveName: "保存",
+    settingsFor: (name) => `${name} の設定`,
+    settingsTitle: "プロバイダー設定",
+    cancelEdit: "キャンセル",
+    nameRequired: "名前を入力してください。",
+    settingsGone: "このプロバイダーは存在しないため、設定を閉じました。",
+    quotaLabel: "利用枠",
+    removeHint: "保存されているログイン情報も削除されます。",
+    confirmHint: "もう一度押すと完全に削除します。",
+    accountLabel: "アカウント",
+    removeTitle: "プロバイダーを削除",
+    keep: "保持",
+    removing: "削除中…",
+    removeFailed: (name, message) => `「${name}」を削除できませんでした：${message}`,
+    localShort: "ホストの Codex ログインに追従",
+    deviceShort: "デバイスコードでログイン",
+    remove: "削除",
+    confirmRemove: "削除を確定",
+    listFailed: "プロバイダーを取得できません。再度更新してください。",
+    localMissing: "ローカルのログインが見つかりません。AstrBot のホストで Codex にログインしてください。",
+    refreshing: "更新中…",
+    updated: "更新時刻",
+    automatic: "ページ表示中は30秒ごとに自動更新",
+    states: {
+      ready: "ログイン済み", refreshing: "更新中", cooling: "リセット待ち",
+      degraded: "要確認", reauth_required: "再ログインが必要",
+      not_logged_in: "未ログイン", invalid: "認証情報が無効", unknown: "状態不明",
+    },
+    details: {
+      ready: "ログイン済みで、利用できます。",
+      refreshing: "認証情報を更新しています…",
+      cooling: "サブスクリプションの利用枠は現在リセット待ちです。",
+      degraded: "現在の認証情報は利用できますが、更新の確認が必要です。",
+      reauth_required: "再ログインして OpenAI の認証情報を更新してください。",
+      not_logged_in: "まだログインしていません。",
+      invalid: "保存された認証情報の形式は未対応です。プラグインを更新して再ログインしてください。",
+      unknown: "アカウントの状態を取得できません。",
+    },
+    local: "ローカル Codex",
+    add: "プロバイダーを追加",
+    renew: "再認証",
+    noHelp: "このプロバイダーにログインすると利用枠を確認できます。",
+    privacy: "認証情報はサーバーにのみ保存されます。",
+    loading: "利用枠を取得中",
+    noWindows: "利用枠の期間が返されていません。利用無制限を意味するものではありません。",
+    failed: "利用枠を取得できません。再度更新してください。",
+    changed: "アカウントが変わりました。利用枠を更新中",
+    unknown: "取得不可",
+    remaining: "残り",
+    usedUp: "使用済み",
+    fiveHour: "5時間の利用枠",
+    shortWindows: { 18000: "5時間", 604800: "週間", 2592000: "30日" },
+    week: "週間利用枠",
+    month: "30日間の利用枠",
+    windowHours: (n) => `${n}時間の期間`,
+    window: "期間",
+    today: "今日",
+    soon: "まもなくリセット",
+    resetIn: (n, unit) => `${n}${{ m: "分", h: "時間", d: "日" }[unit]}後にリセット`,
+    weeklyOnly: "週間の利用枠のみ取得できました。他の期間がないことは利用無制限を意味しません。",
+    exhausted: "利用上限に達しました。リセット時刻を確認してください。",
+    exhaustedUntil: (when) => `利用上限に達しました。${when} に回復します。`,
+    noSwitch: "紐づけたモデルのアカウントは自動で切り替わりません。",
+    willFallback: "紐づけたモデルの自動切替が有効です。",
+    coolingUntil: (when) => `サブスクリプションの利用枠は ${when} までリセット待ちです。`,
+    denied: "サービス側で現在この利用枠は利用不可とされています。",
+    close: "閉じる",
+    intro: "デバイスコードを使って ChatGPT アカウントにログインします。",
+    introRenew: (name) => `「${name}」の ChatGPT に再ログインします。名前と設定は維持されます。`,
+    optional: "任意",
+    codeLabel: "デバイスコード",
+    deviceHint: "ブラウザーでリンクを開き、デバイスコードを入力して認証してください。",
+    verifyLink: "OpenAI の認証リンク",
+    copyUrl: "リンクをコピー",
+    copyCode: "コードをコピー",
+    copiedShort: "コピー済み",
+    copiedCode: "デバイスコードをコピーしました。",
+    copiedUrl: "リンクをコピーしました。別のブラウザーやアカウントでも開けます。",
+    copyFailed: "コピーできませんでした。テキストを選択して手動でコピーしてください。",
+    start: "コードを取得",
+    restartCode: "コードを再取得",
+    restart: "再ログイン",
+    cancel: "ログインをキャンセル",
+    done: "完了",
+    requesting: "デバイスコードを取得中",
+    waiting: "認証を待っています",
+    retrying: "接続が中断されました。再試行中",
+    retryStatus: "状態を再確認",
+    savingLogin: "認証済み。プロバイダーを保存中",
+    success: "プロバイダーを保存しました",
+    successDetail: "AstrBot のモデル設定で選択すると利用できます。",
+    renewedDetail: "ログイン情報を更新しました。",
+    cancelled: "ログインをキャンセルしました",
+    failedLogin: "ログインに失敗しました。",
+    expired: "デバイスコードの有効期限が切れました",
+    sessionExpired: "ログインセッションの有効期限が切れました",
+    sessionExpiredDetail: "認証済みの場合はプロバイダー一覧を確認してください。それ以外の場合は再ログインしてください。",
+  },
+
 };
 
 const byId = (id) => document.getElementById(id);
@@ -322,7 +551,14 @@ const warningStates = ["cooling", "degraded"];
 const dangerStates = ["reauth_required", "invalid"];
 const signedOutStates = ["not_logged_in", "invalid"];
 
-let isEnglish = false;
+const locales = { zh: "zh-CN", en: "en-US", ru: "ru-RU", ja: "ja-JP" };
+let language = "zh";
+let dateLocale = locales.zh;
+
+function resolveLanguage(locale) {
+  const key = String(locale || "zh-CN").toLowerCase().split(/[-_]/)[0];
+  return Object.hasOwn(locales, key) ? key : "en";
+}
 let t = strings.zh;
 let pollTimer = null;
 let activeSessionId = null;
@@ -336,6 +572,19 @@ let activeUsageRequests = 0;
 const usageQueue = [];
 let cancelling = false;
 let lastUpdated = null;
+let pageErrorMessage = "";
+let saveErrorMessage = "";
+
+// Keep UI-generated messages translatable while preserving server details.
+function messageText(message) {
+  return typeof message === "function" ? message() : message;
+}
+
+function showPageError(message) {
+  pageErrorMessage = message;
+  byId("page-error").textContent = messageText(message);
+  byId("page-error").hidden = !message;
+}
 // Login dialog view. `activeSessionId` stays the only signal that a server
 // session may still finish; `phase` decides what the dialog shows.
 const login = {
@@ -376,9 +625,10 @@ const editableFields = ["name", "enabled", "routing_mode"];
 let settings = null;
 
 function applyLocale(locale) {
-  isEnglish = String(locale || "zh-CN").startsWith("en");
-  t = isEnglish ? strings.en : strings.zh;
-  document.documentElement.lang = isEnglish ? "en" : "zh-CN";
+  language = resolveLanguage(locale);
+  dateLocale = locales[language];
+  t = strings[language];
+  document.documentElement.lang = dateLocale;
   document.title = t.title;
   for (const [id, value] of Object.entries({
     title: t.title,
@@ -407,7 +657,8 @@ function applyLocale(locale) {
   verifyUrl.setAttribute("aria-label", t.verifyLink);
   closeSettingsButton.setAttribute("aria-label", t.close);
   closeSettingsButton.setAttribute("title", t.close);
-  usageButton.setAttribute("aria-label", t.refresh);
+  setRefreshing(usageButton.disabled);
+  providerList.setAttribute("aria-label", t.title);
   usageButton.setAttribute("title", t.refresh);
   byId("updated").setAttribute("title", t.automatic);
 }
@@ -441,7 +692,7 @@ function formatAbsolute(seconds) {
   if (seconds === null) return "";
   const date = new Date(seconds * 1000);
   if (!Number.isFinite(date.getTime())) return "";
-  const locale = isEnglish ? "en-US" : "zh-CN";
+  const locale = dateLocale;
   const time = date.toLocaleTimeString(locale, {
     hour: "2-digit",
     minute: "2-digit",
@@ -525,7 +776,7 @@ function windowLabel(seconds, short = false) {
   if (seconds === 604800) return t.week;
   if (seconds === 2592000) return t.month;
   return typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0
-    ? `${Number((seconds / 3600).toFixed(2))} ${t.hours} ${t.window}`
+    ? t.windowHours(new Intl.NumberFormat(dateLocale, { maximumFractionDigits: 2 }).format(seconds / 3600))
     : t.window;
 }
 
@@ -662,7 +913,7 @@ function updateNotice(panel) {
     message = resets.length
       ? t.exhaustedUntil(formatAbsolute(Math.max(...resets)))
       : t.exhausted;
-    message += (isEnglish ? " " : "") + (routingMode(effective(panel.account)) === "auto" ? t.willFallback : t.noSwitch);
+    message += (["en", "ru"].includes(language) ? " " : "") + (routingMode(effective(panel.account)) === "auto" ? t.willFallback : t.noSwitch);
   } else if (panel.account.status === "cooling") {
     const until = formatAbsolute(resetSeconds(panel.account.cooldown_until));
     message = until ? t.coolingUntil(until) : t.details.cooling;
@@ -678,7 +929,7 @@ function updateNotice(panel) {
 function renderUpdated() {
   if (!lastUpdated) return;
   byId("updated").textContent = `${t.updated} ${lastUpdated.toLocaleTimeString(
-    isEnglish ? "en-US" : "zh-CN",
+    dateLocale,
     { hour12: false },
   )}`;
 }
@@ -934,10 +1185,10 @@ async function loadProviders() {
   const listed = ++listRequestSeq;
   const list = await bridge.apiPost("providers/list", {});
   if (listed < listedSeq) return;
-  if (!Array.isArray(list?.providers)) throw new Error(t.listFailed);
+  if (!Array.isArray(list?.providers)) throw new Error();
   providers = list.providers.map((p) => keepNewerEdits(p, since));
   listedSeq = listed;
-  byId("page-error").hidden = true;
+  showPageError("");
   renderProviders();
   if (!initializedExpansion && providers.length) {
     initializedExpansion = true;
@@ -958,8 +1209,7 @@ async function queryUsage(revealId = null) {
         renderProviders();
       }
     } catch (reason) {
-      byId("page-error").textContent = reason?.message || t.listFailed;
-      byId("page-error").hidden = false;
+      showPageError(reason?.message || (() => t.listFailed));
     }
     await Promise.all(providers.map((p) => queryProvider(p.id)));
   })();
@@ -1016,7 +1266,8 @@ function applyProvider(provider) {
 }
 
 function showSaveError(message) {
-  saveError.textContent = message;
+  saveErrorMessage = message;
+  saveError.textContent = messageText(message);
   saveError.hidden = !message;
 }
 
@@ -1043,7 +1294,7 @@ async function writeProvider(sourceId, changes, { report = true } = {}) {
       refreshIdentity = applyProvider(provider);
     } else {
       reconcile = true;
-      outcome = { status: "unknown", message: t.saveUnknown };
+      outcome = { status: "unknown", message: () => t.saveUnknown };
     }
   } catch (reason) {
     // The bridge reports HTTP rejections and transport failures alike, so
@@ -1053,7 +1304,7 @@ async function writeProvider(sourceId, changes, { report = true } = {}) {
     const local = providers.find((p) => p.id === sourceId);
     outcome = {
       status: "failed",
-      message: t.saveFailed(
+      message: () => t.saveFailed(
         local ? providerName(local) : sourceId,
         reason?.message || t.saveUnknown,
       ),
@@ -1198,7 +1449,7 @@ function renderSettings() {
   settingsCancel.disabled = busy;
   closeSettingsButton.disabled = busy;
   const settingsError = byId("settings-error");
-  settingsError.textContent = session.error;
+  settingsError.textContent = messageText(session.error);
   settingsError.hidden = !session.error;
   renderSettingsAccount(session, provider ? effective(provider) : null);
 }
@@ -1254,8 +1505,7 @@ function syncSettings() {
     return;
   }
   endSettings(byId("add-provider"));
-  byId("page-error").textContent = t.settingsGone;
-  byId("page-error").hidden = false;
+  showPageError(() => t.settingsGone);
 }
 
 function setSettingsRouting(mode) {
@@ -1360,7 +1610,7 @@ async function removeFromSettings() {
     if (settings !== session) return;
     session.busy = null;
     session.removeArmed = false;
-    session.error = t.removeFailed(name, reason?.message || t.saveUnknown);
+    session.error = () => t.removeFailed(name, reason?.message || t.saveUnknown);
     renderSettings();
     return;
   }
@@ -1372,6 +1622,8 @@ async function removeFromSettings() {
 }
 
 function rerender() {
+  showPageError(pageErrorMessage);
+  showSaveError(saveErrorMessage);
   renderProviders();
   for (const { panel } of rowNodes.values()) {
     if (panel.lastUsage) renderUsage(panel, { status: "success", usage: panel.lastUsage });
@@ -1384,7 +1636,7 @@ function rerender() {
 
 bridge.onContext?.((next) => {
   const locale = next?.locale;
-  if (!locale || String(locale).startsWith("en") === isEnglish) return;
+  if (!locale || resolveLanguage(locale) === language) return;
   applyLocale(locale);
   rerender();
 });
@@ -1452,7 +1704,7 @@ function renderLogin() {
   const url = showCode ? safeVerifyUrl(login.url) : "";
   verifyUrl.value = url;
   byId("verify-row").hidden = !url;
-  copyStatus.textContent = showCode ? login.note : "";
+  copyStatus.textContent = showCode ? t[login.note] || "" : "";
 
   const state = loginStateView();
   loginState.className = "login-state" + (state.tone ? ` ${state.tone}` : "");
@@ -1473,7 +1725,7 @@ function renderLogin() {
     byId("saved-sub").hidden = !sub;
   }
 
-  error.textContent = login.error;
+  error.textContent = messageText(login.error);
   error.hidden = !login.error;
 
   // A cancel is refused while the server saves, so it is not offered then.
@@ -1535,7 +1787,7 @@ function failLogin(message, terminal) {
   }
   login.phase = "failed";
   login.retrying = false;
-  login.error = message || t.failedLogin;
+  login.error = message || (() => t.failedLogin);
   renderLogin();
 }
 
@@ -1588,7 +1840,7 @@ async function poll(sessionId, intervalSeconds) {
       return;
     }
     if (result.status === "error") {
-      failLogin(result.error || t.failedLogin, true);
+      failLogin(result.error || (() => t.failedLogin), true);
       return;
     }
     if (result.status === "saving") login.saving = true;
@@ -1601,7 +1853,7 @@ async function poll(sessionId, intervalSeconds) {
     if (activeSessionId !== sessionId || cancelling) return;
     consecutivePollFailures += 1;
     if (consecutivePollFailures >= maxConsecutivePollFailures) {
-      failLogin(reason?.message || t.failedLogin, false);
+      failLogin(reason?.message || (() => t.failedLogin), false);
       return;
     }
     login.phase = login.saving ? "saving" : "waiting";
@@ -1639,7 +1891,7 @@ async function startLogin() {
     const body = loginSourceId ? { source_id: loginSourceId } : name ? { name } : {};
     const result = await bridge.apiPost("device/start", body);
     if (result?.status !== "pending") {
-      throw new Error(result?.message || t.failedLogin);
+      throw new Error(result?.message || "");
     }
     activeSessionId = result.session_id;
     Object.assign(login, {
@@ -1650,7 +1902,7 @@ async function startLogin() {
     renderLogin();
     await poll(result.session_id, Math.max(2, Number(result.interval) || 5));
   } catch (reason) {
-    failLogin(reason?.message || t.failedLogin, false);
+    failLogin(reason?.message || (() => t.failedLogin), false);
   }
 }
 
@@ -1675,7 +1927,7 @@ async function cancelLogin() {
     // Saving may already be under way (HTTP 409) or the request was lost:
     // keep the session and let polling report how it ends.
     if (activeSessionId !== sessionId) return;
-    failLogin(reason?.message || t.failedLogin, false);
+    failLogin(reason?.message || (() => t.failedLogin), false);
     schedulePoll(activeSessionId, 2);
   } finally {
     cancelling = false;
@@ -1730,14 +1982,14 @@ async function copyField(field, button) {
   // The session may have ended while the clipboard call was pending.
   if (activeSessionId !== sessionId || devicePanel.hidden) return;
   if (copied) {
-    login.note = field === userCode ? t.copiedCode : t.copiedUrl;
+    login.note = field === userCode ? "copiedCode" : "copiedUrl";
     flashCopied(button);
   } else {
-    login.note = t.copyFailed;
+    login.note = "copyFailed";
     field.focus?.();
     field.select?.();
   }
-  copyStatus.textContent = login.note;
+  copyStatus.textContent = t[login.note] || "";
 }
 
 // Close after a successful login and reveal the saved provider.

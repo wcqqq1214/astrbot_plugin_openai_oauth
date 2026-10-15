@@ -95,8 +95,9 @@ let listCalls = 0;
 let listGate = null;
 let deviceUsage = {windows: [{label_seconds: 604800, used_percent: 60}]};
 const editable = ["name", "enabled", "routing_mode"];
+let initialLocale = "zh-CN";
 const bridge = {
-  ready: async () => ({ locale: "zh-CN" }),
+  ready: async () => ({ locale: initialLocale }),
   onContext: (handler) => { contextHandler = handler; },
   getLocale: () => "zh-CN",
   apiPost: async (endpoint, body) => {
@@ -1452,7 +1453,7 @@ bridge.apiPost = async (endpoint, body) => {
   } finally { --liveRequests; }
 };
 const freshPage = () => vm.runInNewContext(
-  `(async () => {${source}\n await queryUsage(); return {queryUsage, selectProvider, loadProviders, rowNodes};})()`,
+  `(async () => {${source}\n await queryUsage(); return {queryUsage, selectProvider, loadProviders, rowNodes, strings, resolveLanguage, formatAbsolute, formatRelative, windowLabel, openSettings, openLogin, failLogin};})()`,
   {window, document, navigator, console, URL},
 );
 const multi = await freshPage();
@@ -1555,3 +1556,87 @@ assert.deepEqual(quotaCalls, ["p0"]);
 assert.equal(reloaded.rowNodes.get("p0").panel.detail.hidden, false);
 assert.equal(reloaded.rowNodes.get("p5").panel.detail.hidden, true);
 console.log("Independent provider panel regressions passed: defaults, concurrent expansion, collapsed refresh, locale/rename preservation, isolated errors, stale responses, bounded queue, removal and page reload.");
+
+// All AstrBot locales must be complete, selectable at startup, and live-switchable.
+const shape = (object) => Object.fromEntries(Object.entries(object).sort().map(([key, value]) =>
+  [key, typeof value === "object" ? shape(value) : typeof value],
+));
+for (const dictionary of Object.values(reloaded.strings)) {
+  assert.deepEqual(shape(dictionary), shape(reloaded.strings.en));
+  const checkText = (object) => {
+    for (const value of Object.values(object)) {
+      if (typeof value === "object") checkText(value);
+      else if (typeof value === "string") assert.ok(value.trim());
+      else assert.equal(typeof value("Example", "h"), "string");
+    }
+  };
+  checkText(dictionary);
+}
+fixtures[0].name = "Local Codex";
+const cases = [
+  ["zh-CN", "zh", "本地 Codex"],
+  ["en-US", "en", "Local Codex"],
+  ["ru-RU", "ru", "Локальный Codex"],
+  ["ja-JP", "ja", "ローカル Codex"],
+];
+for (const [locale, key, localName] of cases) {
+  initialLocale = locale;
+  const translated = await freshPage();
+  const dictionary = translated.strings[key];
+  assert.equal(document.documentElement.lang, locale);
+  assert.equal(document.title, dictionary.title);
+  assert.equal(read("title"), dictionary.title);
+  assert.equal(ids.get("providers").getAttribute("aria-label"), dictionary.title);
+  assert.equal(translated.rowNodes.get("p0").name.textContent, localName);
+  assert.equal(translated.rowNodes.get("p1")?.name.textContent, fixtures.find((p) => p.id === "p1")?.name);
+  assert.equal(ids.get("usage").getAttribute("aria-label"), dictionary.refresh);
+  assert.ok(translated.rowNodes.get("p0").panel.usageResult.textContent.includes(dictionary.shortWindows[604800]));
+  assert.ok(read("updated").startsWith(dictionary.updated));
+  const date = new Date(2030, 9, 22, 14, 13);
+  assert.equal(translated.formatAbsolute(date.getTime() / 1000),
+    date.toLocaleDateString(locale, {month: "short", day: "numeric"}) + " " +
+    date.toLocaleTimeString(locale, {hour: "2-digit", minute: "2-digit", hour12: false}));
+  assert.equal(translated.formatRelative(Date.now() / 1000 + 7200), dictionary.resetIn(2, "h"));
+  assert.equal(translated.windowLabel(9000), dictionary.windowHours(new Intl.NumberFormat(locale).format(2.5)));
+  translated.openSettings("p0");
+  assert.equal(nameInput.value, localName);
+  assert.equal(read("settings-title"), localName);
+  assert.equal(read("settings-kicker"), dictionary.settingsTitle);
+  assert.equal(saveButton.disabled, true);
+  for (const [otherLocale, otherKey, otherName] of cases) {
+    contextHandler({locale: otherLocale});
+    assert.equal(nameInput.value, otherName);
+    assert.equal(read("settings-title"), otherName);
+    assert.equal(saveButton.disabled, true);
+    assert.equal(document.documentElement.lang, otherLocale);
+    assert.equal(translated.rowNodes.get("p0").main.getAttribute("aria-expanded"), "true");
+    assert.equal(read("settings-routing-help"), translated.strings[otherKey].routingFixedHelp);
+  }
+  typeName("My Custom 名称");
+  contextHandler({locale});
+  assert.equal(nameInput.value, "My Custom 名称");
+  await click(ids.get("settings-cancel"));
+  translated.openLogin();
+  assert.equal(read("instructions-title"), dictionary.add);
+  assert.equal(read("login-intro"), dictionary.intro);
+  assert.equal(read("start"), dictionary.start);
+  assert.equal(read("copy-code"), dictionary.copyCode);
+  translated.failLogin(null, false);
+  assert.equal(read("error"), dictionary.failedLogin);
+  contextHandler({locale: "ru-RU"});
+  assert.equal(read("error"), translated.strings.ru.failedLogin, "an existing fallback error follows locale changes");
+  contextHandler({locale: "ja-JP"});
+  assert.equal(read("error"), translated.strings.ja.failedLogin);
+  await click(ids.get("close-login"));
+  const native = JSON.parse(readFileSync(new URL(`../.astrbot-plugin/i18n/${locale}.json`, import.meta.url), "utf8"));
+  assert.equal(native.pages.providers.title, dictionary.title);
+  assert.ok(native.metadata.display_name && native.metadata.desc && native.metadata.short_desc);
+  assert.ok(native.config.codex_auth_path.description);
+  assert.ok(native.config.codex_auth_path.hint.includes("$CODEX_HOME/auth.json"));
+}
+assert.equal(reloaded.resolveLanguage("RU_ru"), "ru");
+assert.equal(reloaded.resolveLanguage("ja"), "ja");
+assert.equal(reloaded.resolveLanguage("en-GB"), "en");
+assert.equal(reloaded.resolveLanguage("fr-FR"), "en");
+assert.equal(reloaded.resolveLanguage("__proto__"), "en");
+console.log("Four-language regressions passed: complete dictionaries, startup/context locales, dates/windows, default/custom names, dialogs/errors, ARIA labels and AstrBot plugin metadata.");

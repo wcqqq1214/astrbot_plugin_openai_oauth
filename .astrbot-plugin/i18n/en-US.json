@@ -1,0 +1,19 @@
+{
+  "metadata": {
+    "display_name": "OpenAI Subscription Login",
+    "short_desc": "Use your ChatGPT subscription for models, without an API key",
+    "desc": "Sign in with your ChatGPT subscription to use its allowance for models, without an API key."
+  },
+  "pages": {
+    "providers": {
+      "title": "Providers",
+      "description": "Manage ChatGPT sign-ins, provider settings and subscription allowances."
+    }
+  },
+  "config": {
+    "codex_auth_path": {
+      "description": "Codex auth.json path (optional)",
+      "hint": "Leave blank to read $CODEX_HOME/auth.json or ~/.codex/auth.json. In Docker, mount the entire credential directory; automatic refresh requires write access to that directory. Reload the plugin after saving."
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "metadata": {
+    "display_name": "OpenAI 订阅登录",
+    "short_desc": "用 ChatGPT 订阅账号跑模型，无需 API Key",
+    "desc": "用你的 ChatGPT 订阅账号登录后，即可把订阅额度当作模型使用，无需 API Key。"
+  },
+  "pages": {
+    "providers": {
+      "title": "Providers",
+      "description": "管理 ChatGPT 登录、Provider 设置和订阅额度。"
+    }
+  },
+  "config": {
+    "codex_auth_path": {
+      "description": "Codex auth.json 路径（可选）",
+      "hint": "留空时读取 $CODEX_HOME/auth.json 或 ~/.codex/auth.json。Docker 请挂载整个凭据目录；自动刷新需要目录写权限。保存后重载插件生效。"
+    }
+  }
+}

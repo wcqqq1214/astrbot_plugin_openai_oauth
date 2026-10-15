@@ -1,0 +1,19 @@
+{
+  "metadata": {
+    "display_name": "OpenAI サブスクリプションログイン",
+    "short_desc": "API キー不要で ChatGPT のサブスクリプションを利用",
+    "desc": "ChatGPT のサブスクリプションアカウントでログインすると、API キーなしでその利用枠をモデルに使用できます。"
+  },
+  "pages": {
+    "providers": {
+      "title": "プロバイダー",
+      "description": "ChatGPT のログイン、プロバイダー設定、サブスクリプションの利用枠を管理します。"
+    }
+  },
+  "config": {
+    "codex_auth_path": {
+      "description": "Codex auth.json のパス（任意）",
+      "hint": "空欄の場合は $CODEX_HOME/auth.json または ~/.codex/auth.json を読み込みます。Docker では認証情報のディレクトリ全体をマウントしてください。自動更新にはディレクトリへの書き込み権限が必要です。保存後にプラグインを再読み込みしてください。"
+    }
+  }
+}
