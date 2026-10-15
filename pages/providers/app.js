@@ -29,9 +29,14 @@ const strings = {
     quotaLabel: "Allowance",
     removeHint: "Its saved login is deleted too.",
     confirmHint: "Click again to delete permanently.",
+    accountLabel: "Account",
+    removeTitle: "Remove provider",
+    keep: "Keep",
+    removing: "Removing…",
+    removeFailed: (name, message) => `Could not remove ${name}: ${message}`,
     localShort: "Follows the host Codex login",
     deviceShort: "Device-code login",
-    remove: "Remove provider",
+    remove: "Remove",
     confirmRemove: "Confirm removal",
     listFailed: "Could not load providers. Try refreshing.",
     localMissing: "No local Codex login detected. Sign in to Codex on the AstrBot host.",
@@ -155,9 +160,14 @@ const strings = {
     quotaLabel: "额度",
     removeHint: "会同时删除它保存的登录凭据。",
     confirmHint: "再次点击即永久删除。",
+    accountLabel: "账号",
+    removeTitle: "移除 Provider",
+    keep: "保留",
+    removing: "正在移除…",
+    removeFailed: (name, message) => `移除「${name}」失败：${message}`,
     localShort: "跟随主机上的 Codex 登录",
     deviceShort: "设备码登录",
-    remove: "移除此 Provider",
+    remove: "移除",
     confirmRemove: "确认移除",
     listFailed: "无法加载 Provider，请刷新重试。",
     localMissing: "未检测到本地登录，请在 AstrBot 所在机器登录 Codex。",
@@ -327,7 +337,6 @@ let providers = [];
 let selectedSourceId = null;
 let expanded = true;
 let loginSourceId = null;
-let deletingSourceId = null;
 let viewGeneration = 0;
 let refreshPromise = null;
 let cancelling = false;
@@ -392,9 +401,10 @@ function applyLocale(locale) {
     "settings-routing-auto": t.routingAuto,
     "settings-cancel": t.cancelEdit,
     "settings-save": t.saveName,
-    "delete-hint": t.removeHint,
-    "delete-provider": t.remove,
-    "open-login": t.renew,
+    "settings-account-label": t.accountLabel,
+    "settings-reauth": t.renew,
+    "settings-remove-title": t.removeTitle,
+    "settings-remove-keep": t.keep,
     "login-name-label": t.name,
     "login-name-optional": t.optional,
     privacy: t.privacy,
@@ -498,11 +508,7 @@ function renderAccountStatus(result) {
   accountStatus.setAttribute("title", t.details[state] || t.details.unknown);
   accountStatus.className = "badge" + statusClass(state);
 
-  const local = account.credential_mode === "local_codex";
   byId("source-name").textContent = providerName(account);
-  byId("open-login").hidden = local;
-  byId("delete-provider").hidden = local;
-  byId("delete-row").hidden = local;
   updateNotice();
   return Boolean(identityChanged);
 }
@@ -821,9 +827,6 @@ async function openProvider(id) {
   ++viewGeneration;
   refreshPromise = null;
   selectedSourceId = id;
-  deletingSourceId = null;
-  byId("delete-provider").textContent = t.remove;
-  byId("delete-hint").textContent = t.removeHint;
   byId("page-error").hidden = true;
   lastUpdated = null;
   byId("updated").textContent = "";
@@ -1051,9 +1054,14 @@ function openSettings(sourceId) {
     sourceId,
     base,
     draft: { ...base },
+    // null, "save" or "remove" while a request for this session runs.
     busy: null,
     error: "",
     iconMode: null,
+    // Removal needs a second, explicit confirmation.
+    removeArmed: false,
+    // Hidden while the device login dialog renews this provider.
+    suspended: false,
   };
   settingsNameInput.value = base.name;
   renderSettings();
@@ -1111,16 +1119,41 @@ function renderSettings() {
   const settingsError = byId("settings-error");
   settingsError.textContent = session.error;
   settingsError.hidden = !session.error;
+  renderSettingsAccount(session, provider ? effective(provider) : null);
+}
+
+// Local Codex follows the host login, so it offers no renew or removal.
+function renderSettingsAccount(session, view) {
+  const custom = Boolean(view) && view.credential_mode !== "local_codex";
+  byId("settings-account").hidden = !custom;
+  if (!custom) return;
+  const state = String(view.status || "unknown");
+  byId("settings-account-text").textContent =
+    view.email || t.states[state] || t.states.unknown;
+  const busy = Boolean(session.busy);
+  byId("settings-reauth").disabled = busy;
+  const armed = session.removeArmed;
+  const remove = byId("settings-remove");
+  remove.className = "button small danger" + (armed ? " armed" : "");
+  remove.textContent =
+    session.busy === "remove" ? t.removing : armed ? t.confirmRemove : t.remove;
+  remove.disabled = busy;
+  remove.setAttribute("aria-busy", String(session.busy === "remove"));
+  byId("settings-remove-keep").hidden = !armed;
+  byId("settings-remove-keep").disabled = busy;
+  byId("settings-remove-hint").textContent = armed ? t.confirmHint : t.removeHint;
+  byId("settings-danger").className = "danger-zone" + (armed ? " armed" : "");
 }
 
 // End the session and return focus to the row's gear, or to a stable control
-// when that row is gone.
-function endSettings() {
+// when that row is gone or about to go.
+function endSettings(focusTarget = null) {
   const session = settings;
   settings = null;
   if (settingsDialog.open) settingsDialog.close();
   const gear = session && rowNodes.get(session.sourceId)?.gear;
-  const target = gear && gear.isConnected !== false ? gear : byId("add-provider");
+  const target =
+    focusTarget || (gear && gear.isConnected !== false ? gear : byId("add-provider"));
   target.focus?.();
 }
 
@@ -1139,7 +1172,7 @@ function syncSettings() {
     renderSettings();
     return;
   }
-  endSettings();
+  endSettings(byId("add-provider"));
   byId("page-error").textContent = t.settingsGone;
   byId("page-error").hidden = false;
 }
@@ -1157,6 +1190,7 @@ async function saveSettings() {
   if (!Object.keys(changes).length || !session.draft.name.trim()) return;
   session.busy = "save";
   session.error = "";
+  session.removeArmed = false;
   renderSettings();
   // One request carries every changed field for the bound source.
   const outcome = await writeProvider(session.sourceId, changes, { report: false });
@@ -1179,27 +1213,80 @@ async function saveSettings() {
   renderSettings();
 }
 
-async function deleteProvider() {
-  const sourceId = selectedSourceId;
-  if (!sourceId) return;
-  if (deletingSourceId !== sourceId) {
-    deletingSourceId = sourceId;
-    byId("delete-provider").textContent = t.confirmRemove;
-    byId("delete-hint").textContent = t.confirmHint;
+// Renewing is independent of the draft: nothing is saved, and the device
+// login only sends this session's source ID, so a disabled provider stays
+// disabled. The settings dialog steps aside so only one modal is open, and
+// comes back with the draft once the login dialog closes.
+function reauthorizeFromSettings() {
+  const session = settings;
+  const provider = settingsProvider();
+  if (!session || session.busy || !provider) return;
+  if (provider.credential_mode === "local_codex") return;
+  session.removeArmed = false;
+  session.suspended = true;
+  settingsDialog.close();
+  openLogin(session.sourceId);
+}
+
+function resumeSettings() {
+  const session = settings;
+  if (!session?.suspended) return;
+  session.suspended = false;
+  if (!settingsProvider()) {
+    syncSettings();
     return;
   }
-  const button = byId("delete-provider");
-  button.disabled = true;
+  renderSettings();
+  settingsDialog.showModal();
+  byId("settings-reauth").focus?.();
+}
+
+function disarmRemoval() {
+  if (!settings?.removeArmed || settings.busy) return;
+  settings.removeArmed = false;
+  renderSettings();
+  byId("settings-remove").focus?.();
+}
+
+// The first click arms removal and the second deletes. Removing never saves
+// the draft, and keeping the provider leaves the draft as it was.
+async function removeFromSettings() {
+  const session = settings;
+  const provider = settingsProvider();
+  if (!session || session.busy || !provider) return;
+  if (provider.credential_mode === "local_codex") return;
+  if (!session.removeArmed) {
+    session.removeArmed = true;
+    session.error = "";
+    renderSettings();
+    return;
+  }
+  const sourceId = session.sourceId;
+  const name = providerName(effective(provider));
+  session.busy = "remove";
+  session.error = "";
+  renderSettings();
   try {
     await runInChain(sourceId, () =>
       bridge.apiPost("providers/delete", { source_id: sourceId }),
     );
-    if (selectedSourceId === sourceId) await openProvider(null);
-    else await queryUsage();
   } catch (reason) {
-    byId("page-error").textContent = reason?.message || t.failed;
-    byId("page-error").hidden = false;
-  } finally { button.disabled = false; }
+    // The removal may still have landed; a reload that no longer lists the
+    // provider ends this session instead of showing a stale error.
+    await reloadProviders();
+    if (settings !== session) return;
+    session.busy = null;
+    session.removeArmed = false;
+    session.error = t.removeFailed(name, reason?.message || t.saveUnknown);
+    renderSettings();
+    return;
+  }
+  if (settings === session) {
+    session.busy = null;
+    endSettings(byId("add-provider"));
+  }
+  if (selectedSourceId === sourceId) await openProvider(null);
+  else await refreshAccountUsage();
 }
 
 function rerender() {
@@ -1580,8 +1667,14 @@ function completeLogin() {
   resetLogin("idle");
   login.savedId = null;
   if (loginDialog.open) loginDialog.close();
-  if (!id || !providers.some((p) => p.id === id)) return;
-  if (selectedSourceId !== id || !expanded) void openProvider(id);
+  const saved = Boolean(id) && providers.some((p) => p.id === id);
+  if (saved && (selectedSourceId !== id || !expanded)) void openProvider(id);
+  // A renewal started from settings returns there; that dialog takes focus.
+  if (settings?.suspended) {
+    resumeSettings();
+    return;
+  }
+  if (!saved) return;
   const node = rowNodes.get(id);
   node?.row.scrollIntoView?.({ block: "nearest" });
   node?.main.focus?.({ preventScroll: true });
@@ -1618,7 +1711,6 @@ loginNameInput.addEventListener("keydown", (event) => {
     void startLogin();
   }
 });
-byId("open-login").addEventListener("click", () => openLogin(selectedSourceId));
 byId("add-provider").addEventListener("click", () => openLogin());
 settingsRouting.fixed.addEventListener("click", () => setSettingsRouting("fixed"));
 settingsRouting.auto.addEventListener("click", () => setSettingsRouting("auto"));
@@ -1635,18 +1727,22 @@ settingsNameInput.addEventListener("keydown", (event) => {
 settingsSave.addEventListener("click", () => void saveSettings());
 settingsCancel.addEventListener("click", closeSettings);
 closeSettingsButton.addEventListener("click", closeSettings);
+byId("settings-reauth").addEventListener("click", reauthorizeFromSettings);
+byId("settings-remove").addEventListener("click", () => void removeFromSettings());
+byId("settings-remove-keep").addEventListener("click", disarmRemoval);
+// Escape backs out of an armed removal first, then closes the dialog.
 settingsDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
-  closeSettings();
+  if (settings?.removeArmed && !settings.busy) disarmRemoval();
+  else closeSettings();
 });
 // Browsers may close a modal without a cancellable event. Keep a busy
 // session on screen; otherwise treat it like Cancel.
 settingsDialog.addEventListener("close", () => {
-  if (!settings) return;
+  if (!settings || settings.suspended) return;
   if (settings.busy) settingsDialog.showModal();
   else endSettings();
 });
-byId("delete-provider").addEventListener("click", () => void deleteProvider());
 async function closeLogin() {
   if (closeButton.disabled || cancelling) return;
   if (login.phase === "success") {
@@ -1654,7 +1750,10 @@ async function closeLogin() {
     return;
   }
   if (activeSessionId) await cancelLogin();
-  if (!activeSessionId) loginDialog.close();
+  if (!activeSessionId) {
+    loginDialog.close();
+    resumeSettings();
+  }
 }
 closeButton.addEventListener("click", () => void closeLogin());
 loginDialog.addEventListener("cancel", (event) => {
@@ -1677,6 +1776,7 @@ loginDialog.addEventListener("close", async () => {
     loginDialog.showModal();
     renderLogin();
   }
+  if (!loginDialog.open) resumeSettings();
 });
 window.setInterval(() => {
   if (!document.hidden && !loginDialog.open) void queryUsage();

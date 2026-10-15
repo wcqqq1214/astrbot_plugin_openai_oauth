@@ -948,15 +948,6 @@ dialog::backdrop {
   font-weight: var(--medium);
   box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgb(0 0 0 / 6%);
 }
-.editor-note {
-  padding-top: 6px;
-  font-size: 12.5px;
-  color: var(--secondary);
-}
-.segmented + .editor-note {
-  padding-top: 8px;
-  color: var(--muted);
-}
 
 /* The gear sits between the row's main button and its switch. It stays
    quiet until the row is hovered or focused. */
@@ -1003,9 +994,6 @@ dialog::backdrop {
   gap: 14px;
   padding: 12px 0;
 }
-.editor-row + .editor-row {
-  border-top: 1px solid var(--line);
-}
 .editor-label {
   font-size: 13px;
   line-height: 32px;
@@ -1017,41 +1005,6 @@ dialog::backdrop {
 /* The quota lines are 24px tall; keep their label on the same baseline. */
 .editor-label.compact {
   line-height: 24px;
-}
-.editor-inline {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 32px;
-}
-.editor-inline .text-input {
-  max-width: 320px;
-}
-.editor-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 0 12px;
-  border-top: 1px solid var(--line);
-}
-.editor-hint {
-  font-size: 12px;
-  color: var(--muted);
-}
-.link-button {
-  padding: 4px 0;
-  border: 0;
-  background: none;
-  font-size: 13px;
-  font-weight: var(--medium);
-}
-.link-button.danger {
-  color: var(--bad-text);
-}
-.link-button:hover:not(:disabled) {
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 .text-input {
   flex: 1;
@@ -1168,6 +1121,83 @@ dialog::backdrop {
 .settings-dialog .actions {
   flex-shrink: 0;
 }
+.settings-section {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.settings-section h3 {
+  line-height: 1.4;
+}
+.settings-account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.settings-account-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--secondary);
+}
+.settings-account-row .button {
+  flex-shrink: 0;
+}
+/* Destructive actions live in their own tinted box, apart from Save. */
+.danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--bad) 28%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bad) 4%, transparent);
+}
+.danger-zone.armed {
+  border-color: color-mix(in srgb, var(--bad) 55%, transparent);
+  background: var(--bad-soft);
+}
+.danger-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.danger-copy strong {
+  font-size: 13px;
+  font-weight: var(--medium);
+  color: var(--bad-text);
+}
+.danger-copy span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.danger-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+.button.danger {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+}
+.button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bad) 18%, transparent);
+}
+/* Darkened so white text stays readable in both themes. */
+.button.danger.armed {
+  background: color-mix(in oklab, var(--bad) 80%, #000);
+  color: #ffffff;
+}
+.button.danger.armed:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--bad) 70%, #000);
+}
 
 /* ---------- Narrow containers ---------- */
 /* Wrap the reset time based on the space inside the editor, not the page. */
@@ -1250,6 +1280,12 @@ dialog::backdrop {
   .settings-dialog .actions {
     padding: 12px 16px;
   }
+  .danger-zone {
+    flex-wrap: wrap;
+  }
+  .danger-actions {
+    margin-left: auto;
+  }
   .editor {
     padding: 0 12px;
   }
@@ -1267,9 +1303,6 @@ dialog::backdrop {
   .editor-label,
   .editor-label.compact {
     line-height: 1.6;
-  }
-  .editor-foot {
-    flex-wrap: wrap;
   }
   .copy-row .device-code {
     font-size: 20px;

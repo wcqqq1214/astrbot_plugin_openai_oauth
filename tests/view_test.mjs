@@ -268,13 +268,11 @@ resolveOld({status: "success", account, usage: {windows: [{label_seconds: 604800
 await oldQuery;
 assert.match(read("usage-result"), /40%/);
 assert.equal(read("source-name"), "Work");
-assert.equal(ids.get("open-login").hidden, false);
 slowUsage = null;
 account.status = "not_logged_in";
 await page.selectProvider("local");
 assert.match(read("providers"), /本地 Codex/);
 assert.match(read("usage-result"), /未检测到本地登录/);
-assert.equal(ids.get("open-login").hidden, true);
 page.openLogin();
 ids.get("login-name").value = "Personal";
 const pendingLogin = page.startLogin();
@@ -471,8 +469,11 @@ assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "device", enabled: fal
 await page.queryUsage();
 assert.equal(checked("工作"), "false");
 assert.match(read("usage-result"), /40%/);
-assert.equal(ids.get("open-login").hidden, false);
-assert.equal(ids.get("delete-row").hidden, false);
+await openSettings("工作");
+assert.equal(ids.get("settings-account").hidden, false);
+assert.equal(ids.get("settings-reauth").disabled, false);
+assert.equal(ids.get("settings-remove").disabled, false);
+await click(ids.get("settings-cancel"));
 assert.match(visibleText(rowFor("工作")), /已登录/);
 
 // Reauthorizing a disabled source never enables it.
@@ -613,16 +614,21 @@ assert.equal(ids.get("save-error").hidden, true);
 assert.equal(checked("Server Name"), "true");
 
 // Deleting sends only the ID.
-const deleteButton = ids.get("delete-provider");
+const removeButton = ids.get("settings-remove");
+const removeFromSettings = async (name) => {
+  await openSettings(name);
+  await click(removeButton);
+  await click(removeButton);
+};
 const bodies = [];
 const originalPost = bridge.apiPost;
 bridge.apiPost = async (endpoint, body) => {
   if (endpoint === "providers/delete") { bodies.push(body); return {status: "success"}; }
   return originalPost(endpoint, body);
 };
-await click(deleteButton);
-await click(deleteButton);
+await removeFromSettings("Server Name");
 assert.deepEqual({...bodies[0]}, {source_id: "device"});
+assert.equal(settingsBox.open, false);
 bridge.apiPost = originalPost;
 
 // A reconciliation started after a failed save must not replace a newer view.
@@ -703,8 +709,7 @@ bridge.apiPost = async (endpoint, body) => {
 };
 updateHandler = () => { throw new Error("Network Error"); };
 await click(switchFor("Newer device"));
-await click(deleteButton);
-await click(deleteButton);
+await removeFromSettings("Newer device");
 assert.equal(rowFor("Newer device"), undefined);
 delayedRecovery.resolve();
 await tick();
@@ -1193,4 +1198,134 @@ bridge.apiPost = originalPost;
 updateHandler = null;
 await page.queryUsage();
 
-console.log("View regressions passed: device login dialog (copy instructions, copy, saving, success, done, failure recovery), quota windows, provider selection, stale-result isolation, login and cancellation races, settings dialog drafts and entry points, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");
+// ---------- Account actions in the settings dialog ----------
+// Local Codex follows the host login: no renew, no removal.
+device.name = "Mine";
+await page.queryUsage();
+await openSettings("本地 Codex");
+assert.equal(ids.get("settings-account").hidden, true);
+await click(ids.get("settings-cancel"));
+await openSettings("Mine");
+assert.equal(ids.get("settings-account").hidden, false);
+assert.match(read("settings-reauth"), /重新授权/);
+assert.match(read("settings-remove"), /^移除$/);
+await click(ids.get("settings-cancel"));
+
+// Renewing from settings saves nothing, targets the dialog's provider, keeps
+// a disabled provider disabled and brings the draft back afterwards.
+device.enabled = false;
+await page.queryUsage();
+await page.selectProvider("local");
+assert.equal(checked("Mine"), "false");
+const sentBeforeRenew = providerUpdates.length;
+await openSettings("Mine");
+typeName("Unsaved draft");
+await click(ids.get("settings-routing-auto"));
+await click(ids.get("settings-reauth"));
+assert.equal(settingsBox.open, false, "only one modal is open at a time");
+assert.equal(ids.get("login-dialog").open, true);
+assert.equal(read("instructions-title"), "重新授权");
+const renewal = page.startLogin();
+await tick();
+assert.deepEqual({...deviceBody}, {source_id: "device"}, "the renewal targets the dialog's provider, not the selected row");
+pollResult({status: "success", source_id: "device"});
+await renewal;
+await tick();
+await page.closeLogin();
+assert.equal(ids.get("login-dialog").open, false);
+assert.equal(settingsBox.open, true, "settings return after the login dialog closes");
+assert.equal(read("settings-title"), "Mine");
+assert.equal(nameInput.value, "Unsaved draft");
+assert.equal(pressed("auto"), "true");
+assert.equal(saveButton.disabled, false);
+assert.equal(document.activeElement, ids.get("settings-reauth"));
+assert.equal(providerUpdates.length, sentBeforeRenew, "renewing never saves the draft");
+assert.equal(checked("Mine"), "false", "renewing never enables a disabled provider");
+// Leaving the login dialog without starting also returns to settings,
+// including when the browser closes it without a cancel event.
+await click(ids.get("settings-reauth"));
+await page.closeLogin();
+assert.equal(settingsBox.open, true);
+assert.equal(nameInput.value, "Unsaved draft");
+await click(ids.get("settings-reauth"));
+const loginBox = ids.get("login-dialog");
+loginBox.open = false;
+await loginBox.handlers.close();
+assert.equal(settingsBox.open, true);
+assert.equal(nameInput.value, "Unsaved draft");
+await click(ids.get("settings-cancel"));
+assert.equal(providerUpdates.length, sentBeforeRenew);
+
+// Removal needs a second click; Keep and Escape back out without losing the draft.
+const deletes = [];
+let deleteHandler = () => ({status: "success"});
+bridge.apiPost = async (endpoint, body) => {
+  if (endpoint === "providers/delete") { deletes.push(body); return deleteHandler(body); }
+  return originalPost(endpoint, body);
+};
+await openSettings("Mine");
+typeName("Kept draft");
+await click(removeButton);
+assert.equal(deletes.length, 0);
+assert.match(read("settings-remove"), /确认移除/);
+assert.match(read("settings-remove-hint"), /再次点击即永久删除/);
+assert.equal(ids.get("settings-remove-keep").hidden, false);
+await click(ids.get("settings-remove-keep"));
+assert.match(read("settings-remove"), /^移除$/);
+assert.equal(ids.get("settings-remove-keep").hidden, true);
+assert.equal(nameInput.value, "Kept draft");
+await click(removeButton);
+escape();
+await tick();
+assert.equal(settingsBox.open, true, "Escape first backs out of an armed removal");
+assert.match(read("settings-remove"), /^移除$/);
+assert.equal(nameInput.value, "Kept draft");
+assert.equal(deletes.length, 0);
+
+// A failed removal keeps the dialog, the provider and the draft.
+deleteHandler = () => { throw new Error("Remove this provider's model bindings in AstrBot first."); };
+await click(removeButton);
+await click(removeButton);
+await tick();
+assert.equal(deletes.length, 1);
+assert.equal(settingsBox.open, true);
+assert.match(read("settings-error"), /移除「Mine」失败.*model bindings/);
+assert.equal(nameInput.value, "Kept draft");
+assert.ok(rowFor("Mine"));
+
+// A busy removal blocks the other dialog actions.
+let heldDelete = deferred();
+deleteHandler = () => heldDelete.promise;
+await click(removeButton);
+await click(removeButton);
+assert.match(read("settings-remove"), /正在移除/);
+assert.equal(saveButton.disabled, true);
+assert.equal(ids.get("settings-reauth").disabled, true);
+assert.equal(ids.get("settings-cancel").disabled, true);
+escape();
+await tick();
+assert.equal(settingsBox.open, true);
+// Success closes the dialog, removes the row and never saves the draft.
+let deviceRemoved = false;
+const removalPost = bridge.apiPost;
+bridge.apiPost = async (endpoint, body) => {
+  if (endpoint === "providers/list" && deviceRemoved) {
+    listCalls += 1;
+    return {providers: [{...account}]};
+  }
+  return removalPost(endpoint, body);
+};
+deviceRemoved = true;
+const sentBeforeRemove = providerUpdates.length;
+heldDelete.resolve({status: "success"});
+await tick();
+await tick();
+assert.deepEqual({...deletes.at(-1)}, {source_id: "device"});
+assert.equal(settingsBox.open, false);
+assert.equal(rowFor("Mine"), undefined);
+assert.equal(document.activeElement, ids.get("add-provider"));
+assert.doesNotMatch(visibleText(ids.get("page-error")), /已不存在/, "a removal from settings is not reported as a vanished provider");
+assert.equal(providerUpdates.length, sentBeforeRemove);
+bridge.apiPost = originalPost;
+
+console.log("View regressions passed: device login dialog (copy instructions, copy, saving, success, done, failure recovery), quota windows, provider selection, stale-result isolation, login and cancellation races, settings dialog drafts and entry points, renew and removal from settings, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");

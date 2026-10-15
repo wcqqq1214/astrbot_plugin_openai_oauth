@@ -53,13 +53,6 @@
               </p>
             </div>
           </div>
-          <div id="delete-row" class="editor-foot">
-            <button id="open-login" class="button small" type="button">重新授权</button>
-            <div class="editor-inline">
-              <button id="delete-provider" class="link-button danger" type="button">移除此 Provider</button>
-              <span id="delete-hint" class="editor-hint"></span>
-            </div>
-          </div>
         </section>
       </div>
 
@@ -156,6 +149,24 @@
           </div>
           <p id="settings-routing-help" class="field-hint"></p>
         </div>
+        <!-- Account actions act immediately and never save the draft above. -->
+        <section id="settings-account" class="settings-section" aria-labelledby="settings-account-label">
+          <h3 id="settings-account-label" class="field-label">账号</h3>
+          <div class="settings-account-row">
+            <span id="settings-account-text" class="settings-account-text"></span>
+            <button id="settings-reauth" class="button small" type="button">重新授权</button>
+          </div>
+          <div id="settings-danger" class="danger-zone">
+            <div class="danger-copy">
+              <strong id="settings-remove-title">移除 Provider</strong>
+              <span id="settings-remove-hint"></span>
+            </div>
+            <div class="danger-actions">
+              <button id="settings-remove-keep" class="button small quiet" type="button" hidden>保留</button>
+              <button id="settings-remove" class="button small danger" type="button">移除</button>
+            </div>
+          </div>
+        </section>
         <p id="settings-error" class="error" role="alert" hidden></p>
       </div>
       <div class="actions">
