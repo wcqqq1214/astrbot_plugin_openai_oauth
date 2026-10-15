@@ -72,8 +72,6 @@ const strings = {
     soon: "Resets soon",
     resetIn: (n, unit) =>
       `Resets in ${n} ${{ m: "min", h: n === 1 ? "hour" : "hours", d: n === 1 ? "day" : "days" }[unit]}`,
-    proWeekly:
-      "Pro · Only the weekly window is returned; there is no separate 5-hour window.",
     weeklyOnly:
       "Only the weekly window is returned. Missing windows do not imply unlimited usage.",
     exhausted:
@@ -171,7 +169,6 @@ const strings = {
     soon: "即将重置",
     resetIn: (n, unit) =>
       `${n} ${{ m: "分钟", h: "小时", d: "天" }[unit]}后重置`,
-    proWeekly: "Pro · 当前仅返回每周额度，没有独立的 5 小时窗口。",
     weeklyOnly: "仅显示已返回的每周窗口；未返回不代表无限额度。",
     exhausted:
       "已达到额度上限，请查看窗口重置时间。当前不会自动切换 Provider。",
@@ -561,9 +558,10 @@ function renderUsage(result) {
   byId("plan").hidden = !plan;
   const weeklyOnly =
     windows.length === 1 && windows[0].label_seconds === 604800;
-  quotaPolicy.hidden = !weeklyOnly;
-  quotaPolicy.textContent =
-    usage.plan_type === "pro" ? t.proWeekly : t.weeklyOnly;
+  const proWeekly = weeklyOnly && usage.plan_type === "pro";
+  usageResult.className = "quota-cards" + (proWeekly ? " single-window" : "");
+  quotaPolicy.hidden = !weeklyOnly || proWeekly;
+  quotaPolicy.textContent = quotaPolicy.hidden ? "" : t.weeklyOnly;
   updateNotice();
 }
 

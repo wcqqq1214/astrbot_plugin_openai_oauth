@@ -150,7 +150,9 @@ assert.equal(read("plan"), "Pro");
 assert.match(read("providers"), /本地 Codex.*Work/);
 assert.doesNotMatch(read("providers"), /备用/);
 assert.equal(usageBodies.at(-1).source_id, "local");
-assert.match(read("quota-policy"), /没有独立的 5 小时窗口/);
+assert.equal(ids.get("quota-policy").hidden, true);
+assert.equal(read("quota-policy"), "");
+assert.match(ids.get("usage-result").className, /single-window/);
 
 usage = {
   status: "success",
@@ -167,6 +169,7 @@ assert.match(read("usage-result"), /5 小时额度.*—.*暂不可用.*每周额
 assert.doesNotMatch(read("usage-result"), /100%/);
 assert.equal(ids.get("plan").hidden, true);
 assert.equal(ids.get("quota-policy").hidden, true);
+assert.equal(ids.get("usage-result").className, "quota-cards");
 
 // Both exhausted windows must reset before the included allowance recovers.
 const laterReset = new Date(Date.now() + 2 * 86400000);

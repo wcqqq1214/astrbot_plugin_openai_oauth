@@ -291,6 +291,9 @@ summary:focus-visible {
 .quota-cards {
   display: contents;
 }
+.quota-cards.single-window > .quota {
+  grid-column: 1 / -1;
+}
 .quota-cards > .muted {
   grid-column: 1 / -1;
   display: flex;
