@@ -40,7 +40,6 @@ from astrbot.core.workspace import API_KEY_USERNAME_PREFIX
 
 from .credential_store import (
     CredentialCooldownError,
-    CredentialCoordinator,
     CredentialError,
     CredentialSchemaError,
     CredentialSnapshot,
@@ -49,6 +48,8 @@ from .credential_store import (
     ReauthenticationRequiredError,
     parse_credentials,
 )
+from .local_codex import LocalCodexStore
+from .local_codex import LocalCredentialCoordinator as CredentialCoordinator
 from .oauth import (
     CODEX_BASE,
     CODEX_DEVICE_LOGIN_TIMEOUT,
@@ -122,6 +123,7 @@ def _provider_default_effort(provider: Any) -> str | None:
 # source-scoped credentials from AstrBot configuration.
 _config_mgr: Any = None
 _credential_coordinator: CredentialCoordinator | None = None
+_local_codex_store: LocalCodexStore | None = None
 _COORDINATOR_ATTR = "_astrbot_openai_oauth_credential_coordinator"
 _command_login_tasks: dict[str, asyncio.Task[Any]] = {}
 
@@ -167,6 +169,7 @@ def _get_credential_coordinator() -> CredentialCoordinator:
     existing = getattr(cfg_mgr, _COORDINATOR_ATTR, None)
     if isinstance(existing, CredentialCoordinator):
         existing.update_refresh_credentials(refresh_access_token)
+        existing.local_store = _local_codex_store
         _credential_coordinator = existing
         return existing
     if (
@@ -174,6 +177,7 @@ def _get_credential_coordinator() -> CredentialCoordinator:
         and _credential_coordinator.config_manager is cfg_mgr
     ):
         _credential_coordinator.update_refresh_credentials(refresh_access_token)
+        _credential_coordinator.local_store = _local_codex_store
         return _credential_coordinator
 
     coordinator = CredentialCoordinator(
@@ -183,6 +187,7 @@ def _get_credential_coordinator() -> CredentialCoordinator:
         default_source_factory=_build_default_source_config,
         refresh_credentials=refresh_access_token,
         refresh_skew_seconds=_REFRESH_SKEW_SECONDS,
+        local_store=_local_codex_store,
     )
     try:
         setattr(cfg_mgr, _COORDINATOR_ATTR, coordinator)
@@ -204,11 +209,16 @@ class OpenAI_OAuth_Plugin(Star):
         context: Context,
         config: AstrBotConfig | None = None,
     ) -> None:
-        global _config_mgr
+        global _config_mgr, _local_codex_store
         super().__init__(context)
         _config_mgr = context.astrbot_config_mgr
-        _get_credential_coordinator()
         self.config = config if config is not None else AstrBotConfig()
+        _local_codex_store = (
+            LocalCodexStore(str(self.config.get("codex_auth_path", "") or ""))
+            if self.config.get("follow_local_codex", True)
+            else None
+        )
+        _get_credential_coordinator()
         self.context.register_web_api(
             "/astrbot_plugin_openai_oauth/device/start",
             _handle_device_start,
@@ -239,6 +249,10 @@ class OpenAI_OAuth_Plugin(Star):
             ["POST"],
             "查询 OpenAI 订阅额度",
         )
+
+    async def initialize(self) -> None:
+        """Expose the default model source without requiring a device login."""
+        await _get_credential_coordinator().ensure_default_source()
 
     @filter.command("usage")
     async def usage(self, event: AstrMessageEvent) -> None:
@@ -1070,10 +1084,15 @@ def format_usage(usage: dict) -> str:
     if not windows:
         lines.append("当前账号暂无可用额度窗口。")
     for window in windows:
-        remaining = max(0.0, 100.0 - float(window.get("used_percent", 0.0)))
+        used = window.get("used_percent")
+        remaining = (
+            f"剩余 {max(0.0, min(100.0, 100.0 - used)):.0f}%"
+            if isinstance(used, (int, float))
+            else "额度暂不可用"
+        )
         lines.append(
             f"· {_window_label(window.get('label_seconds'))}："
-            f"剩余 {remaining:.0f}%"
+            f"{remaining}"
             f"{_format_reset_at(window.get('reset_at'), window.get('reset_after_seconds'))}"
         )
     if usage.get("limit_reached"):
@@ -1491,7 +1510,8 @@ async def _handle_account_status() -> Any:
     if message := _login_request_error():
         return _login_error_response(message, 403)
     try:
-        status = _get_credential_coordinator().status().as_dict()
+        coordinator = _get_credential_coordinator()
+        status = coordinator.account_view()
     except CredentialError:
         status = {"status": "invalid"}
     return json_response(status, headers=_NO_STORE_HEADERS)
@@ -1500,8 +1520,17 @@ async def _handle_account_status() -> Any:
 async def _handle_account_usage() -> Any:
     if message := _login_request_error():
         return _login_error_response(message, 403)
+    before: dict[str, Any] = {}
     try:
+        coordinator = _get_credential_coordinator()
+        before = coordinator.account_view()
         usage = await _fetch_source_usage()
+        account = coordinator.account_view()
+        if before.get("account_revision") != account.get("account_revision"):
+            return json_response(
+                {"status": "account_changed", "account": account},
+                headers=_NO_STORE_HEADERS,
+            )
     except CredentialCooldownError as exc:
         return json_response(
             {
@@ -1511,11 +1540,17 @@ async def _handle_account_usage() -> Any:
             },
             headers=_NO_STORE_HEADERS,
         )
-    except (
-        CredentialsNotConfiguredError,
-        ReauthenticationRequiredError,
-        CredentialExpiredError,
-    ):
+    except ReauthenticationRequiredError:
+        account = _get_credential_coordinator().account_view()
+        state = (
+            "account_changed"
+            if before.get("account_revision") != account.get("account_revision")
+            else "reauth_required"
+        )
+        return json_response(
+            {"status": state, "account": account}, headers=_NO_STORE_HEADERS
+        )
+    except (CredentialsNotConfiguredError, CredentialExpiredError):
         return json_response({"status": "reauth_required"}, headers=_NO_STORE_HEADERS)
     except CredentialSchemaError:
         return json_response({"status": "invalid"}, headers=_NO_STORE_HEADERS)
@@ -1525,6 +1560,6 @@ async def _handle_account_usage() -> Any:
         logger.error("OpenAI Codex usage API failed: %s", type(exc).__name__)
         return _login_error_response("额度查询失败，请稍后重试", 502)
     return json_response(
-        {"status": "success", "usage": usage},
+        {"status": "success", "usage": usage, "account": account},
         headers=_NO_STORE_HEADERS,
     )

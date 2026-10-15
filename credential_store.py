@@ -60,6 +60,7 @@ class CredentialSnapshot:
     account_id: str
     cooldown_until: int | None
     cooldown_reason: str | None
+    credential_origin: str = "plugin"
 
     def is_access_token_expired(self, now: float | None = None) -> bool:
         return self.expires is not None and self.expires <= (now or time.time())
@@ -333,7 +334,7 @@ class CredentialCoordinator:
     ) -> CredentialSnapshot:
         source["key"] = dump_credentials(creds)
         committed = await self._conf().save_config_async()
-        persisted = self._read_snapshot(source_id)
+        persisted = self._snapshot_from_source(source_id, self._source(source_id))
         expected = self._snapshot_from_source(
             source_id, {"key": dump_credentials(creds)}
         )

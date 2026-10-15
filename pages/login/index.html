@@ -3,49 +3,100 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OpenAI 订阅登录</title>
+    <title>订阅与账号</title>
     <link rel="stylesheet" href="./style.css" />
     <script src="/api/plugin/page/bridge-sdk.js"></script>
   </head>
   <body>
-    <main class="card">
-      <h1 id="title">OpenAI 订阅登录</h1>
-      <p id="intro">使用 ChatGPT 设备码完成授权，凭据会由 AstrBot 服务端保存。</p>
-
-      <section class="account" aria-live="polite">
-        <h2 id="account-title">账号状态</h2>
-        <p id="account-status" class="status"></p>
-        <button id="usage" class="secondary" type="button">查询额度</button>
-        <p id="usage-result" class="usage-result" hidden></p>
+    <main class="account-center">
+      <header class="page-heading">
+        <div>
+          <div class="eyebrow">OPENAI SUBSCRIPTION</div>
+          <h1 id="title">订阅与账号</h1>
+          <p id="intro">正在连接 AstrBot…</p>
+        </div>
+        <button id="usage" type="button">刷新状态</button>
+      </header>
+      <section class="panel" aria-labelledby="account-title">
+        <div class="list-toolbar">
+          <h2 id="account-title">OpenAI Subscribe</h2>
+          <span id="account-status" class="badge" role="status">…</span>
+        </div>
+        <div class="account-list-row">
+          <div class="account-name">
+            <div class="icon-box" aria-hidden="true">&gt;_</div>
+            <div>
+              <h3 id="source-name">—</h3>
+              <p id="source-caption"></p>
+              <span id="plan" class="plan-tag" hidden></span>
+            </div>
+          </div>
+          <div id="usage-result" class="quota-list" aria-live="polite">
+            <p class="muted">…</p>
+          </div>
+        </div>
+        <p id="quota-policy" class="quota-policy" hidden></p>
+        <div class="backup">
+          <div class="backup-copy">
+            <h3>
+              <span id="backup-title">备用登录</span>
+              <span id="backup-status" class="badge neutral"></span>
+            </h3>
+            <p id="backup-copy"></p>
+          </div>
+          <button id="open-login" type="button">添加备用登录 →</button>
+        </div>
+        <div id="updated" class="list-note" role="status"></div>
       </section>
-
-      <div class="actions">
-        <button id="start" type="button">开始登录</button>
-        <button id="cancel" class="secondary" type="button" hidden>取消登录</button>
+      <p id="notice" class="notice" role="status" hidden></p>
+      <div class="list-info">
+        <section>
+          <h3 id="source-title"></h3>
+          <p id="source-help"></p>
+        </section>
+        <section>
+          <h3 id="fallback-title"></h3>
+          <p id="fallback-help"></p>
+        </section>
       </div>
-
-      <section id="instructions" hidden>
-        <h2 id="instructions-title">完成授权</h2>
-        <div class="field">
-          <label id="open-label" for="verify-url">复制验证网址并在新标签页打开：</label>
-          <div class="copy-row">
-            <input id="verify-url" type="text" readonly />
-            <button id="copy-url" class="secondary" type="button">复制网址</button>
-          </div>
-        </div>
-        <div class="field">
-          <label id="code-label" for="user-code">输入设备码：</label>
-          <div class="copy-row">
-            <input id="user-code" class="device-code" type="text" readonly />
-            <button id="copy-code" class="secondary" type="button">复制设备码</button>
-          </div>
-        </div>
-        <p id="copy-status" class="copy-status" role="status"></p>
-      </section>
-
-      <p id="status" class="status" role="status"></p>
-      <p id="error" class="error" role="alert" hidden></p>
+      <p id="privacy" class="footnote"></p>
     </main>
+    <dialog id="login-dialog" aria-labelledby="instructions-title">
+      <div class="dialog-heading">
+        <h2 id="instructions-title">备用登录</h2>
+        <button id="close-login" type="button" aria-label="关闭">×</button>
+      </div>
+      <p id="login-intro" class="muted"></p>
+      <section id="instructions" hidden>
+        <div class="field">
+          <label id="open-label" for="verify-url"></label>
+          <div class="copy-row">
+            <input id="verify-url" type="text" readonly /><button
+              id="copy-url"
+              type="button"
+            ></button>
+          </div>
+        </div>
+        <div class="field">
+          <label id="code-label" for="user-code"></label>
+          <div class="copy-row">
+            <input
+              id="user-code"
+              class="device-code"
+              type="text"
+              readonly
+            /><button id="copy-code" type="button"></button>
+          </div>
+        </div>
+        <p id="copy-status" class="muted" role="status"></p>
+      </section>
+      <p id="status" class="muted" role="status"></p>
+      <p id="error" class="error" role="alert" hidden></p>
+      <div class="actions">
+        <button id="cancel" type="button" hidden></button
+        ><button id="start" class="primary" type="button"></button>
+      </div>
+    </dialog>
     <script type="module" src="./app.js"></script>
   </body>
 </html>

@@ -14,6 +14,7 @@ sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)
 
 oauth = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.oauth")
+plugin = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.main")
 
 FAILED: list[str] = []
 
@@ -129,6 +130,39 @@ def test_usage_schemas() -> None:
         parsed_legacy["windows"][0]["used_percent"] == 35.0,
         "legacy usage is converted to percentage",
     )
+    weekly = oauth._parse_usage_payload(
+        {
+            "plan_type": "pro",
+            "rate_limit": {
+                "primary_window": {"used_percent": 4, "limit_window_seconds": 604800},
+                "secondary_window": None,
+            },
+        }
+    )
+    check(weekly["plan_type"] == "pro", "usage exposes a known subscription plan")
+    check(
+        len(weekly["windows"]) == 1 and weekly["windows"][0]["label_seconds"] == 604800,
+        "a Pro primary window remains weekly without an invented five-hour window",
+    )
+    for invalid in (None, True, "4", float("nan"), float("inf")):
+        parsed = oauth._parse_usage_payload(
+            {
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": invalid,
+                        "limit_window_seconds": 604800,
+                    }
+                }
+            }
+        )
+        check(
+            parsed["windows"][0]["used_percent"] is None,
+            "invalid usage remains unknown rather than zero used",
+        )
+        check(
+            "100%" not in plugin.format_usage(parsed),
+            "unknown usage never advertises a full allowance",
+        )
 
 
 def test_error_classification() -> None:

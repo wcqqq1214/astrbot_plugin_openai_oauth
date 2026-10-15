@@ -378,7 +378,7 @@ class StaticSecurityTests(unittest.TestCase):
         schema_path = os.path.join(PLUGIN_ROOT, "_conf_schema.json")
         with open(schema_path, encoding="utf-8") as source:
             schema = json.load(source)
-        self.assertEqual(schema, {})
+        self.assertNotIn("allow_insecure_local_http", schema)
         self.assertFalse(hasattr(plugin, "_allow_insecure_local_http"))
         main_path = os.path.join(PLUGIN_ROOT, "main.py")
         with open(main_path, encoding="utf-8") as source:

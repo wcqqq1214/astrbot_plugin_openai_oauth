@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import math
 import time
 from typing import Any
 
@@ -23,8 +24,7 @@ CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_BASE = "https://chatgpt.com/backend-api/codex"
 CODEX_MODELS_URL = f"{CODEX_BASE}/models"
-# 订阅额度查询（与 Codex CLI /status、cc-switch 一致）：rate_limit 下按
-# primary_window（5 小时滚动）/ secondary_window（周）各带 used_percent。
+# Window durations come from the response; Pro may return only a weekly window.
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 
 # Codex CLI 的新版设备登录流程（device_code_auth.rs）：先取 user_code，
@@ -118,6 +118,8 @@ async def refresh_access_token(creds: dict, proxy: str | None = None) -> dict:
     updated["access_token"] = data["access_token"]
     if data.get("refresh_token"):
         updated["refresh_token"] = data["refresh_token"]
+    if data.get("id_token"):
+        updated["id_token"] = data["id_token"]
     updated["expires"] = int(time.time()) + int(data.get("expires_in", 3600))
     return updated
 
@@ -380,13 +382,18 @@ def _parse_usage_payload(data: Any) -> dict:
         limit_reached = bool(rate_limit.get("limit_reached", False))
         for window in ("primary_window", "secondary_window"):
             item = rate_limit.get(window)
-            if isinstance(item, dict) and isinstance(
-                item.get("used_percent"), (int, float)
-            ):
+            if isinstance(item, dict):
+                used = item.get("used_percent")
+                if (
+                    isinstance(used, bool)
+                    or not isinstance(used, (int, float))
+                    or not math.isfinite(used)
+                ):
+                    used = None
                 windows.append(
                     {
                         "label_seconds": item.get("limit_window_seconds"),
-                        "used_percent": float(item["used_percent"]),
+                        "used_percent": float(used) if used is not None else None,
                         "reset_after_seconds": item.get("reset_after_seconds"),
                         "reset_at": item.get("reset_at"),
                     }
@@ -403,12 +410,23 @@ def _parse_usage_payload(data: Any) -> dict:
                     continue
                 limit_s = item.get("limit_in_seconds")
                 usage_s = item.get("usage_in_seconds")
-                if isinstance(limit_s, (int, float)) and limit_s:
-                    used = usage_s * 100.0 / limit_s if usage_s else 0.0
+                if (
+                    not isinstance(limit_s, bool)
+                    and isinstance(limit_s, (int, float))
+                    and math.isfinite(limit_s)
+                    and limit_s > 0
+                ):
+                    used = None
+                    if (
+                        not isinstance(usage_s, bool)
+                        and isinstance(usage_s, (int, float))
+                        and math.isfinite(usage_s)
+                    ):
+                        used = min(100.0, max(0.0, usage_s / limit_s * 100))
                     windows.append(
                         {
                             "label_seconds": int(limit_s),
-                            "used_percent": min(used, 100.0),
+                            "used_percent": used,
                             "reset_after_seconds": item.get("resets_in_seconds"),
                             "reset_at": None,
                         }
@@ -417,6 +435,13 @@ def _parse_usage_payload(data: Any) -> dict:
         "allowed": allowed,
         "limit_reached": limit_reached,
         "windows": windows,
+        "plan_type": (
+            data.get("plan_type")
+            if isinstance(data, dict)
+            and data.get("plan_type")
+            in ("free", "go", "plus", "pro", "team", "business", "enterprise", "edu")
+            else None
+        ),
     }
 
 

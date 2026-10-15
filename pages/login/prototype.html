@@ -1,0 +1,46 @@
+<!doctype html>
+<!-- Throwaway prototype: three layouts for the existing Plugin View, selected with ?variant=A|B|C. -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenAI 账号中心 · 界面原型</title>
+    <link rel="stylesheet" href="./prototype.css" />
+  </head>
+  <body>
+    <header class="host-bar">
+      <a class="host-brand" href="?variant=B"
+        ><span class="host-symbol">✳</span> AstrBot</a
+      ><span class="crumb">插件视图 <span>/</span> OpenAI 订阅</span
+      ><span class="prototype-label">交互原型 · 示例数据</span>
+    </header>
+    <main id="app"></main>
+    <aside class="prototype-controls" aria-label="原型控制">
+      <div class="variant-control">
+        <button id="previous" aria-label="上一个布局">←</button
+        ><span id="variant-name"></span
+        ><button id="next" aria-label="下一个布局">→</button>
+      </div>
+      <span class="control-divider"></span>
+      <label class="scenario-label"
+        >场景
+        <select id="scenario">
+          <option value="pro">Pro · 仅每周限额</option>
+          <option value="weekly_only">仅返回每周窗口</option>
+          <option value="weekly_cooling">Pro · 每周额度耗尽</option>
+          <option value="ready">双窗口 · 正常使用</option>
+          <option value="low">额度偏低</option>
+          <option value="cooling">额度冷却</option>
+          <option value="signedout">尚未登录</option>
+          <option value="backup">使用备用账号</option>
+          <option value="error">额度查询失败</option>
+          <option value="empty">暂无额度数据</option>
+        </select></label
+      >
+      <button id="theme-toggle" aria-label="切换深浅色">◐</button>
+    </aside>
+    <dialog id="login-dialog" aria-labelledby="dialog-title"></dialog>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="./prototype.js"></script>
+  </body>
+</html>

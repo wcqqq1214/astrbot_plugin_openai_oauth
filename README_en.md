@@ -15,7 +15,7 @@
   <a href="README.md">简体中文</a>
 </p>
 
-This plugin connects your ChatGPT account to AstrBot. After you sign in,
+This plugin connects your ChatGPT account to AstrBot. After installation,
 AstrBot gets an `OpenAI Subscribe` model source. Choose a model from that
 source to use your ChatGPT/Codex quota—no separate OpenAI API key is needed.
 
@@ -29,7 +29,7 @@ account, not your prepaid OpenAI API balance.
 - If your Dashboard is publicly reachable, use HTTPS, a VPN, or an SSH tunnel.
   Device-code sign-in also works over plain HTTP, but the Dashboard session can
   be intercepted, so it is not recommended.
-- In ChatGPT, open **Settings → Security and login** and turn on
+- For backup device-code login, open ChatGPT **Settings → Security and login** and turn on
   **Enable device code authorization for Codex**.
 
 ![Enable Codex device-code authorization in ChatGPT settings](images/enable-device-code-auth-codex.png)
@@ -40,20 +40,50 @@ the screenshot is **Enable device code authorization for Codex**.*
 > Treat a device code like a password: enter it only on OpenAI's verification
 > page, and never share it with anyone.
 
-## Sign in in five steps
+## Default: follow local Codex
+
+The plugin uses the current Codex account on the **machine running AstrBot** by
+default. Sign in to Codex there, then choose the `OpenAI Subscribe` source in
+AstrBot's model configuration. No Plugin Page login is required.
+
+- Reads `$CODEX_HOME/auth.json`, or `~/.codex/auth.json` when `CODEX_HOME` is unset.
+  Set the plugin's `codex_auth_path` to override the full file path.
+- Rereads credentials for each model request and quota lookup. Account switches
+  apply to the next request; requests already in progress keep their starting account.
+- Does not copy local credentials into AstrBot configuration. Refresh atomically
+  writes rotated tokens back to the Codex file, preserving other fields. AstrBot
+  needs file read access and directory write access.
+- In Docker, mount the entire credentials directory and configure the path inside
+  the container. A single-file mount may prevent atomic replacement. A remote
+  AstrBot server cannot read credentials from your personal computer directly.
+- Supports file-backed ChatGPT OAuth credentials. Keyring-only logins, API-key
+  logins and browser ChatGPT sessions need the backup device-login flow instead.
+
+Missing, unreadable or unsupported local credentials fall back to the account
+saved through the Plugin Page. Exhausted quota or a failed refresh does not
+automatically switch accounts: sign in to Codex again, or disable
+`follow_local_codex` to use the saved plugin account exclusively. Reload the
+plugin after changing settings. The Plugin Page identifies the active credential source.
+
+## Backup: device-code login
 
 1. Install the plugin from the AstrBot plugin marketplace. For a manual
    installation, place the project in `data/plugins/`.
-2. Open this plugin's detail page and enter its **Plugin Page** (the sign-in
-   page). Click **Start login**.
+2. Open this plugin's detail page and enter its **Plugin Views** (formerly Plugin Page). Click **Add backup login**, then
+   **Start login**.
 3. The page shows an OpenAI verification URL and a device code. Open the URL,
    sign in to ChatGPT, enter the code, and approve the request.
-4. Return to AstrBot and wait for the “Login succeeded” message. Credentials are
+4. Return to AstrBot and wait for the “Backup login saved” message. Credentials are
    stored only on the AstrBot server; they are not shown in the browser or chat.
-5. Open AstrBot's model configuration. Create or choose a model that uses the
-   `OpenAI Subscribe` source, enable it, and you are ready to go.
+5. Local Codex still takes priority if available. To use the backup immediately,
+   disable `follow_local_codex` and reload the plugin, then select a model from
+   the `OpenAI Subscribe` source.
 
-The sign-in page can also show account status and quota. You can select
+The account page shows the active source, sign-in health, saved backup status,
+and the actual subscription plan. It refreshes every 30 seconds while visible.
+Quota bars follow the returned window durations: a weekly-only Pro response
+shows one weekly bar and its reset time. Missing data and lookup failures are
+unavailable, never unlimited or a fabricated full allowance. You can select
 **Cancel login** while a device code is still waiting for approval. After you
 sign in, `/usage` in chat also shows your quota.
 
@@ -123,9 +153,9 @@ default. It does not change other sessions or the model's global configuration.
   directly. For an authorized outbound proxy in Docker or on a cloud server,
   set both `HTTP_PROXY` and `HTTPS_PROXY` in the **AstrBot container** and leave
   the plugin's own `proxy` empty. A non-empty plugin `proxy` takes precedence.
-- Credentials are never returned to the browser or sent to chat, but they are
-  stored in plaintext in AstrBot's `data/cmd_config.json`. Limit read access to
-  that file and its backups.
+- Credentials are never returned to the browser or sent to chat. Local mode uses
+  Codex's `auth.json`; backup device credentials are stored in plaintext in
+  AstrBot's `data/cmd_config.json`. Limit read access to these files and their backups.
 - One `OpenAI Subscribe` model source represents one ChatGPT account. When the
   quota is exhausted, the page shows the cooldown and reset time; the plugin
   does not rotate accounts automatically.
@@ -135,6 +165,12 @@ default. It does not change other sessions or the model's global configuration.
 
 Use your own account and make sure your use complies with OpenAI's terms of
 service.
+
+## Development checks
+
+Run `tests/run_tests.py` with the local AstrBot virtualenv's Python. It tests this
+checkout rather than a deployed plugin copy and uses a temporary Codex directory
+to avoid reading or refreshing real account credentials.
 
 ## License
 
