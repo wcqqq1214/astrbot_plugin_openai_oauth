@@ -10,12 +10,14 @@ from typing import Any
 from .credential_store import (
     CredentialPersistenceError,
     CredentialSourceError,
+    ProviderDisabledError,
     dump_credentials,
     normalize_credentials,
 )
 
 LOCAL = "local_codex"
 DEVICE = "device_oauth"
+UNSET = object()
 
 
 class ProviderRegistry:
@@ -25,6 +27,19 @@ class ProviderRegistry:
         self.coordinator = coordinator
         self.lock = asyncio.Lock()
         self.on_change: Any = None
+        self._pending_previous: dict[str, dict[str, Any]] = {}
+
+    def policy_source(self, source_id: str) -> dict[str, Any]:
+        """Keep dispatch on the committed policy while persistence is pending."""
+        source = self.coordinator._source(source_id)
+        return self._pending_previous.get(source_id, source)
+
+    def enabled(self, source_id: str) -> bool:
+        return self.policy_source(source_id).get("enable", True) is True
+
+    def ensure_enabled(self, source_id: str) -> None:
+        if not self.enabled(source_id):
+            raise ProviderDisabledError("This Provider is disabled for new requests.")
 
     def sources(self) -> list[dict[str, Any]]:
         sources = self.coordinator._conf().get("provider_sources", [])
@@ -63,6 +78,7 @@ class ProviderRegistry:
     async def _save(self, previous: list[dict[str, Any]]) -> None:
         conf = self.coordinator._conf()
         proposed = deepcopy(conf["provider_sources"])
+        self._pending_previous = {s["id"]: s for s in previous}
         try:
             # A newer AstrBot snapshot can supersede this one; retry once.
             if (
@@ -97,6 +113,7 @@ class ProviderRegistry:
                 "Could not save provider configuration."
             ) from exc
         finally:
+            self._pending_previous = {}
             if self.on_change is not None:
                 self.on_change(conf["provider_sources"])
 
@@ -141,6 +158,9 @@ class ProviderRegistry:
                     source["id"] = self.new_id()
                 source.update(name="Local Codex", credential_mode=LOCAL, key="")
                 planned.append(source)
+            for source in planned:
+                if source.get("type") == c._provider_type:
+                    source.setdefault("enable", True)
             if planned != sources:
                 sources[:] = planned
                 await self._save(previous)
@@ -176,8 +196,19 @@ class ProviderRegistry:
             self.coordinator._usage_cache.pop(source_id, None)
 
     async def edit(
-        self, source_id: str, *, name: str | None = None, delete: bool = False
+        self,
+        source_id: str,
+        *,
+        name: Any = UNSET,
+        enabled: Any = UNSET,
+        delete: bool = False,
     ) -> None:
+        if name is not UNSET:
+            name = self.name(name)
+        if enabled is not UNSET and type(enabled) is not bool:
+            raise CredentialSourceError("enabled must be a boolean.")
+        if not delete and name is UNSET and enabled is UNSET:
+            raise CredentialSourceError("Provide name or enabled to update.")
         async with self.lock, self.coordinator._source_lock(source_id):
             source = self.coordinator._source(source_id)
             sources = self.sources()
@@ -202,7 +233,11 @@ class ProviderRegistry:
                     )
                 sources.remove(source)
             else:
-                source["name"] = self.name(name)
+                if name is not UNSET:
+                    source["name"] = name
+                if enabled is not UNSET:
+                    source["enable"] = enabled
             await self._save(previous)
-            self.coordinator._states.pop(source_id, None)
-            self.coordinator._usage_cache.pop(source_id, None)
+            if delete:
+                self.coordinator._states.pop(source_id, None)
+                self.coordinator._usage_cache.pop(source_id, None)

@@ -20,6 +20,10 @@ class CredentialSourceError(CredentialError):
     """The configured provider source cannot safely be used."""
 
 
+class ProviderDisabledError(CredentialSourceError):
+    """The source is disabled for new inference attempts."""
+
+
 class CredentialSchemaError(CredentialError):
     """The persisted credential record has an unsupported schema."""
 

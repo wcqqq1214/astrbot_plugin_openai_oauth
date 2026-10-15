@@ -178,6 +178,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
         result.update(
             id=source_id,
             name=source.get("name") or source_id,
+            enabled=self.providers.enabled(source_id),
             credential_mode=mode,
             credential_source="local_codex" if mode == LOCAL else "plugin",
         )

@@ -11,7 +11,7 @@ import json
 import math
 import secrets
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
@@ -586,6 +586,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         *,
         request_max_retries: int | None = None,
         session_effort: str | None = None,
+        before_attempt: Callable[[], None] | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
         """Stream from the Codex backend, which completes with an empty response
         object: the content only arrives as deltas. Assemble the final response
@@ -644,6 +645,8 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
 
         async def create_stream():
             nonlocal attempts
+            if before_attempt is not None:
+                before_attempt()
             attempts += 1
             return await request_client.responses.create(
                 **payloads,
@@ -960,7 +963,9 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         base_payloads = deepcopy(payloads)
 
         while True:
+            coordinator.providers.ensure_enabled(self._source_id)
             snapshot = await coordinator.get_snapshot(self._source_id)
+            coordinator.providers.ensure_enabled(self._source_id)
             request_client = self._request_client(snapshot)
             try:
                 async for response in self._query_stream(
@@ -969,6 +974,9 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                     tools,
                     request_max_retries=request_max_retries,
                     session_effort=session_effort,
+                    before_attempt=lambda: coordinator.providers.ensure_enabled(
+                        self._source_id
+                    ),
                 ):
                     emitted_chunk = True
                     yield response
@@ -984,6 +992,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                     and not emitted_chunk
                 ):
                     retry_after_credential_error = False
+                    coordinator.providers.ensure_enabled(self._source_id)
                     await coordinator.get_snapshot(
                         self._source_id,
                         force_refresh=True,
@@ -1637,16 +1646,22 @@ async def _edit_provider(*, delete: bool) -> Any:
         body = await request.json(default={}) or {}
         if "source_id" not in body:
             raise CredentialSourceError("Provider ID is required.")
-        await _get_credential_coordinator().providers.edit(
+        if set(body) - {"source_id", "name", "enabled"}:
+            raise CredentialSourceError("Unknown provider update field.")
+        coordinator = _get_credential_coordinator()
+        await coordinator.providers.edit(
             source_id,
-            name=body.get("name"),
             delete=delete,
+            **{key: body[key] for key in ("name", "enabled") if key in body},
         )
         if delete:
             for session_id, session in list(_login_sessions.items()):
                 if session.get("source_id") == source_id:
                     _discard_login_session(session_id)
-        return json_response({"status": "success"}, headers=_NO_STORE_HEADERS)
+        result = {"status": "success"}
+        if not delete:
+            result["provider"] = coordinator.account_view(source_id)
+        return json_response(result, headers=_NO_STORE_HEADERS)
     except CredentialError as exc:
         return _login_error_response(str(exc), 400)
 

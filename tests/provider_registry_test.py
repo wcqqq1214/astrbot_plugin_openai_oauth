@@ -81,6 +81,104 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
             (await self.coordinator.get_snapshot(device["id"])).account_id, "device"
         )
 
+    async def test_enabled_patch_preserves_credentials_health_and_binding(self):
+        await self.registry.migrate()
+        device = self.registry.owned()[1]
+        sid = device["id"]
+        await self.coordinator.mark_cooling(sid, 9999999999)
+        before = deepcopy(device)
+        models = deepcopy(self.conf["provider"])
+        for enabled in (False, False, True):
+            with request_context({"source_id": sid, "enabled": enabled}):
+                result = payload(await plugin._handle_provider_update())
+            self.assertEqual(result["provider"]["enabled"], enabled)
+            self.assertEqual(result["provider"]["status"], "cooling")
+            self.assertEqual(device, {**before, "enable": enabled})
+            self.assertEqual(self.conf["provider"], models)
+        await self.registry.edit("OpenAI Subscribe", enabled=False)
+        self.assertFalse(self.coordinator.account_view()["enabled"])
+        self.assertEqual((await self.coordinator.get_snapshot()).account_id, "local")
+        with self.assertRaises(store.ProviderDisabledError):
+            self.registry.ensure_enabled("OpenAI Subscribe")
+
+    async def test_enabled_migration_and_strict_validation(self):
+        self.conf["provider_sources"][0]["enable"] = False
+        await self.registry.migrate()
+        self.assertTrue(all(not s["enable"] for s in self.registry.owned()))
+        del self.registry.owned()[1]["enable"]
+        await self.registry.migrate()
+        self.assertTrue(self.registry.owned()[1]["enable"])
+        self.assertFalse(self.registry.owned()[0]["enable"])
+        before = deepcopy(self.conf)
+        for values in (
+            {"enabled": None},
+            {"enabled": 1},
+            {"enabled": "false"},
+            {"name": None},
+            {},
+            {"enable": False},
+        ):
+            with request_context({"source_id": "OpenAI Subscribe", **values}):
+                response = await plugin._handle_provider_update()
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(self.conf, before)
+
+    async def test_failed_enable_save_keeps_committed_dispatch_policy(self):
+        await self.registry.migrate()
+        sid = "OpenAI Subscribe"
+        await self.registry.edit(sid, enabled=False)
+
+        async def fail_save():
+            self.assertFalse(self.registry.enabled(sid))
+            raise OSError("save failed")
+
+        with (
+            patch.object(self.conf, "save_config_async", new=fail_save),
+            self.assertRaises(store.CredentialPersistenceError),
+        ):
+            await self.registry.edit(sid, enabled=True)
+        self.assertFalse(self.registry.enabled(sid))
+
+    async def test_disabled_source_blocks_loaded_adapter_before_inference(self):
+        await self.registry.migrate()
+        provider = object.__new__(plugin.ProviderOpenAICodex)
+        provider._source_id = "OpenAI Subscribe"
+        provider._request_client = AsyncMock()
+        await self.registry.edit(provider._source_id, enabled=False)
+        with self.assertRaises(store.ProviderDisabledError):
+            _ = [
+                item
+                async for item in provider._stream_with_current_credentials(
+                    {}, None, request_max_retries=1
+                )
+            ]
+        provider._request_client.assert_not_called()
+
+    async def test_disabling_during_refresh_blocks_dispatch(self):
+        await self.registry.migrate()
+        sid = "OpenAI Subscribe"
+        original = self.coordinator.get_snapshot
+
+        async def get_snapshot(*args, **kwargs):
+            snapshot = await original(*args, **kwargs)
+            await self.registry.edit(sid, enabled=False)
+            return snapshot
+
+        provider = object.__new__(plugin.ProviderOpenAICodex)
+        provider._source_id = sid
+        provider._request_client = AsyncMock()
+        with (
+            patch.object(self.coordinator, "get_snapshot", new=get_snapshot),
+            self.assertRaises(store.ProviderDisabledError),
+        ):
+            _ = [
+                item
+                async for item in provider._stream_with_current_credentials(
+                    {}, None, request_max_retries=1
+                )
+            ]
+        provider._request_client.assert_not_called()
+
     async def test_saved_login_keeps_id_when_following_off_or_local_missing(self):
         for follow in (True, False):
             for present in (True, False):
