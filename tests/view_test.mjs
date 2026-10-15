@@ -31,6 +31,19 @@ class Element {
   setAttribute(key, value) {
     this.attributes[key] = value;
   }
+  getAttribute(key) {
+    return key in this.attributes ? this.attributes[key] : null;
+  }
+  removeAttribute(key) {
+    delete this.attributes[key];
+  }
+  focus() {
+    document.activeElement = this;
+    this.focusCount = (this.focusCount || 0) + 1;
+  }
+  select() {
+    this.selected = true;
+  }
   addEventListener(name, handler) {
     (this.handlers ||= {})[name] = handler;
   }
@@ -69,6 +82,8 @@ let pollResult;
 let pollFailure;
 let loginStarts = 0;
 let cancelResponse = null;
+let startResponse = null;
+let contextHandler = null;
 const device = {id: "device", name: "Work", status: "ready", credential_mode: "device_oauth", account_revision: "device-one"};
 let slowUsage = null;
 let deviceBody;
@@ -82,6 +97,7 @@ let deviceUsage = {windows: [{label_seconds: 604800, used_percent: 60}]};
 const editable = ["name", "enabled", "routing_mode"];
 const bridge = {
   ready: async () => ({ locale: "zh-CN" }),
+  onContext: (handler) => { contextHandler = handler; },
   getLocale: () => "zh-CN",
   apiPost: async (endpoint, body) => {
     if (endpoint === "providers/update") {
@@ -108,6 +124,7 @@ const bridge = {
     if (endpoint === "device/start") {
       loginStarts += 1;
       deviceBody = body;
+      if (startResponse) return startResponse;
       return {
         status: "pending",
         session_id: "device-one",
@@ -132,8 +149,23 @@ const document = {
   },
   createElement: (tag) => new Element(tag),
   documentElement: new Element(),
+  body: new Element("body"),
+  activeElement: null,
   addEventListener() {},
+  // Records what a synchronous copy would place on the clipboard.
+  execCommand(command) {
+    if (command !== "copy") return false;
+    copyCommands.push(document.activeElement?.value);
+    return execCopyResult;
+  },
 };
+const copyCommands = [];
+let execCopyResult = true;
+const opened = [];
+let openResult = () => ({ opener: "page" });
+const clipboardWrites = [];
+let clipboardResult = "reject";
+let clipboardHold = null;
 const window = {
   AstrBotPluginPage: bridge,
   setInterval() {},
@@ -141,6 +173,20 @@ const window = {
     return 1;
   },
   clearTimeout() {},
+  open(url, target) {
+    const tab = openResult();
+    opened.push({ url, target, tab });
+    return tab;
+  },
+};
+const navigator = {
+  clipboard: {
+    writeText: async (value) => {
+      clipboardWrites.push(value);
+      if (clipboardResult === "reject") throw new Error("Blocked by permissions policy");
+      if (clipboardResult === "hold") await clipboardHold.promise;
+    },
+  },
 };
 const source = readFileSync(
   new URL("../pages/providers/app.js", import.meta.url),
@@ -148,7 +194,7 @@ const source = readFileSync(
 );
 const page = await vm.runInNewContext(
   `(async () => {${source}\n await queryUsage(); return {queryUsage, startLogin, cancelLogin, closeLogin, poll, selectProvider, openLogin};})()`,
-  { window, document, navigator: {}, console },
+  { window, document, navigator, console, URL },
 );
 const read = (id) => ids.get(id).textContent;
 assert.match(read("usage-result"), /每周.*96%/);
@@ -241,8 +287,8 @@ assert.equal(deviceBody.source_id, undefined);
 await page.cancelLogin();
 pollResult({ status: "success" });
 await pendingLogin;
-assert.equal(read("status"), "已取消登录。");
-assert.equal(ids.get("instructions").hidden, true);
+assert.equal(read("status"), "已取消登录");
+assert.equal(ids.get("device-panel").hidden, true);
 assert.equal(ids.get("cancel").hidden, true);
 // A successful poll must survive a concurrent cancellation rejected by the server.
 page.openLogin("device");
@@ -268,8 +314,11 @@ const listsBeforeExpiry = listCalls;
 pollResult({status: "expired"});
 await expiredLogin;
 await new Promise((resolve) => setImmediate(resolve));
-assert.match(read("error"), /登录会话已失效/);
-assert.equal(ids.get("instructions").hidden, true);
+assert.match(read("status"), /登录会话已失效/);
+assert.equal(ids.get("error").hidden, true, "an expired session is not reported as a failure");
+assert.equal(ids.get("device-panel").hidden, true);
+assert.equal(ids.get("user-code").value, "");
+assert.equal(ids.get("open-verify").getAttribute("href"), null);
 assert.equal(ids.get("cancel").hidden, true);
 assert.equal(ids.get("start").hidden, false);
 assert.ok(listCalls > listsBeforeExpiry);
@@ -304,6 +353,10 @@ for (let attempt = 1; attempt < 5; attempt += 1) {
 }
 assert.match(read("error"), /Network unavailable/);
 assert.equal(ids.get("start").hidden, false);
+// The session may still be authorized, so its code stays and the form does not return.
+assert.equal(ids.get("device-panel").hidden, false);
+assert.equal(ids.get("login-intro").hidden, true);
+assert.equal(ids.get("login-name-field").hidden, true);
 cancelResponse = Promise.reject(new Error("Still saving or network unavailable"));
 await page.closeLogin();
 assert.equal(ids.get("login-dialog").open, true);
@@ -618,4 +671,269 @@ await tick();
 assert.equal(rowFor("Newer device"), undefined, "a stale recovery read must not resurrect a deleted provider");
 bridge.apiPost = originalPost;
 updateHandler = null;
-console.log("View regressions passed: quota windows, provider selection, stale-result isolation, login and cancellation races, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");
+
+// ---------- Device login dialog ----------
+const shown = (id) => !ids.get(id).hidden;
+const dialog = ids.get("login-dialog");
+const startDevice = async (sourceId) => {
+  page.openLogin(sourceId);
+  const pending = page.startLogin();
+  await tick();
+  return [pending];
+};
+device.status = "ready";
+device.email = "old@example.com";
+device.plan_type = "plus";
+cancelResponse = null;
+await page.queryUsage();
+assert.ok(rowFor("Newer device"));
+
+// The add form keeps the optional name with its default; an empty name
+// lets the server apply its own default.
+page.openLogin();
+assert.equal(read("instructions-title"), "新增 Provider");
+assert.equal(ids.get("login-name").value, "ChatGPT");
+assert.ok(shown("login-name-field") && shown("login-intro"));
+assert.equal(read("start"), "获取设备码");
+assert.equal(shown("device-panel"), false);
+ids.get("login-name").value = "   ";
+let waitingLogin = page.startLogin();
+await tick();
+assert.deepEqual({...deviceBody}, {});
+// Waiting: the code and the main open action replace the form.
+assert.ok(shown("device-panel"));
+assert.equal(ids.get("user-code").value, "test-code");
+assert.equal(ids.get("open-verify").getAttribute("href"), "https://example.com/");
+assert.equal(ids.get("verify-url").value, "https://example.com/");
+assert.equal(shown("login-name-field") || shown("login-intro"), false);
+assert.match(read("status"), /输入设备码并确认/);
+assert.equal(ids.get("status-dots").hidden, false);
+assert.ok(shown("cancel") && !shown("start") && !shown("done"));
+
+// Opening uses the server URL from the click itself and drops the opener.
+const openLink = ids.get("open-verify");
+let prevented = 0;
+const clickEvent = (extra = {}) => ({button: 0, preventDefault: () => { prevented += 1; }, ...extra});
+openLink.handlers.click(clickEvent());
+assert.equal(opened.length, 1);
+assert.equal(opened[0].url, "https://example.com/");
+assert.equal(opened[0].target, "_blank");
+assert.equal(opened[0].tab.opener, null);
+assert.equal(prevented, 1);
+// Modified clicks stay with the browser.
+openLink.handlers.click(clickEvent({ctrlKey: true}));
+assert.equal(opened.length, 1);
+assert.equal(prevented, 1);
+// A sandboxed page gets no window back: copy the link instead.
+openResult = () => null;
+openLink.handlers.click(clickEvent());
+await tick();
+assert.equal(copyCommands.at(-1), "https://example.com/");
+assert.match(read("copy-status"), /无法打开新标签页，已复制链接/);
+execCopyResult = false;
+openLink.handlers.click(clickEvent());
+await tick();
+assert.match(read("copy-status"), /请复制链接后在浏览器中打开/);
+execCopyResult = true;
+openResult = () => ({ opener: "page" });
+
+// Copying the code or the link reports which one was copied.
+await ids.get("copy-code").handlers.click();
+await tick();
+assert.equal(copyCommands.at(-1), "test-code");
+assert.equal(read("copy-code"), "已复制");
+assert.equal(read("copy-status"), "设备码已复制。");
+await ids.get("copy-url").handlers.click();
+await tick();
+assert.equal(copyCommands.at(-1), "https://example.com/");
+assert.match(read("copy-status"), /链接已复制/);
+// Without a synchronous copy the Clipboard API is the fallback; when both
+// fail the value is selected for manual copying.
+execCopyResult = false;
+clipboardResult = "resolve";
+await ids.get("copy-code").handlers.click();
+await tick();
+assert.equal(clipboardWrites.at(-1), "test-code");
+assert.equal(read("copy-status"), "设备码已复制。");
+clipboardResult = "reject";
+ids.get("user-code").selected = false;
+await ids.get("copy-code").handlers.click();
+await tick();
+assert.match(read("copy-status"), /复制失败/);
+assert.equal(ids.get("user-code").selected, true);
+execCopyResult = true;
+// A copy that settles after the code was replaced reports nothing.
+execCopyResult = false;
+clipboardResult = "hold";
+clipboardHold = deferred();
+const slowCopy = ids.get("copy-code").handlers.click();
+await tick();
+pollResult({status: "pending"});
+await waitingLogin;
+startResponse = {status: "pending", session_id: "device-fresh", interval: 5, user_code: "fresh-code", verify_url: "https://example.com"};
+waitingLogin = page.startLogin();
+await tick();
+startResponse = null;
+assert.equal(ids.get("user-code").value, "fresh-code");
+assert.equal(read("copy-status"), "");
+clipboardHold.resolve();
+await slowCopy;
+await tick();
+assert.equal(read("copy-status"), "", "a late copy result must not describe the new code");
+assert.equal(read("copy-code"), "复制");
+execCopyResult = true;
+clipboardResult = "reject";
+// Continue with the fresh session, as the server would.
+pollResult({status: "pending"});
+await waitingLogin;
+waitingLogin = page.poll("device-fresh", 5);
+
+// A transient poll failure keeps the code and says it is retrying.
+pollFailure(new Error("Network unavailable"));
+await waitingLogin;
+assert.ok(shown("device-panel"));
+assert.match(read("status"), /连接暂时中断，正在重试/);
+// Saving: the code and the cancel action go away, closing is held back
+// because the server refuses to cancel now, and no cancel is sent.
+let savingPoll = page.poll("device-fresh", 5);
+pollResult({status: "saving"});
+await savingPoll;
+assert.match(read("status"), /已授权，正在保存 Provider/);
+assert.equal(shown("device-panel"), false);
+assert.equal(shown("cancel") || shown("start") || shown("done"), false);
+assert.equal(ids.get("close-login").disabled, true);
+let cancelCalls = 0;
+bridge.apiPost = async (endpoint, body) => {
+  if (endpoint === "device/cancel") cancelCalls += 1;
+  return originalPost(endpoint, body);
+};
+await page.closeLogin();
+assert.equal(dialog.open, true);
+assert.equal(cancelCalls, 0);
+// Repeated poll failures while saving never bring back an obsolete code.
+for (let attempt = 0; attempt < 5; attempt += 1) {
+  const failedPoll = page.poll("device-fresh", 5);
+  pollFailure(new Error("Network unavailable"));
+  await failedPoll;
+}
+assert.match(read("error"), /Network unavailable/);
+assert.equal(shown("device-panel") || shown("cancel") || shown("start"), false);
+// Closing now asks the server; a refused cancel (409) keeps the session.
+cancelResponse = Promise.reject(new Error("授权已完成，正在保存或已保存 Provider，请等待登录结果。"));
+await page.closeLogin();
+assert.equal(dialog.open, true);
+assert.equal(cancelCalls, 1);
+assert.match(read("error"), /正在保存或已保存/);
+cancelResponse = null;
+bridge.apiPost = originalPost;
+
+// Success: the saved provider comes from a list requested after the login,
+// never from the list already on the page.
+device.email = "work@example.com";
+listGate = deferred();
+savingPoll = page.poll("device-fresh", 5);
+pollResult({status: "success", source_id: "device"});
+await savingPoll;
+assert.equal(read("status"), "Provider 已保存");
+assert.match(read("status-detail"), /模型配置/);
+assert.equal(ids.get("error").hidden, true);
+assert.ok(shown("done") && !shown("start") && !shown("cancel"));
+assert.equal(ids.get("close-login").disabled, false);
+assert.equal(shown("saved-provider"), false, "no provider is shown from a list older than the login");
+const savedGate = listGate;
+listGate = null;
+savedGate.resolve();
+await tick();
+await tick();
+assert.ok(shown("saved-provider"));
+assert.equal(read("saved-name"), "Newer device");
+assert.equal(read("saved-sub"), "work@example.com · ChatGPT Plus");
+// Done closes the dialog and reveals the saved provider.
+await page.selectProvider("local");
+ids.get("done").handlers.click();
+await tick();
+await tick();
+assert.equal(dialog.open, false);
+assert.equal(read("source-name"), "Newer device");
+assert.match(rowFor("Newer device").className, /selected open/);
+assert.equal(document.activeElement, rowFor("Newer device").children[0]);
+
+// Missing account details are not guessed.
+const savedEmail = device.email;
+delete device.email;
+device.plan_type = "mystery";
+[waitingLogin] = await startDevice("device");
+assert.match(read("login-intro"), /为「Newer device」重新登录 ChatGPT/);
+assert.equal(shown("login-name-field"), false);
+assert.deepEqual({...deviceBody}, {source_id: "device"});
+pollResult({status: "success", source_id: "device"});
+await waitingLogin;
+await tick();
+assert.equal(read("status-detail"), "登录凭据已更新。");
+assert.ok(shown("saved-provider"));
+assert.equal(shown("saved-sub"), false);
+await page.closeLogin();
+assert.equal(dialog.open, false, "closing after success completes the login");
+device.email = savedEmail;
+device.plan_type = "plus";
+
+// An expired device code offers a new code; a server error offers a retry.
+[waitingLogin] = await startDevice();
+pollResult({status: "timeout"});
+await waitingLogin;
+assert.equal(read("status"), "设备码已过期");
+assert.equal(read("start"), "重新获取设备码");
+assert.ok(shown("start") && !shown("cancel") && !shown("device-panel"));
+assert.equal(ids.get("error").hidden, true);
+waitingLogin = page.startLogin();
+await tick();
+pollResult({status: "error", error: "OpenAI rejected the code"});
+await waitingLogin;
+assert.match(read("error"), /OpenAI rejected the code/);
+assert.equal(read("start"), "重新登录");
+assert.ok(shown("start") && shown("login-name-field") && !shown("cancel") && !shown("device-panel"));
+// A rejected start request is recoverable from the same form.
+startResponse = {status: "error", message: "设备登录会话已达上限，请稍后重试"};
+await page.startLogin();
+assert.match(read("error"), /会话已达上限/);
+assert.equal(ids.get("start").disabled, false);
+assert.equal(ids.get("login-name").disabled, false);
+startResponse = null;
+waitingLogin = page.startLogin();
+await tick();
+assert.equal(ids.get("error").hidden, true);
+assert.ok(shown("device-panel"));
+// An unsafe verification URL is never linked.
+pollResult({status: "pending"});
+await waitingLogin;
+startResponse = {status: "pending", session_id: "device-two", interval: 5, user_code: "next-code", verify_url: "javascript:alert(1)"};
+cancelResponse = {status: "cancelled"};
+waitingLogin = page.startLogin();
+await tick();
+assert.equal(ids.get("user-code").value, "next-code");
+assert.equal(ids.get("open-verify").getAttribute("href"), null);
+assert.equal(shown("open-verify") || shown("verify-row"), false);
+// The previous session's late result cannot affect the new one.
+startResponse = null;
+const latePoll = page.poll("device-one", 5);
+pollResult({status: "success", source_id: "device"});
+await latePoll;
+assert.equal(ids.get("user-code").value, "next-code");
+assert.match(read("status"), /输入设备码并确认/);
+
+// Labels and states follow a locale change while the dialog is open.
+page.openLogin();
+[waitingLogin] = await startDevice();
+contextHandler({locale: "en-US"});
+assert.equal(read("open-verify-label"), "Open OpenAI authorization page");
+assert.equal(read("code-label"), "Device code");
+assert.equal(read("copy-url"), "Copy link");
+assert.equal(read("cancel"), "Cancel login");
+assert.match(read("status"), /Enter the code on the OpenAI page/);
+assert.equal(ids.get("verify-url").attributes["aria-label"], "OpenAI authorization link");
+contextHandler({locale: "zh-CN"});
+assert.match(read("status"), /输入设备码并确认/);
+await page.closeLogin();
+assert.equal(dialog.open, false);
+cancelResponse = null;
+console.log("View regressions passed: device login dialog (open, copy, saving, success, done, failure recovery), quota windows, provider selection, stale-result isolation, login and cancellation races, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");

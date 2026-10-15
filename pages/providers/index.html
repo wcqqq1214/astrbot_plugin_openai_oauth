@@ -91,7 +91,7 @@
 
     <dialog id="login-dialog" aria-labelledby="instructions-title">
       <div class="dialog-heading">
-        <h2 id="instructions-title">设备码登录</h2>
+        <h2 id="instructions-title">新增 Provider</h2>
         <button id="close-login" class="icon-button" type="button" aria-label="关闭">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
@@ -101,38 +101,53 @@
       <div class="dialog-body">
         <p id="login-intro" class="dialog-intro"></p>
         <div id="login-name-field" class="field">
-          <label id="login-name-label" for="login-name">Provider 名称</label>
-          <input id="login-name" class="text-input" type="text" maxlength="80" value="ChatGPT" autocomplete="off" />
+          <label for="login-name">
+            <span id="login-name-label">Provider 名称</span>
+            <span id="login-name-optional" class="field-optional">可选</span>
+          </label>
+          <input id="login-name" class="text-input" type="text" maxlength="80" value="ChatGPT" placeholder="ChatGPT" autocomplete="off" />
         </div>
-        <ol id="instructions" class="steps" hidden>
-          <li>
-            <label id="open-label" for="verify-url"></label>
-            <div class="copy-row">
-              <input id="verify-url" type="text" readonly />
-              <button id="copy-url" class="button small" type="button"></button>
-            </div>
-          </li>
-          <li>
-            <label id="code-label" for="user-code"></label>
-            <div class="copy-row code-row">
-              <input id="user-code" class="device-code" type="text" readonly />
-              <button id="copy-code" class="button small" type="button"></button>
-            </div>
-          </li>
-          <li>
-            <span id="confirm-label" class="step-label"></span>
-          </li>
-        </ol>
-        <p class="login-status">
-          <span id="status" role="status"></span>
+        <!-- Shown while a device code is waiting for authorization. -->
+        <section id="device-panel" class="device-panel" aria-labelledby="code-label" hidden>
+          <p id="code-label" class="device-label">设备码</p>
+          <div class="copy-row code-row">
+            <input id="user-code" class="device-code" type="text" readonly spellcheck="false" aria-labelledby="code-label" />
+            <button id="copy-code" class="button small" type="button" aria-describedby="code-label">复制</button>
+          </div>
+          <a id="open-verify" class="button primary block" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">
+            <span id="open-verify-label">打开 OpenAI 授权页</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M14 5h5v5M19 5l-8 8" />
+              <path d="M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4" />
+            </svg>
+          </a>
+          <div id="verify-row" class="link-row">
+            <input id="verify-url" type="text" readonly spellcheck="false" aria-label="授权链接" />
+            <button id="copy-url" class="link-button" type="button">复制链接</button>
+          </div>
+          <p id="copy-status" class="copy-status" role="status"></p>
+        </section>
+        <div id="login-state" class="login-state" role="status">
+          <span id="state-icon" class="state-icon" aria-hidden="true"></span>
+          <span class="state-copy">
+            <strong id="status"></strong>
+            <span id="status-detail" class="state-detail"></span>
+          </span>
           <span id="status-dots" class="quiet-dots" aria-hidden="true" hidden><i></i><i></i><i></i></span>
-        </p>
-        <p id="copy-status" class="copy-status" role="status"></p>
+        </div>
+        <div id="saved-provider" class="saved-provider" hidden>
+          <span class="provider-icon" aria-hidden="true"><span class="openai-icon"></span></span>
+          <span class="saved-copy">
+            <strong id="saved-name" class="saved-name"></strong>
+            <span id="saved-sub" class="saved-sub" hidden></span>
+          </span>
+        </div>
         <p id="error" class="error" role="alert" hidden></p>
       </div>
       <div class="actions">
-        <button id="cancel" class="button quiet" type="button" hidden></button>
-        <button id="start" class="button primary" type="button" autofocus></button>
+        <button id="cancel" class="button quiet" type="button" hidden>取消登录</button>
+        <button id="start" class="button primary" type="button" autofocus>获取设备码</button>
+        <button id="done" class="button primary" type="button" hidden>完成</button>
       </div>
     </dialog>
     <script type="module" src="./app.js"></script>

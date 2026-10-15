@@ -90,27 +90,41 @@ const strings = {
       `The subscription quota is cooling down until ${when}.`,
     denied: "The service reports this allowance is currently unavailable.",
     close: "Close",
-    intro:
-      "Sign in to ChatGPT with a device code.",
-    open: "Open the verification URL in a new tab",
-    code: "Enter this device code",
-    confirm: "Confirm on the OpenAI page. This dialog updates automatically.",
-    copyUrl: "Copy URL",
+    intro: "Sign in to a ChatGPT account with a device code.",
+    introRenew: (name) =>
+      `Sign in to ChatGPT again for ${name}. Its name and settings stay the same.`,
+    optional: "Optional",
+    codeLabel: "Device code",
+    openVerify: "Open OpenAI authorization page",
+    verifyLink: "OpenAI authorization link",
+    copyUrl: "Copy link",
     copyCode: "Copy",
     copiedShort: "Copied",
-    copied: "Copied. Open a new browser tab to continue.",
-    copyFailed: "Copy failed. Select the value and copy it manually.",
-    start: "Start login",
+    copiedCode: "Device code copied.",
+    copiedUrl: "Link copied. Open it in any browser or account.",
+    copyFailed: "Copy failed. Select the text and copy it manually.",
+    openBlocked:
+      "This page cannot open new tabs. The link was copied; paste it into your browser.",
+    openBlockedManual:
+      "This page cannot open new tabs. Copy the link and open it in your browser.",
+    start: "Get device code",
+    restartCode: "Get a new code",
     restart: "Log in again",
     cancel: "Cancel login",
-    cancelled: "Login was cancelled.",
-    waiting: "Waiting for authorization",
+    done: "Done",
+    requesting: "Getting a device code",
+    waiting: "Enter the code on the OpenAI page and confirm",
     retrying: "Connection interrupted. Retrying",
-    success:
-      "Provider saved. Select this source in AstrBot model settings to use it.",
+    savingLogin: "Authorized. Saving the provider",
+    success: "Provider saved",
+    successDetail: "Select it in AstrBot model settings to use it.",
+    renewedDetail: "Its sign-in has been updated.",
+    cancelled: "Login cancelled",
     failedLogin: "Login failed.",
-    expired: "The device code expired. Please start again.",
-    sessionExpired: "The sign-in session expired. Check the provider list or sign in again.",
+    expired: "The device code expired",
+    sessionExpired: "The sign-in session expired",
+    sessionExpiredDetail:
+      "If you already authorized, check the provider list. Otherwise, sign in again.",
   },
   zh: {
     title: "Providers",
@@ -193,26 +207,37 @@ const strings = {
     coolingUntil: (when) => `订阅额度冷却中，预计 ${when} 恢复。`,
     denied: "服务端返回当前额度不可用。",
     close: "关闭",
-    intro:
-      "使用设备码登录 ChatGPT。",
-    open: "在新标签页打开验证网址",
-    code: "输入下面的设备码",
-    confirm: "在 OpenAI 页面确认授权，完成后这里会自动更新。",
-    copyUrl: "复制网址",
+    intro: "使用设备码登录 ChatGPT 账号。",
+    introRenew: (name) => `为「${name}」重新登录 ChatGPT，名称和设置保持不变。`,
+    optional: "可选",
+    codeLabel: "设备码",
+    openVerify: "打开 OpenAI 授权页",
+    verifyLink: "授权链接",
+    copyUrl: "复制链接",
     copyCode: "复制",
     copiedShort: "已复制",
-    copied: "已复制，请在浏览器新标签页中继续。",
+    copiedCode: "设备码已复制。",
+    copiedUrl: "链接已复制，可在其他浏览器或账号中打开。",
     copyFailed: "复制失败，请手动选择并复制。",
-    start: "开始登录",
+    openBlocked: "当前页面无法打开新标签页，已复制链接，请粘贴到浏览器中打开。",
+    openBlockedManual: "当前页面无法打开新标签页，请复制链接后在浏览器中打开。",
+    start: "获取设备码",
+    restartCode: "重新获取设备码",
     restart: "重新登录",
     cancel: "取消登录",
-    cancelled: "已取消登录。",
-    waiting: "等待授权",
+    done: "完成",
+    requesting: "正在获取设备码",
+    waiting: "在 OpenAI 授权页输入设备码并确认",
     retrying: "连接暂时中断，正在重试",
-    success: "Provider 已保存。请在 AstrBot 模型配置中选择此来源。",
+    savingLogin: "已授权，正在保存 Provider",
+    success: "Provider 已保存",
+    successDetail: "在 AstrBot 模型配置中选择它即可使用。",
+    renewedDetail: "登录凭据已更新。",
+    cancelled: "已取消登录",
     failedLogin: "登录失败。",
-    expired: "设备码已过期，请重新开始登录。",
-    sessionExpired: "登录会话已失效，请检查 Provider 列表或重新登录。",
+    expired: "设备码已过期",
+    sessionExpired: "登录会话已失效",
+    sessionExpiredDetail: "如已完成授权，请在列表中确认；否则请重新登录。",
   },
 };
 
@@ -224,8 +249,15 @@ const accountStatus = byId("account-status");
 const usageResult = byId("usage-result");
 const quotaPolicy = byId("quota-policy");
 const notice = byId("notice");
-const instructions = byId("instructions");
 const loginIntro = byId("login-intro");
+const loginNameInput = byId("login-name");
+const devicePanel = byId("device-panel");
+const openVerifyLink = byId("open-verify");
+const loginState = byId("login-state");
+const stateIcon = byId("state-icon");
+const statusDetail = byId("status-detail");
+const savedProvider = byId("saved-provider");
+const doneButton = byId("done");
 const verifyUrl = byId("verify-url");
 const userCode = byId("user-code");
 const copyUrlButton = byId("copy-url");
@@ -260,6 +292,10 @@ const providerIcons = {
   device_oauth: '<span class="openai-icon"></span>',
 };
 const chevronIcon = '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>';
+const stateIcons = {
+  ok: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.2 12.4l2.6 2.6 5-5.2"/></svg>',
+  warn: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.6v5.2M12 16.4h.01"/></svg>',
+};
 // Rows persist across refreshes and are updated in place, so the detail
 // editor (and a name being typed in it) is never detached by a re-render.
 const rowNodes = new Map();
@@ -288,7 +324,27 @@ let lastUsage = null;
 let usageMessage = "loading";
 let shownRevision = null;
 let lastUpdated = null;
-let startLabel = "start";
+// Login dialog view. `activeSessionId` stays the only signal that a server
+// session may still finish; `phase` decides what the dialog shows.
+const login = {
+  // idle | requesting | waiting | saving | success | timeout | expired | cancelled | failed
+  phase: "idle",
+  url: "",
+  code: "",
+  error: "",
+  note: "",
+  retrying: false,
+  // The server reported that authorization finished and is being saved.
+  saving: false,
+  savedId: null,
+  // Provider-list request sequence when the login succeeded. The saved
+  // provider is shown only from a list requested after that point.
+  listAfter: 0,
+};
+const formPhases = ["idle", "requesting", "timeout", "expired", "cancelled", "failed"];
+const copyTimers = new Map();
+let listRequestSeq = 0;
+let listedSeq = 0;
 // Provider writes. Each source has one promise chain so its updates reach the
 // server in order. `pendingChanges` holds the values the user asked for while
 // they are queued or in flight; `providers` only holds server-confirmed state.
@@ -319,42 +375,22 @@ function applyLocale(locale) {
     "delete-provider": t.remove,
     "open-login": t.renew,
     "login-name-label": t.name,
+    "login-name-optional": t.optional,
     privacy: t.privacy,
-    "login-intro": t.intro,
-    "open-label": t.open,
-    "code-label": t.code,
-    "confirm-label": t.confirm,
+    "code-label": t.codeLabel,
+    "open-verify-label": t.openVerify,
     "copy-url": t.copyUrl,
     "copy-code": t.copyCode,
-    cancel: t.cancel,
-    start: t[startLabel],
   }))
     byId(id).textContent = value;
   closeButton.setAttribute("aria-label", t.close);
+  verifyUrl.setAttribute("aria-label", t.verifyLink);
   usageButton.setAttribute("aria-label", t.refresh);
   usageButton.setAttribute("title", t.refresh);
   byId("updated").setAttribute("title", t.automatic);
 }
 
 applyLocale(context?.locale || bridge.getLocale());
-
-function setStartLabel(key) {
-  startLabel = key;
-  startButton.textContent = t[key];
-}
-
-function setStatus(message, busy = false) {
-  status.textContent = message;
-  statusDots.hidden = !busy;
-  error.hidden = true;
-}
-
-function showInstructions(visible) {
-  instructions.hidden = !visible;
-  loginIntro.hidden = visible;
-  // The name only matters before a session starts.
-  byId("login-name-field").hidden = visible || Boolean(loginSourceId);
-}
 
 function clearPollTimer() {
   if (pollTimer !== null) {
@@ -369,26 +405,6 @@ function schedulePoll(sessionId, intervalSeconds) {
     () => void poll(sessionId, intervalSeconds),
     intervalSeconds * 1000,
   );
-}
-
-function finishSession() {
-  activeSessionId = null;
-  byId("login-name").disabled = false;
-  cancelButton.hidden = true;
-  startButton.hidden = false;
-}
-
-function showError(message, terminal = true) {
-  clearPollTimer();
-  setStatus("");
-  error.hidden = false;
-  error.textContent = message || t.failedLogin;
-  startButton.disabled = false;
-  startButton.hidden = false;
-  setStartLabel("restart");
-  if (terminal) {
-    finishSession();
-  }
 }
 
 function resetSeconds(timestamp, after) {
@@ -778,6 +794,8 @@ function renderProviders() {
     current.some((child, index) => child !== order[index])
   )
     providerList.replaceChildren(...order);
+  // The login result card reads the saved provider from this list.
+  if (login.phase === "success") renderLogin();
 }
 
 async function selectProvider(id) {
@@ -817,10 +835,12 @@ async function queryUsage() {
     if (!lastUsage) showUsageMessage("loading");
     const since = mutationSeq;
     try {
+      const listed = ++listRequestSeq;
       const list = await bridge.apiPost("providers/list", {});
       if (generation !== viewGeneration) return;
       if (!Array.isArray(list?.providers)) throw new Error(t.listFailed);
       providers = list.providers.map((p) => keepNewerEdits(p, since));
+      listedSeq = Math.max(listedSeq, listed);
       byId("page-error").hidden = true;
       if (!providers.some((p) => p.id === selectedSourceId)) {
         selectedSourceId = providers[0]?.id || null;
@@ -969,10 +989,12 @@ async function reloadProviders() {
   const since = mutationSeq;
   const generation = viewGeneration;
   try {
+    const listed = ++listRequestSeq;
     const list = await bridge.apiPost("providers/list", {});
     if (generation !== viewGeneration) return;
     if (!Array.isArray(list?.providers)) return;
     providers = list.providers.map((p) => keepNewerEdits(p, since));
+    listedSeq = Math.max(listedSeq, listed);
     const selected = providers.find((p) => p.id === selectedSourceId);
     if (!selected) {
       await queryUsage();
@@ -1037,6 +1059,7 @@ function rerender() {
     showUsageMessage(usageMessage);
   }
   renderUpdated();
+  renderLogin();
 }
 
 bridge.onContext?.((next) => {
@@ -1046,27 +1069,182 @@ bridge.onContext?.((next) => {
   rerender();
 });
 
+function safeVerifyUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "https:" ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function loginStateView() {
+  switch (login.phase) {
+    case "requesting":
+      return { tone: "busy", title: t.requesting };
+    case "waiting":
+      return { tone: "busy", title: login.retrying ? t.retrying : t.waiting };
+    case "saving":
+      return { tone: "busy", title: login.retrying ? t.retrying : t.savingLogin };
+    case "success":
+      return {
+        tone: "ok",
+        title: t.success,
+        detail: loginSourceId ? t.renewedDetail : t.successDetail,
+      };
+    case "timeout":
+      return { tone: "warn", title: t.expired };
+    case "expired":
+      return { tone: "warn", title: t.sessionExpired, detail: t.sessionExpiredDetail };
+    case "cancelled":
+      return { tone: "", title: t.cancelled };
+    default:
+      return { tone: "", title: "" };
+  }
+}
+
+function savedLoginProvider() {
+  if (login.phase !== "success" || listedSeq <= login.listAfter) return null;
+  return providers.find((p) => p.id === login.savedId) || null;
+}
+
+// Render the whole dialog from `login` and the session flags.
+function renderLogin() {
+  const { phase } = login;
+  const live = Boolean(activeSessionId);
+  const renewing = Boolean(loginSourceId);
+  const target = renewing ? providers.find((p) => p.id === loginSourceId) : null;
+  byId("instructions-title").textContent = renewing ? t.renew : t.add;
+  const showForm = !live && formPhases.includes(phase);
+  loginIntro.hidden = !showForm;
+  loginIntro.textContent = renewing
+    ? t.introRenew(target ? providerName(target) : loginSourceId)
+    : t.intro;
+  byId("login-name-field").hidden = !showForm || renewing;
+  loginNameInput.disabled = phase === "requesting";
+
+  // The code stays visible after a recoverable failure: the session may
+  // still be authorized from a tab that is already open.
+  const showCode =
+    live && !login.saving && ["waiting", "failed"].includes(phase) && Boolean(login.code);
+  devicePanel.hidden = !showCode;
+  userCode.value = showCode ? login.code : "";
+  const url = showCode ? safeVerifyUrl(login.url) : "";
+  verifyUrl.value = url;
+  if (url) openVerifyLink.setAttribute("href", url);
+  else openVerifyLink.removeAttribute("href");
+  openVerifyLink.hidden = !url;
+  byId("verify-row").hidden = !url;
+  copyStatus.textContent = showCode ? login.note : "";
+
+  const state = loginStateView();
+  loginState.className = "login-state" + (state.tone ? ` ${state.tone}` : "");
+  status.textContent = state.title;
+  statusDetail.textContent = state.detail || "";
+  statusDetail.hidden = !state.detail;
+  statusDots.hidden = state.tone !== "busy";
+  stateIcon.innerHTML = stateIcons[state.tone] || "";
+  stateIcon.hidden = !stateIcons[state.tone];
+
+  const saved = savedLoginProvider();
+  savedProvider.hidden = !saved;
+  if (saved) {
+    byId("saved-name").textContent = providerName(saved);
+    const plan = plans[saved.plan_type];
+    const sub = [saved.email, plan && `ChatGPT ${plan}`].filter(Boolean).join(" · ");
+    byId("saved-sub").textContent = sub;
+    byId("saved-sub").hidden = !sub;
+  }
+
+  error.textContent = login.error;
+  error.hidden = !login.error;
+
+  // A cancel is refused while the server saves, so it is not offered then.
+  cancelButton.textContent = t.cancel;
+  cancelButton.hidden = !live || login.saving;
+  cancelButton.disabled = cancelling;
+  startButton.textContent =
+    phase === "idle" || phase === "requesting"
+      ? t.start
+      : phase === "timeout"
+        ? t.restartCode
+        : t.restart;
+  startButton.hidden = !formPhases.includes(phase) || (live && login.saving);
+  startButton.disabled = phase === "requesting";
+  doneButton.textContent = t.done;
+  doneButton.hidden = phase !== "success";
+  closeButton.disabled = phase === "requesting" || phase === "saving";
+  focusLoginAction();
+}
+
+// Keep keyboard focus inside the dialog when the focused control disappears.
+function focusLoginAction() {
+  if (!loginDialog.open) return;
+  const active = document.activeElement;
+  const unusable = (node) =>
+    !node || node.hidden || node.disabled || Boolean(node.closest?.("[hidden]"));
+  if (active && active !== document.body && !unusable(active)) return;
+  const next = [openVerifyLink, doneButton, startButton].find(
+    (node) => !unusable(node) && (node !== openVerifyLink || node.getAttribute("href")),
+  );
+  next?.focus?.();
+}
+
+function resetLogin(phase) {
+  for (const [button, key] of [[copyUrlButton, "copyUrl"], [copyCodeButton, "copyCode"]]) {
+    window.clearTimeout(copyTimers.get(button));
+    button.textContent = t[key];
+  }
+  Object.assign(login, {
+    phase,
+    url: "",
+    code: "",
+    error: "",
+    note: "",
+    retrying: false,
+    saving: false,
+  });
+}
+
+// A server-reported login failure ends the session; a transport failure
+// (`terminal` false) keeps it so a cancel or a later poll can settle it.
+function failLogin(message, terminal) {
+  clearPollTimer();
+  if (terminal) {
+    activeSessionId = null;
+    login.saving = false;
+  }
+  login.phase = "failed";
+  login.retrying = false;
+  login.error = message || t.failedLogin;
+  renderLogin();
+}
+
 function finishSuccess(sourceId) {
   clearPollTimer();
-  finishSession();
-  setStatus(t.success);
-  startButton.disabled = false;
-  setStartLabel("restart");
-  showInstructions(false);
-  verifyUrl.value = "";
-  userCode.value = "";
-  startButton.hidden = true;
-  byId("login-name").disabled = false;
-  void openProvider(sourceId || selectedSourceId);
+  activeSessionId = null;
+  resetLogin("success");
+  login.savedId = sourceId || loginSourceId || null;
+  login.listAfter = listRequestSeq;
+  renderLogin();
+  if (login.savedId) void openProvider(login.savedId);
+  else void refreshAccountUsage();
+}
+
+function finishTimeout() {
+  clearPollTimer();
+  activeSessionId = null;
+  resetLogin("timeout");
+  renderLogin();
 }
 
 function finishExpiredSession() {
-  showError(t.sessionExpired);
-  showInstructions(false);
-  verifyUrl.value = "";
-  userCode.value = "";
+  clearPollTimer();
+  activeSessionId = null;
+  resetLogin("expired");
+  renderLogin();
   // A lost terminal response may have followed a successful provider save.
-  void queryUsage();
+  void refreshAccountUsage();
 }
 
 async function poll(sessionId, intervalSeconds) {
@@ -1088,23 +1266,29 @@ async function poll(sessionId, intervalSeconds) {
       return;
     }
     if (result.status === "timeout") {
-      showError(t.expired);
+      finishTimeout();
       return;
     }
     if (result.status === "error") {
-      showError(result.error || t.failedLogin);
+      failLogin(result.error || t.failedLogin, true);
       return;
     }
-    setStatus(t.waiting, true);
+    if (result.status === "saving") login.saving = true;
+    login.phase = login.saving ? "saving" : "waiting";
+    login.retrying = false;
+    login.error = "";
+    renderLogin();
     schedulePoll(sessionId, intervalSeconds);
   } catch (reason) {
     if (activeSessionId !== sessionId || cancelling) return;
     consecutivePollFailures += 1;
     if (consecutivePollFailures >= maxConsecutivePollFailures) {
-      showError(reason?.message || t.failedLogin, false);
+      failLogin(reason?.message || t.failedLogin, false);
       return;
     }
-    setStatus(t.retrying, true);
+    login.phase = login.saving ? "saving" : "waiting";
+    login.retrying = true;
+    renderLogin();
     schedulePoll(sessionId, intervalSeconds);
   }
 }
@@ -1114,39 +1298,29 @@ async function startLogin() {
     await cancelLogin();
     if (activeSessionId) return;
   }
-  closeButton.disabled = true;
   clearPollTimer();
   consecutivePollFailures = 0;
-  startButton.disabled = true;
-  setStartLabel("start");
-  error.hidden = true;
-  showInstructions(false);
-  copyStatus.textContent = "";
-  setStatus(t.waiting, true);
-
+  resetLogin("requesting");
+  login.savedId = null;
+  renderLogin();
+  const name = loginNameInput.value.trim();
   try {
-    byId("login-name").disabled = true;
-    const result = await bridge.apiPost("device/start", loginSourceId
-      ? { source_id: loginSourceId }
-      : { name: byId("login-name").value.trim() });
-    if (result.status !== "pending") {
-      throw new Error(result.message || t.failedLogin);
+    // An empty name lets the server apply its default.
+    const body = loginSourceId ? { source_id: loginSourceId } : name ? { name } : {};
+    const result = await bridge.apiPost("device/start", body);
+    if (result?.status !== "pending") {
+      throw new Error(result?.message || t.failedLogin);
     }
     activeSessionId = result.session_id;
-    startButton.hidden = true;
-    startButton.disabled = false;
-    cancelButton.hidden = false;
-    showInstructions(true);
-    verifyUrl.value = result.verify_url;
-    userCode.value = result.user_code;
-    setStatus(t.waiting, true);
-    closeButton.disabled = false;
+    Object.assign(login, {
+      phase: "waiting",
+      url: result.verify_url,
+      code: result.user_code,
+    });
+    renderLogin();
     await poll(result.session_id, Math.max(2, Number(result.interval) || 5));
   } catch (reason) {
-    showError(reason?.message || t.failedLogin, false);
-  } finally {
-    closeButton.disabled = false;
-    if (!activeSessionId) byId("login-name").disabled = false;
+    failLogin(reason?.message || t.failedLogin, false);
   }
 }
 
@@ -1155,7 +1329,7 @@ async function cancelLogin() {
     return;
   }
   cancelling = true;
-  cancelButton.disabled = true;
+  renderLogin();
   const sessionId = activeSessionId;
   try {
     const result = await bridge.apiPost("device/cancel", { session_id: sessionId });
@@ -1165,65 +1339,130 @@ async function cancelLogin() {
       return;
     }
     clearPollTimer();
-    finishSession();
-    showInstructions(false);
-    setStatus(t.cancelled);
-    startButton.disabled = false;
-    setStartLabel("restart");
+    activeSessionId = null;
+    resetLogin("cancelled");
   } catch (reason) {
+    // Saving may already be under way (HTTP 409) or the request was lost:
+    // keep the session and let polling report how it ends.
     if (activeSessionId !== sessionId) return;
-    showError(reason?.message || t.failedLogin, false);
+    failLogin(reason?.message || t.failedLogin, false);
     schedulePoll(activeSessionId, 2);
   } finally {
-    cancelButton.disabled = false;
     cancelling = false;
+    renderLogin();
   }
 }
 
-async function copyField(field, button) {
+// Copy synchronously first: that keeps the click's user activation, which
+// sandboxed plugin pages need, while the async Clipboard API is often
+// blocked there by permissions policy.
+async function copyText(field) {
+  const value = field.value;
+  if (!value) return false;
+  const previous = document.activeElement;
+  let copied = false;
   try {
-    if (window.isSecureContext && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(field.value);
-    } else {
-      field.focus();
-      field.select();
-      field.setSelectionRange(0, field.value.length);
-      if (!document.execCommand("copy")) {
-        throw new Error("Copy command was rejected.");
-      }
-    }
-    copyStatus.textContent = t.copied;
-    const label = button === copyUrlButton ? "copyUrl" : "copyCode";
-    button.textContent = t.copiedShort;
-    window.setTimeout(() => {
-      button.textContent = t[label];
-    }, 1600);
+    field.focus?.({ preventScroll: true });
+    field.select?.();
+    field.setSelectionRange?.(0, value.length);
+    copied = document.execCommand?.("copy") === true;
   } catch {
-    field.focus();
-    field.select();
-    copyStatus.textContent = t.copyFailed;
+    copied = false;
+  } finally {
+    if (previous && previous !== field) previous.focus?.({ preventScroll: true });
   }
+  if (!copied && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      copied = true;
+    } catch {
+      copied = false;
+    }
+  }
+  return copied;
+}
+
+function flashCopied(button) {
+  const key = button === copyUrlButton ? "copyUrl" : "copyCode";
+  button.textContent = t.copiedShort;
+  window.clearTimeout(copyTimers.get(button));
+  copyTimers.set(
+    button,
+    window.setTimeout(() => {
+      button.textContent = t[key];
+    }, 1600),
+  );
+}
+
+async function copyField(field, button, messages = {}) {
+  const sessionId = activeSessionId;
+  const copied = await copyText(field);
+  // The session may have ended while the clipboard call was pending.
+  if (activeSessionId !== sessionId || devicePanel.hidden) return;
+  if (copied) {
+    login.note = messages.copied || (field === userCode ? t.copiedCode : t.copiedUrl);
+    if (button) flashCopied(button);
+  } else {
+    login.note = messages.failed || t.copyFailed;
+    field.focus?.();
+    field.select?.();
+  }
+  copyStatus.textContent = login.note;
+}
+
+// Open the server-provided URL from the click itself. A sandboxed plugin
+// page without popup permission gets null back, so copy the link instead.
+function openVerification(event) {
+  const url = openVerifyLink.getAttribute("href");
+  if (!url) return;
+  // Leave modified clicks (new window, background tab) to the browser.
+  if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  let opened = null;
+  try {
+    opened = window.open(url, "_blank");
+  } catch {
+    opened = null;
+  }
+  if (opened) {
+    try {
+      opened.opener = null;
+    } catch {
+      // Nothing else to do; the tab is already open.
+    }
+    return;
+  }
+  void copyField(verifyUrl, null, { copied: t.openBlocked, failed: t.openBlockedManual });
+}
+
+// Close after a successful login and reveal the saved provider.
+function completeLogin() {
+  const id = login.phase === "success" ? login.savedId : null;
+  resetLogin("idle");
+  login.savedId = null;
+  if (loginDialog.open) loginDialog.close();
+  if (!id || !providers.some((p) => p.id === id)) return;
+  if (selectedSourceId !== id || !expanded) void openProvider(id);
+  const node = rowNodes.get(id);
+  node?.row.scrollIntoView?.({ block: "nearest" });
+  node?.main.focus?.({ preventScroll: true });
 }
 
 function openLogin(sourceId = null) {
-  loginSourceId = sourceId;
-  byId("instructions-title").textContent = sourceId ? t.renew : t.add;
-  byId("login-name").value = sourceId ? account.name : "ChatGPT";
-  byId("login-name").hidden = Boolean(sourceId);
-  byId("login-name-label").hidden = Boolean(sourceId);
-  byId("login-name-field").hidden = Boolean(sourceId);
+  // A session still in progress keeps its own target until it settles.
   if (!activeSessionId) {
-    showInstructions(false);
-    setStatus("");
-    setStartLabel("start");
-    startButton.hidden = false;
-    byId("login-name").disabled = false;
+    loginSourceId = sourceId;
+    resetLogin("idle");
+    login.savedId = null;
+    loginNameInput.value = "ChatGPT";
   }
-  loginDialog.showModal();
+  renderLogin();
+  if (!loginDialog.open) loginDialog.showModal();
 }
 
 startButton.addEventListener("click", () => void startLogin());
 cancelButton.addEventListener("click", () => void cancelLogin());
+doneButton.addEventListener("click", () => completeLogin());
 usageButton.addEventListener("click", () => void queryUsage());
 copyUrlButton.addEventListener(
   "click",
@@ -1233,6 +1472,14 @@ copyCodeButton.addEventListener(
   "click",
   () => void copyField(userCode, copyCodeButton),
 );
+openVerifyLink.addEventListener("click", openVerification);
+loginNameInput.addEventListener("keydown", (event) => {
+  if (event.isComposing || event.keyCode === 229) return;
+  if (event.key === "Enter" && !startButton.hidden && !startButton.disabled) {
+    event.preventDefault?.();
+    void startLogin();
+  }
+});
 byId("open-login").addEventListener("click", () => openLogin(selectedSourceId));
 byId("add-provider").addEventListener("click", () => openLogin());
 byId("rename-provider").addEventListener("click", () => void renameProvider());
@@ -1247,6 +1494,10 @@ providerNameInput.addEventListener("keydown", (event) => {
 byId("delete-provider").addEventListener("click", () => void deleteProvider());
 async function closeLogin() {
   if (closeButton.disabled || cancelling) return;
+  if (login.phase === "success") {
+    completeLogin();
+    return;
+  }
   if (activeSessionId) await cancelLogin();
   if (!activeSessionId) loginDialog.close();
 }
@@ -1255,10 +1506,17 @@ loginDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
   void closeLogin();
 });
+// The browser may still close the dialog itself (repeated Escape). Treat
+// that like the close button so no session keeps running unseen.
+loginDialog.addEventListener("close", () => {
+  if (login.phase === "success") completeLogin();
+  else if (activeSessionId && !cancelling) void cancelLogin();
+});
 window.setInterval(() => {
   if (!document.hidden && !loginDialog.open) void queryUsage();
 }, 30000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) void queryUsage();
 });
+renderLogin();
 void queryUsage();

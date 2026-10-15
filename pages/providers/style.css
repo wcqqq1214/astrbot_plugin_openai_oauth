@@ -126,6 +126,7 @@ button:disabled {
   cursor: default;
   opacity: 0.45;
 }
+a:focus-visible,
 button:focus-visible,
 input:focus-visible,
 summary:focus-visible {
@@ -471,47 +472,6 @@ dialog::backdrop {
   font-size: 13px;
   color: var(--secondary);
 }
-.steps {
-  display: grid;
-  gap: 18px;
-  margin: 16px 0 0;
-  padding: 0;
-  list-style: none;
-  counter-reset: step;
-}
-.steps li {
-  min-width: 0;
-  position: relative;
-  padding-left: 36px;
-  counter-increment: step;
-}
-.steps li::before {
-  content: counter(step);
-  position: absolute;
-  left: 0;
-  top: 0;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--primary-soft);
-  color: var(--primary);
-  font-size: 12px;
-  font-weight: var(--bold);
-  font-variant-numeric: tabular-nums;
-}
-.steps label,
-.step-label {
-  display: block;
-  font-size: 13px;
-  font-weight: var(--medium);
-  line-height: 22px;
-  margin-bottom: 8px;
-}
-.step-label {
-  margin-bottom: 0;
-}
 .copy-row {
   display: flex;
   align-items: center;
@@ -550,32 +510,157 @@ dialog::backdrop {
   font-weight: 600;
   letter-spacing: 4px;
 }
-.login-status {
+
+/* Device code, the main open action and the raw link for other browsers. */
+.device-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.device-label {
+  font-size: 12px;
+  font-weight: var(--medium);
+  color: var(--muted);
+}
+.device-label + .code-row {
+  margin-top: -4px;
+}
+.button.block {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-  font-size: 13px;
-  color: var(--secondary);
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 14px;
+  text-decoration: none;
 }
-.login-status:has(#status:empty) {
-  display: none;
+.button.block svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2;
 }
-/* While the steps are visible, the waiting line belongs to step 3. */
-.steps:not([hidden]) + .login-status {
-  margin-top: 6px;
-  padding-left: 36px;
+.link-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 2px;
 }
-.steps:not([hidden]) ~ .copy-status {
-  padding-left: 36px;
+.link-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+.link-row input:focus-visible {
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.link-row .link-button {
+  flex-shrink: 0;
+  color: var(--primary-strong);
+  font-size: 12.5px;
 }
 .copy-status {
-  margin-top: 6px;
   font-size: 12px;
   color: var(--muted);
 }
 .copy-status:empty {
   display: none;
+}
+
+/* One line for progress; a tonal box once the login settles. */
+.login-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--secondary);
+}
+.login-state:has(#status:empty) {
+  display: none;
+}
+.state-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.login-state strong {
+  font-weight: var(--medium);
+  color: var(--text);
+}
+.login-state.busy {
+  align-items: center;
+}
+.login-state.busy strong {
+  font-weight: 400;
+  color: var(--secondary);
+}
+.state-detail {
+  font-size: 12.5px;
+  color: var(--secondary);
+  overflow-wrap: anywhere;
+}
+.login-state.ok,
+.login-state.warn {
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+.login-state.ok {
+  background: var(--ok-soft);
+}
+.login-state.warn {
+  background: var(--warn-soft);
+}
+.state-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.state-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
+}
+.login-state.ok .state-icon {
+  color: var(--ok-text);
+}
+.login-state.warn .state-icon {
+  color: var(--warn-text);
+}
+.saved-provider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-low);
+  box-shadow: var(--surface-ring);
+}
+.saved-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.saved-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: var(--bold);
+}
+.saved-sub {
+  font-size: 12.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 .error {
   margin-top: 14px;
@@ -592,6 +677,10 @@ dialog::backdrop {
   gap: 8px;
   padding: 12px 20px;
   box-shadow: inset 0 var(--hairline) var(--line);
+}
+/* While the server saves there is nothing to act on. */
+.actions:not(:has(> :not([hidden]))) {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -979,8 +1068,16 @@ dialog::backdrop {
   margin-top: 14px;
 }
 .field label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   font-size: 13px;
   font-weight: var(--medium);
+}
+.field-optional {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
 }
 .field .text-input {
   height: 36px;
