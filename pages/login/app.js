@@ -619,19 +619,20 @@ function providerRow(id) {
   const icon = element("span", "provider-icon");
   icon.setAttribute("aria-hidden", "true");
   const copy = element("span", "provider-copy");
-  const title = element("span", "provider-title");
   const name = element("strong", "provider-name");
-  const plan = element("span", "plan-tag");
-  title.append(name, plan);
   const sub = element("span", "provider-sub");
-  copy.append(title, sub);
-  const badge = element("span", "badge");
+  copy.append(name, sub);
+  // Row summary: a status dot and the plan while healthy, the
+  // status itself once something needs attention.
+  const meta = element("span", "provider-meta");
+  const metaText = element("span", "provider-meta-text");
+  meta.append(element("i", "status-dot"), metaText);
   const chevron = element("span", "chevron");
   chevron.setAttribute("aria-hidden", "true");
   chevron.innerHTML = chevronIcon;
-  row.append(icon, copy, badge, chevron);
+  row.append(icon, copy, meta, chevron);
   row.addEventListener("click", () => void selectProvider(id));
-  node = { row, icon, name, plan, sub, badge, mode: null };
+  node = { row, icon, name, sub, meta, metaText, mode: null };
   rowNodes.set(id, node);
   return node;
 }
@@ -654,12 +655,12 @@ function renderProviders() {
     node.row.setAttribute("aria-expanded", String(selected && expanded));
     node.name.textContent = providerName(provider);
     const plan = plans[provider.plan_type];
-    node.plan.textContent = plan || "";
-    node.plan.hidden = !plan;
     node.sub.textContent = provider.email || (local ? t.localShort : t.deviceShort);
-    node.badge.textContent = t.states[state] || t.states.unknown;
-    node.badge.className = "badge" + statusClass(state);
-    node.badge.setAttribute("title", t.details[state] || t.details.unknown);
+    const healthy = state === "ready";
+    node.metaText.textContent =
+      healthy && plan ? `ChatGPT ${plan}` : t.states[state] || t.states.unknown;
+    node.meta.className = "provider-meta" + statusClass(state);
+    node.meta.setAttribute("title", t.details[state] || t.details.unknown);
     order.push(node.row);
     if (selected) order.push(providerDetail);
   }

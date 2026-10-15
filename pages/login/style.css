@@ -732,12 +732,6 @@ dialog::backdrop {
   flex: 1;
   min-width: 0;
 }
-.provider-title {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-}
 .provider-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -745,15 +739,48 @@ dialog::backdrop {
   font-size: 14px;
   font-weight: var(--bold);
 }
-.provider-title .plan-tag {
-  flex-shrink: 0;
-}
 .provider-sub {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12.5px;
   color: var(--muted);
+}
+.provider-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  max-width: 45%;
+  font-size: 13px;
+  color: var(--secondary);
+  white-space: nowrap;
+}
+.provider-meta-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.provider-meta.neutral .status-dot {
+  background: var(--muted);
+}
+.provider-meta.warning {
+  color: var(--warn-text);
+}
+.provider-meta.warning .status-dot {
+  background: var(--warn);
+}
+.provider-meta.danger {
+  color: var(--bad-text);
+}
+.provider-meta.danger .status-dot {
+  background: var(--bad);
 }
 .chevron {
   display: grid;
@@ -874,9 +901,6 @@ dialog::backdrop {
   }
   .provider-row {
     padding: 10px 12px;
-  }
-  .provider-row .badge {
-    padding: 0 7px;
   }
   .editor {
     padding: 2px 12px 14px;
