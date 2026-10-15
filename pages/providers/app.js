@@ -689,9 +689,12 @@ function setRefreshing(busy) {
   usageButton.setAttribute("aria-label", busy ? t.refreshing : t.refresh);
 }
 
+function hasDefaultLocalName(provider) {
+  return provider.credential_mode === "local_codex" && provider.name === "Local Codex";
+}
+
 function providerName(provider) {
-  return provider.credential_mode === "local_codex" && provider.name === "Local Codex"
-    ? t.local : provider.name || provider.id || "—";
+  return hasDefaultLocalName(provider) ? t.local : provider.name || provider.id || "—";
 }
 
 // Each row owns its allowance DOM, cached result and request generation.
@@ -1113,10 +1116,15 @@ function openSettings(sourceId) {
   if (!provider || settingsDialog.open || loginDialog.open) return;
   // Start from the latest effective state, including queued writes.
   const view = effective(provider);
-  const base = { name: String(view.name || ""), routing_mode: routingMode(view) };
+  const defaultLocalName = hasDefaultLocalName(view);
+  const base = {
+    name: defaultLocalName ? t.local : String(view.name || ""),
+    routing_mode: routingMode(view),
+  };
   settings = {
     sourceId,
     base,
+    defaultLocalName,
     draft: { ...base },
     // null, "save" or "remove" while a request for this session runs.
     busy: null,
@@ -1148,6 +1156,15 @@ function settingsChanges(session = settings) {
 function renderSettings() {
   const session = settings;
   if (!session) return;
+  // Translate an untouched default along with the title, without turning a
+  // locale change into a rename or replacing a name the user is editing.
+  if (session.defaultLocalName && session.base.name !== t.local) {
+    if (session.draft.name === session.base.name) {
+      session.draft.name = t.local;
+      settingsNameInput.value = t.local;
+    }
+    session.base.name = t.local;
+  }
   const provider = settingsProvider();
   if (provider) {
     const view = effective(provider);
@@ -1268,8 +1285,10 @@ async function saveSettings() {
   // adopt fields the reloaded server state shows did land, so the dialog
   // never re-sends or claims an unconfirmed result.
   const current = providers.find((p) => p.id === session.sourceId);
-  if (current && "name" in changes && current.name === changes.name)
+  if (current && "name" in changes && current.name === changes.name) {
     session.base.name = changes.name;
+    session.defaultLocalName = hasDefaultLocalName(current);
+  }
   if (current && "routing_mode" in changes && routingMode(current) === changes.routing_mode)
     session.base.routing_mode = changes.routing_mode;
   session.busy = null;

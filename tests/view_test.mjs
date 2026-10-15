@@ -1351,6 +1351,76 @@ assert.doesNotMatch(visibleText(ids.get("page-error")), /已不存在/, "a remov
 assert.equal(providerUpdates.length, sentBeforeRemove);
 bridge.apiPost = originalPost;
 
+// The default local name has one localized presentation in every surface.
+const savedLocalName = account.name;
+const savedLocalRouting = account.routing_mode;
+account.name = "Local Codex";
+account.routing_mode = "fixed";
+await page.queryUsage();
+await openSettings("本地 Codex");
+assert.equal(nameInput.value, "本地 Codex");
+assert.equal(read("settings-title"), nameInput.value);
+assert.equal(saveButton.disabled, true);
+contextHandler({locale: "en-US"});
+assert.equal(nameInput.value, "Local Codex");
+assert.equal(read("settings-title"), nameInput.value);
+assert.equal(saveButton.disabled, true, "changing locale is not a rename");
+contextHandler({locale: "zh-CN"});
+assert.equal(nameInput.value, "本地 Codex");
+const beforeLocalRouting = providerUpdates.length;
+await click(ids.get("settings-routing-auto"));
+await click(saveButton);
+assert.equal(providerUpdates.length, beforeLocalRouting + 1);
+assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "local", routing_mode: "auto"});
+assert.equal(account.name, "Local Codex", "routing edits preserve the canonical default");
+
+await openSettings("本地 Codex");
+typeName("我的工作账号");
+contextHandler({locale: "en-US"});
+assert.equal(nameInput.value, "我的工作账号", "locale changes preserve an edited draft");
+assert.equal(saveButton.disabled, false);
+await click(saveButton);
+assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "local", name: "我的工作账号"});
+await openSettings("我的工作账号");
+contextHandler({locale: "zh-CN"});
+assert.equal(read("settings-title"), "我的工作账号");
+assert.equal(nameInput.value, "我的工作账号");
+assert.equal(saveButton.disabled, true);
+await click(ids.get("settings-cancel"));
+
+// An unclear rename that landed must adopt the custom baseline, so subsequent
+// renders cannot translate it back or resend it with an unrelated setting.
+account.name = "Local Codex";
+await page.queryUsage();
+await openSettings("本地 Codex");
+typeName("已保存的新名称");
+updateHandler = (body) => { account.name = body.name; return {status: "success"}; };
+await click(saveButton);
+await tick();
+assert.equal(settingsBox.open, true);
+assert.equal(nameInput.value, "已保存的新名称");
+assert.equal(saveButton.disabled, true);
+contextHandler({locale: "en-US"});
+assert.equal(nameInput.value, "已保存的新名称");
+assert.equal(saveButton.disabled, true);
+await click(ids.get("settings-cancel"));
+updateHandler = null;
+
+// A custom OpenAI provider called Local Codex is not the built-in default.
+const savedDeviceName = device.name;
+device.name = "Local Codex";
+await page.queryUsage();
+contextHandler({locale: "zh-CN"});
+await openSettings("Local Codex");
+assert.equal(nameInput.value, "Local Codex");
+assert.equal(read("settings-title"), "Local Codex");
+await click(ids.get("settings-cancel"));
+account.name = savedLocalName;
+account.routing_mode = savedLocalRouting;
+device.name = savedDeviceName;
+await page.queryUsage();
+console.log("Localized default name regressions passed: matching title/input, locale changes, routing-only saves, custom drafts/names and unclear-save reconciliation.");
+
 console.log("View regressions passed: device login dialog (copy instructions, copy, saving, success, done, failure recovery), quota windows, provider selection, stale-result isolation, login and cancellation races, settings dialog drafts and entry points, renew and removal from settings, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");
 
 // Independent panels: exercise the public row buttons and refresh behavior in
