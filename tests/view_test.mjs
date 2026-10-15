@@ -187,9 +187,21 @@ const source = readFileSync(
   "utf8",
 );
 const page = await vm.runInNewContext(
-  `(async () => {${source}\n await queryUsage(); return {queryUsage, startLogin, cancelLogin, closeLogin, poll, selectProvider, openLogin};})()`,
+  `(async () => {${source}\n await queryUsage(); return {queryUsage, startLogin, cancelLogin, closeLogin, poll, selectProvider, openProvider, loadProviders, queryProvider, rowNodes, openLogin};})()`,
   { window, document, navigator, console, URL },
 );
+// Existing form/login scenarios inspect one named provider's panel at a time.
+// Navigation in those scenarios explicitly opens a row; toggle behavior is
+// covered separately below, without restoring the old exclusive selection.
+let inspectedProvider = "local";
+const panelElement = (key, sourceId = inspectedProvider) => page.rowNodes.get(sourceId).panel.elements[key];
+const originalGet = ids.get.bind(ids);
+ids.get = (id) => originalGet(id) || panelElement(id);
+const inspectProvider = async (id) => {
+  inspectedProvider = id;
+  await page.loadProviders();
+  await page.openProvider(id);
+};
 const read = (id) => ids.get(id).textContent;
 assert.match(read("usage-result"), /每周.*96%/);
 // A weekly-only Pro response renders exactly one compact quota line.
@@ -255,7 +267,7 @@ let resolveOld;
 slowUsage = new Promise((resolve) => { resolveOld = resolve; });
 const oldQuery = page.queryUsage();
 await new Promise((resolve) => setImmediate(resolve));
-await page.selectProvider("device");
+await inspectProvider("device");
 assert.match(read("usage-result"), /40%/);
 assert.equal(read("source-name"), "Work");
 // Without a confirmed Pro plan, a lone weekly window keeps its caveat.
@@ -267,7 +279,7 @@ assert.match(read("usage-result"), /40%/);
 assert.equal(read("source-name"), "Work");
 slowUsage = null;
 account.status = "not_logged_in";
-await page.selectProvider("local");
+await inspectProvider("local");
 assert.match(read("providers"), /本地 Codex/);
 assert.match(read("usage-result"), /未检测到本地登录/);
 page.openLogin();
@@ -461,6 +473,7 @@ assert.match(visibleText(rowFor("本地 Codex")), /已登录/);
 assert.doesNotMatch(visibleText(rowFor("工作")), /已停用/);
 
 // A disabled device source keeps its allowance, rename, login and removal.
+inspectedProvider = "device";
 await click(switchFor("工作"));
 assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "device", enabled: false});
 await page.queryUsage();
@@ -629,14 +642,14 @@ assert.equal(settingsBox.open, false);
 bridge.apiPost = originalPost;
 
 // A reconciliation started after a failed save must not replace a newer view.
-await page.selectProvider("device");
+await inspectProvider("device");
 updateHandler = () => { throw new Error("Network Error"); };
 listGate = deferred();
 await click(switchFor("Server Name"));
 const oldReconcile = listGate;
 listGate = null;
 device.name = "Newer device";
-await page.selectProvider("local");
+await inspectProvider("local");
 assert.ok(rowFor("Newer device"));
 oldReconcile.resolve();
 await tick();
@@ -644,7 +657,7 @@ assert.ok(rowFor("Newer device"), "a stale reconciliation must not overwrite the
 updateHandler = null;
 
 // A local account may change while saving controls. Never relabel its old quota.
-await page.selectProvider("device");
+await inspectProvider("device");
 assert.match(read("usage-result"), /40%/);
 const oldAccount = {...device};
 const oldDeviceUsage = deviceUsage;
@@ -888,13 +901,14 @@ assert.ok(shown("saved-provider"));
 assert.equal(read("saved-name"), "Newer device");
 assert.equal(read("saved-sub"), "work@example.com · ChatGPT Plus");
 // Done closes the dialog and reveals the saved provider.
-await page.selectProvider("local");
+await inspectProvider("local");
 ids.get("done").handlers.click();
 await tick();
 await tick();
 assert.equal(dialog.open, false);
-assert.equal(read("source-name"), "Newer device");
-assert.match(rowFor("Newer device").className, /selected open/);
+assert.equal(panelElement("source-name", "device").textContent, "Newer device");
+assert.match(rowFor("Newer device").className, /open/);
+assert.equal(mainFor("本地 Codex").attributes["aria-expanded"], "true");
 assert.equal(document.activeElement, rowFor("Newer device").children[0]);
 
 // Missing account details are not guessed.
@@ -1224,7 +1238,7 @@ await click(ids.get("settings-cancel"));
 // a disabled provider disabled and brings the draft back afterwards.
 device.enabled = false;
 await page.queryUsage();
-await page.selectProvider("local");
+await inspectProvider("local");
 assert.equal(checked("Mine"), "false");
 const sentBeforeRenew = providerUpdates.length;
 await openSettings("Mine");
@@ -1338,3 +1352,136 @@ assert.equal(providerUpdates.length, sentBeforeRemove);
 bridge.apiPost = originalPost;
 
 console.log("View regressions passed: device login dialog (copy instructions, copy, saving, success, done, failure recovery), quota windows, provider selection, stale-result isolation, login and cancellation races, settings dialog drafts and entry points, renew and removal from settings, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");
+
+// Independent panels: exercise the public row buttons and refresh behavior in
+// a fresh page instance, including more providers than the request limit.
+let fixtures = Array.from({length: 6}, (_, index) => ({
+  id: `p${index}`, name: `Provider ${index}`, status: "ready",
+  credential_mode: index ? "device_oauth" : "local_codex",
+  account_revision: `revision-${index}`,
+}));
+const quotaCalls = [];
+let quotaGate = null;
+let liveRequests = 0;
+let peakRequests = 0;
+let failingProvider = null;
+bridge.apiPost = async (endpoint, body) => {
+  if (endpoint === "providers/list") return {providers: fixtures.map((p) => ({...p}))};
+  assert.equal(endpoint, "account/usage");
+  quotaCalls.push(body.source_id);
+  const snapshot = {...fixtures.find((p) => p.id === body.source_id)};
+  const gate = quotaGate;
+  ++liveRequests;
+  peakRequests = Math.max(peakRequests, liveRequests);
+  try {
+    if (gate) await gate.promise;
+    if (body.source_id === failingProvider) throw new Error("Offline");
+    return {status: "success", account: snapshot, usage: {
+      plan_type: "pro", windows: [{label_seconds: 604800, used_percent: Number(body.source_id.slice(1)) * 10}],
+    }};
+  } finally { --liveRequests; }
+};
+const freshPage = () => vm.runInNewContext(
+  `(async () => {${source}\n await queryUsage(); return {queryUsage, selectProvider, loadProviders, rowNodes};})()`,
+  {window, document, navigator, console, URL},
+);
+const multi = await freshPage();
+const panelFor = (id) => multi.rowNodes.get(id).panel;
+const rowMain = (id) => multi.rowNodes.get(id).main;
+const panelText = (id) => panelFor(id).usageResult.textContent;
+assert.deepEqual(quotaCalls, ["p0"], "only the first provider fetches on page load");
+assert.equal(rowMain("p0").getAttribute("aria-expanded"), "true");
+assert.equal(rowMain("p1").getAttribute("aria-expanded"), "false");
+assert.equal(panelFor("p1").detail.hidden, true);
+const controlIds = [...multi.rowNodes.values()].map(({main}) => main.getAttribute("aria-controls"));
+assert.equal(new Set(controlIds).size, 6, "each row controls a distinct panel");
+for (const {main, panel} of multi.rowNodes.values()) {
+  assert.equal(main.getAttribute("aria-controls"), panel.detail.id);
+  assert.equal(panel.detail.getAttribute("aria-labelledby"), panel.elements["source-name"].id);
+}
+await click(rowMain("p1"));
+assert.equal(panelFor("p0").detail.hidden, false);
+assert.equal(panelFor("p1").detail.hidden, false);
+assert.match(panelText("p0"), /100%/);
+assert.match(panelText("p1"), /90%/);
+await click(rowMain("p0"));
+quotaCalls.length = 0;
+await multi.queryUsage();
+assert.deepEqual(quotaCalls, ["p1"], "refresh skips collapsed providers");
+assert.equal(panelFor("p0").detail.hidden, true, "refresh never reopens the default row");
+contextHandler({locale: "en-US"});
+assert.equal(panelFor("p0").detail.hidden, true);
+assert.match(panelText("p1"), /Weekly.*90%/);
+contextHandler({locale: "zh-CN"});
+fixtures[1].name = "Renamed";
+await multi.queryUsage();
+assert.equal(panelFor("p1").detail.hidden, false, "renaming preserves expansion by ID");
+assert.equal(panelFor("p0").detail.hidden, true);
+
+await click(rowMain("p0"));
+failingProvider = "p1";
+await multi.queryUsage();
+assert.match(panelText("p0"), /100%/);
+assert.match(panelText("p1"), /暂时无法获取/);
+assert.equal(ids.get("page-error").hidden, true, "a quota failure is scoped to its own panel");
+failingProvider = null;
+
+// A pending request from a collapsed row cannot overwrite its fresh result.
+quotaGate = deferred();
+const oldRefresh = multi.queryUsage();
+await tick();
+await click(rowMain("p1"));
+const oldGate = quotaGate;
+quotaGate = null;
+fixtures[1].account_revision = "replacement";
+await click(rowMain("p1"));
+assert.match(panelText("p1"), /90%/);
+assert.equal(panelFor("p1").account.account_revision, "replacement");
+oldGate.resolve();
+await oldRefresh;
+assert.equal(panelFor("p1").account.account_revision, "replacement");
+assert.equal(panelFor("p0").detail.hidden, false);
+
+// Opening many rows shares the same bounded request queue. Collapsing a
+// queued row cancels its lookup without consuming another API request.
+quotaGate = deferred();
+peakRequests = 0;
+quotaCalls.length = 0;
+const refreshMany = multi.queryUsage();
+await tick();
+const openings = ["p2", "p3", "p4", "p5"].map((id) => multi.selectProvider(id));
+await tick();
+assert.equal(liveRequests, 3);
+assert.equal(quotaCalls.length, 3);
+await multi.selectProvider("p4");
+const manyGate = quotaGate;
+quotaGate = null;
+manyGate.resolve();
+await Promise.all([refreshMany, ...openings]);
+assert.equal(peakRequests, 3, "overlapping refreshes and row clicks stay bounded");
+assert.ok(!quotaCalls.includes("p4"), "a collapsed queued panel does not fetch");
+assert.equal(panelFor("p4").detail.hidden, true);
+assert.match(panelText("p5"), /50%/);
+
+// Removing a provider discards its in-flight response and keeps other panels.
+quotaGate = deferred();
+const beforeRemoval = multi.queryUsage();
+await tick();
+fixtures = fixtures.filter((p) => p.id !== "p1");
+const removalGate = quotaGate;
+quotaGate = null;
+await multi.loadProviders();
+assert.equal(multi.rowNodes.has("p1"), false);
+removalGate.resolve();
+await beforeRemoval;
+assert.equal(multi.rowNodes.has("p1"), false, "a late result cannot resurrect a removed provider");
+assert.equal(panelFor("p0").detail.hidden, false);
+assert.equal(panelFor("p5").detail.hidden, false);
+
+// A full page reload restores the default, regardless of the previous panels.
+quotaCalls.length = 0;
+const reloaded = await freshPage();
+assert.deepEqual(quotaCalls, ["p0"]);
+assert.equal(reloaded.rowNodes.get("p0").panel.detail.hidden, false);
+assert.equal(reloaded.rowNodes.get("p5").panel.detail.hidden, true);
+console.log("Independent provider panel regressions passed: defaults, concurrent expansion, collapsed refresh, locale/rename preservation, isolated errors, stale responses, bounded queue, removal and page reload.");

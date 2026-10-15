@@ -28,33 +28,8 @@
       <p id="page-error" class="error" role="alert" hidden></p>
       <p id="save-error" class="error" role="alert" hidden></p>
 
-      <!-- Rows are rendered by app.js; the allowance panel is moved under the
-           selected row. Rarely used settings live in the settings dialog. -->
-      <div id="providers" class="provider-list" aria-label="Providers">
-        <section id="provider-detail" class="editor" aria-labelledby="source-name" hidden>
-          <div class="sr-only">
-            <h2 id="source-name">—</h2>
-            <span id="plan" hidden></span>
-            <span id="account-status"></span>
-          </div>
-          <div class="editor-row">
-            <span id="quota-label" class="editor-label compact">额度</span>
-            <div class="editor-body">
-              <div class="quota-list" aria-live="polite">
-                <div id="usage-result" class="quota-rows"></div>
-                <p id="quota-policy" class="quota-note" hidden></p>
-              </div>
-              <p id="notice" class="notice" role="status" hidden>
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M12 9v4M12 17h.01" />
-                  <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
-                </svg>
-                <span id="notice-text"></span>
-              </p>
-            </div>
-          </div>
-        </section>
-      </div>
+      <!-- Each provider owns its independently expandable allowance panel. -->
+      <div id="providers" class="provider-list" aria-label="Providers"></div>
 
       <p class="footnote">
         <svg viewBox="0 0 24 24" aria-hidden="true">

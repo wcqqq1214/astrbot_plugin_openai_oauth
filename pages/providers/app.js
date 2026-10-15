@@ -261,10 +261,6 @@ const byId = (id) => document.getElementById(id);
 const startButton = byId("start");
 const cancelButton = byId("cancel");
 const usageButton = byId("usage");
-const accountStatus = byId("account-status");
-const usageResult = byId("usage-result");
-const quotaPolicy = byId("quota-policy");
-const notice = byId("notice");
 const loginIntro = byId("login-intro");
 const loginNameInput = byId("login-name");
 const devicePanel = byId("device-panel");
@@ -284,7 +280,6 @@ const error = byId("error");
 const loginDialog = byId("login-dialog");
 const closeButton = byId("close-login");
 const providerList = byId("providers");
-const providerDetail = byId("provider-detail");
 const saveError = byId("save-error");
 const settingsDialog = byId("settings-dialog");
 const settingsNameInput = byId("settings-name");
@@ -332,19 +327,14 @@ let t = strings.zh;
 let pollTimer = null;
 let activeSessionId = null;
 let consecutivePollFailures = 0;
-let account = {};
 let providers = [];
-let selectedSourceId = null;
-let expanded = true;
 let loginSourceId = null;
-let viewGeneration = 0;
 let refreshPromise = null;
+let initializedExpansion = false;
+let panelSequence = 0;
+let activeUsageRequests = 0;
+const usageQueue = [];
 let cancelling = false;
-// Last rendered usage, kept so a background refresh never blanks the cards
-// and a locale change can re-render without another request.
-let lastUsage = null;
-let usageMessage = "loading";
-let shownRevision = null;
 let lastUpdated = null;
 // Login dialog view. `activeSessionId` stays the only signal that a server
 // session may still finish; `phase` decides what the dialog shows.
@@ -393,7 +383,6 @@ function applyLocale(locale) {
   for (const [id, value] of Object.entries({
     title: t.title,
     "add-provider-label": t.add,
-    "quota-label": t.quotaLabel,
     "settings-kicker": t.settingsTitle,
     "settings-name-label": t.nameShort,
     "settings-routing-label": t.routingLabel,
@@ -491,25 +480,24 @@ function statusClass(state) {
         : " neutral";
 }
 
-function renderAccountStatus(result) {
-  const previous = account;
-  account = result || {};
+function renderAccountStatus(panel, result) {
+  const previous = panel.account;
+  panel.account = result || {};
   const identityChanged =
-    (previous.id === account.id &&
-      (previous.account_revision ?? null) !== (account.account_revision ?? null)) ||
-    (lastUsage && shownRevision !== (account.account_revision ?? null));
+    (previous.id === panel.account.id &&
+      (previous.account_revision ?? null) !== (panel.account.account_revision ?? null)) ||
+    (panel.lastUsage && panel.shownRevision !== (panel.account.account_revision ?? null));
   if (identityChanged) {
-    clearUsage("changed");
-    lastUpdated = null;
-    byId("updated").textContent = "";
+    clearUsage(panel, "changed");
+    invalidatePanel(panel);
   }
-  const state = String(account.status || "unknown");
-  accountStatus.textContent = t.states[state] || t.states.unknown;
-  accountStatus.setAttribute("title", t.details[state] || t.details.unknown);
-  accountStatus.className = "badge" + statusClass(state);
+  const state = String(panel.account.status || "unknown");
+  panel.accountStatus.textContent = t.states[state] || t.states.unknown;
+  panel.accountStatus.setAttribute("title", t.details[state] || t.details.unknown);
+  panel.accountStatus.className = "badge" + statusClass(state);
 
-  byId("source-name").textContent = providerName(account);
-  updateNotice();
+  panel.elements["source-name"].textContent = providerName(panel.account);
+  updateNotice(panel);
   return Boolean(identityChanged);
 }
 
@@ -541,8 +529,8 @@ function windowLabel(seconds, short = false) {
     : t.window;
 }
 
-function showUsageMessage(key) {
-  usageMessage = key;
+function showUsageMessage(panel, key) {
+  panel.usageMessage = key;
   const busy = key === "loading" || key === "changed";
   const message = element("p", "muted");
   if (busy) {
@@ -553,16 +541,16 @@ function showUsageMessage(key) {
   } else {
     message.textContent = t[key];
   }
-  usageResult.replaceChildren(message);
-  byId("plan").hidden = true;
-  quotaPolicy.hidden = true;
+  panel.usageResult.replaceChildren(message);
+  panel.elements["plan"].hidden = true;
+  panel.quotaPolicy.hidden = true;
 }
 
-function clearUsage(key) {
-  lastUsage = null;
-  shownRevision = null;
-  showUsageMessage(key);
-  updateNotice();
+function clearUsage(panel, key) {
+  panel.lastUsage = null;
+  panel.shownRevision = null;
+  showUsageMessage(panel, key);
+  updateNotice(panel);
 }
 
 function remainingOf(item) {
@@ -630,38 +618,38 @@ function usageWindows(usage) {
     : [];
 }
 
-function renderUsage(result) {
-  if (result?.account) renderAccountStatus(result.account);
+function renderUsage(panel, result) {
+  if (result?.account) renderAccountStatus(panel, result.account);
   if (result?.status !== "success" || !result.usage) {
-    clearUsage(result?.status === "account_changed" ? "changed" : "failed");
+    clearUsage(panel, result?.status === "account_changed" ? "changed" : "failed");
     if (["cooling", "reauth_required", "invalid"].includes(result?.status)) {
-      renderAccountStatus({ ...account, status: result.status });
+      renderAccountStatus(panel, { ...panel.account, status: result.status });
     }
     return;
   }
-  lastUsage = result.usage;
-  shownRevision = account.account_revision ?? null;
+  panel.lastUsage = result.usage;
+  panel.shownRevision = panel.account.account_revision ?? null;
   const usage = result.usage;
   const windows = usageWindows(usage);
   if (!windows.length) {
-    showUsageMessage("noWindows");
+    showUsageMessage(panel, "noWindows");
   } else {
-    usageResult.replaceChildren(...windows.map(quotaRow));
+    panel.usageResult.replaceChildren(...windows.map(quotaRow));
   }
   const plan = plans[usage.plan_type];
-  byId("plan").textContent = plan || "";
-  byId("plan").hidden = !plan;
+  panel.elements["plan"].textContent = plan || "";
+  panel.elements["plan"].hidden = !plan;
   const weeklyOnly =
     windows.length === 1 && windows[0].label_seconds === 604800;
   // Pro accounts currently return only a weekly window; that single line
   // needs no caveat. Other plans keep the "missing is not unlimited" note.
-  quotaPolicy.hidden = !weeklyOnly || usage.plan_type === "pro";
-  quotaPolicy.textContent = quotaPolicy.hidden ? "" : t.weeklyOnly;
-  updateNotice();
+  panel.quotaPolicy.hidden = !weeklyOnly || usage.plan_type === "pro";
+  panel.quotaPolicy.textContent = panel.quotaPolicy.hidden ? "" : t.weeklyOnly;
+  updateNotice(panel);
 }
 
-function updateNotice() {
-  const usage = lastUsage;
+function updateNotice(panel) {
+  const usage = panel.lastUsage;
   let message = "";
   if (usage?.limit_reached) {
     const resets = usageWindows(usage)
@@ -669,22 +657,22 @@ function updateNotice() {
       .map((item) => resetSeconds(item.reset_at, item.reset_after_seconds))
       .filter((value) => value !== null);
     // The server may enforce a later cooldown than the reported quota windows.
-    const cooldown = resetSeconds(account.cooldown_until);
+    const cooldown = resetSeconds(panel.account.cooldown_until);
     if (cooldown !== null) resets.push(cooldown);
     message = resets.length
       ? t.exhaustedUntil(formatAbsolute(Math.max(...resets)))
       : t.exhausted;
-    message += (isEnglish ? " " : "") + (routingMode(effective(account)) === "auto" ? t.willFallback : t.noSwitch);
-  } else if (account.status === "cooling") {
-    const until = formatAbsolute(resetSeconds(account.cooldown_until));
+    message += (isEnglish ? " " : "") + (routingMode(effective(panel.account)) === "auto" ? t.willFallback : t.noSwitch);
+  } else if (panel.account.status === "cooling") {
+    const until = formatAbsolute(resetSeconds(panel.account.cooldown_until));
     message = until ? t.coolingUntil(until) : t.details.cooling;
   } else if (usage && usage.allowed === false) {
     message = t.denied;
-  } else if (["degraded", "reauth_required"].includes(account.status)) {
-    message = t.details[account.status];
+  } else if (["degraded", "reauth_required"].includes(panel.account.status)) {
+    message = t.details[panel.account.status];
   }
-  notice.hidden = !message;
-  byId("notice-text").textContent = message;
+  panel.notice.hidden = !message;
+  panel.elements["notice-text"].textContent = message;
 }
 
 function renderUpdated() {
@@ -706,6 +694,48 @@ function providerName(provider) {
     ? t.local : provider.name || provider.id || "—";
 }
 
+// Each row owns its allowance DOM, cached result and request generation.
+function createPanel() {
+  const key = `provider-panel-${++panelSequence}`;
+  const elements = {};
+  const make = (tag, name, className = "") => {
+    const node = element(tag, className);
+    node.id = `${key}-${name}`;
+    elements[name] = node;
+    return node;
+  };
+  const detail = make("section", "detail", "editor");
+  detail.hidden = true;
+  detail.setAttribute("aria-labelledby", `${key}-source-name`);
+  const heading = element("div", "sr-only");
+  heading.append(make("h2", "source-name"), make("span", "plan"), make("span", "account-status"));
+  const row = element("div", "editor-row");
+  const label = make("span", "quota-label", "editor-label compact");
+  const body = element("div", "editor-body");
+  const list = element("div", "quota-list");
+  list.setAttribute("aria-live", "polite");
+  list.append(make("div", "usage-result", "quota-rows"), make("p", "quota-policy", "quota-note"));
+  const notice = make("p", "notice", "notice");
+  notice.setAttribute("role", "status");
+  notice.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>';
+  notice.append(make("span", "notice-text"));
+  body.append(list, notice);
+  row.append(label, body);
+  detail.append(heading, row);
+  return {
+    elements, detail, accountStatus: elements["account-status"],
+    usageResult: elements["usage-result"], quotaPolicy: elements["quota-policy"], notice,
+    account: {}, expanded: false, lastUsage: null, shownRevision: null,
+    usageMessage: "loading", generation: 0, promise: null,
+  };
+}
+
+function invalidatePanel(panel) {
+  ++panel.generation;
+  panel.promise = null;
+  panel.detail.setAttribute("aria-busy", "false");
+}
+
 function providerRow(id) {
   let node = rowNodes.get(id);
   if (node) return node;
@@ -715,7 +745,8 @@ function providerRow(id) {
   const row = element("div", "provider-row");
   const main = element("button", "provider-main");
   main.type = "button";
-  main.setAttribute("aria-controls", "provider-detail");
+  const panel = createPanel();
+  main.setAttribute("aria-controls", panel.detail.id);
   const icon = element("span", "provider-icon");
   icon.setAttribute("aria-hidden", "true");
   const copy = element("span", "provider-copy");
@@ -747,7 +778,7 @@ function providerRow(id) {
   toggle.append(element("span", "switch-track"));
   toggle.addEventListener("click", () => void toggleEnabled(id));
   row.append(main, gear, toggle);
-  node = { row, main, icon, name, disabledTag, autoTag, sub, meta, metaText, gear, toggle, iconMode: null };
+  node = { panel, row, main, icon, name, disabledTag, autoTag, sub, meta, metaText, gear, toggle, iconMode: null };
   rowNodes.set(id, node);
   return node;
 }
@@ -763,16 +794,18 @@ function renderProviders() {
       node.iconMode = iconMode;
       node.icon.innerHTML = providerIcons[iconMode];
     }
-    const selected = provider.id === selectedSourceId;
+    const panel = node.panel;
+    renderAccountStatus(panel, confirmed);
+    panel.detail.hidden = !panel.expanded;
+    panel.elements["quota-label"].textContent = t.quotaLabel;
     const state = String(provider.status || "unknown");
     const enabled = isEnabled(provider);
     const busy = isSaving(provider.id);
     node.row.className =
       "provider-row" +
-      (selected ? " selected" : "") +
-      (selected && expanded ? " open" : "") +
+      (panel.expanded ? " open" : "") +
       (enabled ? "" : " disabled");
-    node.main.setAttribute("aria-expanded", String(selected && expanded));
+    node.main.setAttribute("aria-expanded", String(panel.expanded));
     node.name.textContent = providerName(provider);
     node.disabledTag.textContent = t.disabledTag;
     node.disabledTag.hidden = enabled;
@@ -793,13 +826,14 @@ function renderProviders() {
     node.meta.className = "provider-meta" + statusClass(state);
     node.meta.setAttribute("title", t.details[state] || t.details.unknown);
     order.push(node.row);
-    if (selected) order.push(providerDetail);
+    order.push(panel.detail);
   }
   for (const id of [...rowNodes.keys()])
-    if (!providers.some((provider) => provider.id === id)) rowNodes.delete(id);
-  if (!order.includes(providerDetail)) order.push(providerDetail);
-  // Reorder only when the sequence changed: moving the editor would blur
-  // a focused name field during the 30-second refresh.
+    if (!providers.some((provider) => provider.id === id)) {
+      invalidatePanel(rowNodes.get(id).panel);
+      rowNodes.delete(id);
+    }
+  // Preserve row DOM and focus across background refreshes.
   const current = [...providerList.children];
   if (
     current.length !== order.length ||
@@ -812,89 +846,128 @@ function renderProviders() {
 }
 
 async function selectProvider(id) {
-  if (id && id === selectedSourceId) {
-    // Clicking the open row folds its editor away.
-    expanded = !expanded;
-    providerDetail.hidden = !expanded;
+  const panel = rowNodes.get(id)?.panel;
+  if (!panel) return;
+  if (panel.expanded) {
+    panel.expanded = false;
+    invalidatePanel(panel);
     renderProviders();
-    return;
+  } else {
+    await openProvider(id);
   }
-  await openProvider(id);
 }
 
 async function openProvider(id) {
-  expanded = true;
-  ++viewGeneration;
-  refreshPromise = null;
-  selectedSourceId = id;
-  byId("page-error").hidden = true;
-  lastUpdated = null;
-  byId("updated").textContent = "";
-  clearUsage("loading");
-  const selected = providers.find((p) => p.id === id);
-  if (selected) renderAccountStatus(selected);
+  const panel = rowNodes.get(id)?.panel;
+  if (!panel) return;
+  panel.expanded = true;
   renderProviders();
-  await queryUsage();
+  await queryProvider(id);
 }
 
-async function queryUsage() {
-  if (refreshPromise) return refreshPromise;
-  const generation = ++viewGeneration;
-  const pending = (async () => {
-    setRefreshing(true);
-    if (!lastUsage) showUsageMessage("loading");
+// Bound concurrency across refreshes, expanding rows and identity changes.
+async function usageSlot(task) {
+  if (activeUsageRequests >= 3) await new Promise((resolve) => usageQueue.push(resolve));
+  else ++activeUsageRequests;
+  try { return await task(); }
+  finally {
+    const next = usageQueue.shift();
+    if (next) next();
+    else --activeUsageRequests;
+  }
+}
+
+async function queryProvider(id) {
+  const panel = rowNodes.get(id)?.panel;
+  if (!panel?.expanded) return;
+  if (panel.promise) return panel.promise;
+  const latest = providers.find((p) => p.id === id);
+  if (!latest) return;
+  renderAccountStatus(panel, latest);
+  if (signedOutStates.includes(latest.status)) {
+    clearUsage(panel, latest.credential_mode === "local_codex" ? "localMissing" : "noHelp");
+    return;
+  }
+  const generation = ++panel.generation;
+  const current = () => rowNodes.get(id)?.panel === panel && panel.expanded && panel.generation === generation;
+  panel.detail.setAttribute("aria-busy", "true");
+  if (!panel.lastUsage) showUsageMessage(panel, "loading");
+  const pending = usageSlot(async () => {
+    if (!current()) return;
     const since = mutationSeq;
     try {
-      const listed = ++listRequestSeq;
-      const list = await bridge.apiPost("providers/list", {});
-      if (generation !== viewGeneration) return;
-      if (!Array.isArray(list?.providers)) throw new Error(t.listFailed);
-      providers = list.providers.map((p) => keepNewerEdits(p, since));
-      listedSeq = Math.max(listedSeq, listed);
-      byId("page-error").hidden = true;
-      if (!providers.some((p) => p.id === selectedSourceId)) {
-        selectedSourceId = providers[0]?.id || null;
-        clearUsage("loading");
-      }
-      renderProviders();
-      const latest = providers.find((p) => p.id === selectedSourceId);
-      providerDetail.hidden = !latest || !expanded;
-      if (!latest) return;
-      renderAccountStatus(latest);
-      if (signedOutStates.includes(latest.status)) {
-        clearUsage(latest.credential_mode === "local_codex" ? "localMissing" : "noHelp");
-        return;
-      }
-      if (lastUsage && shownRevision !== (latest.account_revision ?? null)) clearUsage("changed");
-      const body = { source_id: selectedSourceId };
+      const body = { source_id: id };
       let result = await bridge.apiPost("account/usage", body);
-      if (generation !== viewGeneration) return;
+      if (!current()) return;
       if (result?.status === "account_changed") result = await bridge.apiPost("account/usage", body);
-      if (generation !== viewGeneration) return;
+      if (!current()) return;
       if (result?.account) {
-        const current = keepNewerEdits(result.account, since);
-        // Never attach an old quota payload to a newer confirmed identity.
-        if (current.account_revision !== result.account.account_revision) return;
-        result.account = current;
+        if (result.account.id !== id) throw new Error(t.failed);
+        const kept = keepNewerEdits(result.account, since);
+        if (kept.account_revision !== result.account.account_revision) return;
+        result = { ...result, account: kept };
       }
-      renderUsage(result);
-      providers = providers.map((p) => p.id === selectedSourceId ? account : p);
+      renderUsage(panel, result);
+      providers = providers.map((p) => p.id === id ? panel.account : p);
       renderProviders();
       lastUpdated = new Date();
       renderUpdated();
-    } catch (reason) {
-      if (generation === viewGeneration) {
-        clearUsage("failed");
-        byId("page-error").textContent = reason?.message || t.listFailed;
-        byId("page-error").hidden = false;
-      }
-    } finally {
-      if (generation === viewGeneration) setRefreshing(false);
+    } catch {
+      if (current()) clearUsage(panel, "failed");
     }
+  });
+  panel.promise = pending;
+  try { await pending; }
+  finally {
+    if (panel.promise === pending) {
+      panel.promise = null;
+      panel.detail.setAttribute("aria-busy", "false");
+    }
+  }
+}
+
+async function loadProviders() {
+  const since = mutationSeq;
+  const listed = ++listRequestSeq;
+  const list = await bridge.apiPost("providers/list", {});
+  if (listed < listedSeq) return;
+  if (!Array.isArray(list?.providers)) throw new Error(t.listFailed);
+  providers = list.providers.map((p) => keepNewerEdits(p, since));
+  listedSeq = listed;
+  byId("page-error").hidden = true;
+  renderProviders();
+  if (!initializedExpansion && providers.length) {
+    initializedExpansion = true;
+    rowNodes.get(providers[0].id).panel.expanded = true;
+    renderProviders();
+  }
+}
+
+async function queryUsage(revealId = null) {
+  if (refreshPromise) return refreshPromise;
+  const pending = (async () => {
+    setRefreshing(true);
+    try {
+      await loadProviders();
+      const reveal = rowNodes.get(revealId)?.panel;
+      if (reveal) {
+        reveal.expanded = true;
+        renderProviders();
+      }
+    } catch (reason) {
+      byId("page-error").textContent = reason?.message || t.listFailed;
+      byId("page-error").hidden = false;
+    }
+    await Promise.all(providers.map((p) => queryProvider(p.id)));
   })();
   refreshPromise = pending;
   try { await pending; }
-  finally { if (refreshPromise === pending) refreshPromise = null; }
+  finally {
+    if (refreshPromise === pending) {
+      refreshPromise = null;
+      setRefreshing(false);
+    }
+  }
 }
 
 function markMutation(id) {
@@ -926,14 +999,16 @@ function runInChain(sourceId, task) {
 
 function renderSourceState(sourceId) {
   renderProviders();
-  if (sourceId === selectedSourceId) updateNotice();
+  const panel = rowNodes.get(sourceId)?.panel;
+  if (panel) updateNotice(panel);
 }
 
 function applyProvider(provider) {
   const index = providers.findIndex((p) => p.id === provider.id);
   if (index < 0) return;
   providers[index] = provider;
-  if (provider.id === selectedSourceId) return renderAccountStatus(provider);
+  const panel = rowNodes.get(provider.id)?.panel;
+  if (panel) return renderAccountStatus(panel, provider);
   return false;
 }
 
@@ -991,7 +1066,7 @@ async function writeProvider(sourceId, changes, { report = true } = {}) {
   outcome.followUp = reconcile
     ? reloadProviders()
     : refreshIdentity
-      ? refreshAccountUsage()
+      ? queryProvider(sourceId)
       : Promise.resolve();
   return outcome;
 }
@@ -1002,31 +1077,20 @@ async function saveProvider(sourceId, changes) {
   return outcome;
 }
 
-async function refreshAccountUsage() {
-  // A lookup for the previous identity may still be in flight. queryUsage's
-  // generation fence will discard it while this new lookup owns the spinner.
+async function refreshAccountUsage(revealId = null) {
+  // A completed login may replace an identity while its lookup is pending.
+  for (const { panel } of rowNodes.values()) invalidatePanel(panel);
   refreshPromise = null;
-  await queryUsage();
+  await queryUsage(revealId);
 }
 
-// Refetch the provider list, retaining quota only for the same account identity.
 async function reloadProviders() {
-  const since = mutationSeq;
-  const generation = viewGeneration;
   try {
-    const listed = ++listRequestSeq;
-    const list = await bridge.apiPost("providers/list", {});
-    if (generation !== viewGeneration) return;
-    if (!Array.isArray(list?.providers)) return;
-    providers = list.providers.map((p) => keepNewerEdits(p, since));
-    listedSeq = Math.max(listedSeq, listed);
-    const selected = providers.find((p) => p.id === selectedSourceId);
-    if (!selected) {
-      await queryUsage();
-      return;
-    }
-    renderProviders();
-    if (renderAccountStatus(selected)) await refreshAccountUsage();
+    await loadProviders();
+    await Promise.all(providers.filter((p) => {
+      const panel = rowNodes.get(p.id)?.panel;
+      return panel?.expanded && !panel.lastUsage;
+    }).map((p) => queryProvider(p.id)));
   } catch {
     // The save error stays visible; the next refresh retries the list.
   }
@@ -1285,17 +1349,14 @@ async function removeFromSettings() {
     session.busy = null;
     endSettings(byId("add-provider"));
   }
-  if (selectedSourceId === sourceId) await openProvider(null);
-  else await refreshAccountUsage();
+  await refreshAccountUsage();
 }
 
 function rerender() {
   renderProviders();
-  renderAccountStatus(account);
-  if (lastUsage) {
-    renderUsage({ status: "success", usage: lastUsage });
-  } else {
-    showUsageMessage(usageMessage);
+  for (const { panel } of rowNodes.values()) {
+    if (panel.lastUsage) renderUsage(panel, { status: "success", usage: panel.lastUsage });
+    else showUsageMessage(panel, panel.usageMessage);
   }
   renderUpdated();
   renderLogin();
@@ -1466,8 +1527,7 @@ function finishSuccess(sourceId) {
   login.savedId = sourceId || loginSourceId || null;
   login.listAfter = listRequestSeq;
   renderLogin();
-  if (login.savedId) void openProvider(login.savedId);
-  else void refreshAccountUsage();
+  void refreshAccountUsage(login.savedId);
 }
 
 function finishTimeout() {
@@ -1668,7 +1728,7 @@ function completeLogin() {
   login.savedId = null;
   if (loginDialog.open) loginDialog.close();
   const saved = Boolean(id) && providers.some((p) => p.id === id);
-  if (saved && (selectedSourceId !== id || !expanded)) void openProvider(id);
+  if (saved && !rowNodes.get(id)?.panel.expanded) void openProvider(id);
   // A renewal started from settings returns there; that dialog takes focus.
   if (settings?.suspended) {
     resumeSettings();
