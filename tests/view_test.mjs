@@ -810,6 +810,12 @@ bridge.apiPost = async (endpoint, body) => {
 await page.closeLogin();
 assert.equal(dialog.open, true);
 assert.equal(cancelCalls, 0);
+// Native dialog dismissal (for example repeated Escape) must not hide saving.
+dialog.close();
+await dialog.handlers.close();
+assert.equal(dialog.open, true);
+assert.equal(cancelCalls, 0, "a known saving session cannot be cancelled");
+
 // Repeated poll failures while saving never bring back an obsolete code.
 for (let attempt = 0; attempt < 5; attempt += 1) {
   const failedPoll = page.poll("device-fresh", 5);
@@ -817,13 +823,26 @@ for (let attempt = 0; attempt < 5; attempt += 1) {
   await failedPoll;
 }
 assert.match(read("error"), /Network unavailable/);
-assert.equal(shown("device-panel") || shown("cancel") || shown("start"), false);
+assert.equal(shown("device-panel") || shown("cancel"), false);
+assert.equal(shown("start"), true, "saving failures need a retry action");
+assert.equal(read("start"), "重试查询");
 // Closing now asks the server; a refused cancel (409) keeps the session.
 cancelResponse = Promise.reject(new Error("授权已完成，正在保存或已保存 Provider，请等待登录结果。"));
 await page.closeLogin();
 assert.equal(dialog.open, true);
 assert.equal(cancelCalls, 1);
 assert.match(read("error"), /正在保存或已保存/);
+// Retry checks the same session without cancelling or starting another login.
+const startsBeforeStatusRetry = loginStarts;
+const cancelsBeforeStatusRetry = cancelCalls;
+const statusRetry = page.startLogin();
+await tick();
+assert.equal(loginStarts, startsBeforeStatusRetry);
+assert.equal(cancelCalls, cancelsBeforeStatusRetry);
+pollFailure(new Error("Still offline"));
+await statusRetry;
+assert.equal(ids.get("error").hidden, true, "retry resets the poll failure budget");
+assert.match(read("status"), /正在重试/);
 cancelResponse = null;
 bridge.apiPost = originalPost;
 
@@ -935,5 +954,36 @@ contextHandler({locale: "zh-CN"});
 assert.match(read("status"), /输入设备码并确认/);
 await page.closeLogin();
 assert.equal(dialog.open, false);
+cancelResponse = null;
+// A forced close while obtaining a code must not orphan the arriving session.
+page.openLogin();
+const startingGate = deferred();
+startResponse = startingGate.promise;
+const requestingLogin = page.startLogin();
+await tick();
+dialog.close();
+await dialog.handlers.close();
+assert.equal(dialog.open, true);
+startingGate.resolve({status: "pending", session_id: "last-session", interval: 5, user_code: "last-code", verify_url: "https://example.com"});
+await tick();
+pollResult({status: "pending"});
+await requestingLogin;
+startResponse = null;
+
+// If cancelling a natively closed dialog fails, keep the session visible.
+cancelResponse = Promise.reject(new Error("Cancellation unavailable"));
+dialog.close();
+await dialog.handlers.close();
+assert.equal(dialog.open, true);
+assert.match(read("error"), /Cancellation unavailable/);
+// A queued close event from an earlier dismissal cannot cancel a reopened dialog.
+cancelResponse = {status: "cancelled"};
+await dialog.handlers.close();
+assert.equal(shown("cancel"), true);
+// Once cancellation is confirmed, native dismissal stays closed.
+dialog.close();
+await dialog.handlers.close();
+assert.equal(dialog.open, false);
+assert.equal(shown("cancel"), false);
 cancelResponse = null;
 console.log("View regressions passed: device login dialog (open, copy, saving, success, done, failure recovery), quota windows, provider selection, stale-result isolation, login and cancellation races, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");

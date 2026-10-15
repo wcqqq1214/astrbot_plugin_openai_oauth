@@ -115,6 +115,7 @@ const strings = {
     requesting: "Getting a device code",
     waiting: "Enter the code on the OpenAI page and confirm",
     retrying: "Connection interrupted. Retrying",
+    retryStatus: "Retry status check",
     savingLogin: "Authorized. Saving the provider",
     success: "Provider saved",
     successDetail: "Select it in AstrBot model settings to use it.",
@@ -229,6 +230,7 @@ const strings = {
     requesting: "正在获取设备码",
     waiting: "在 OpenAI 授权页输入设备码并确认",
     retrying: "连接暂时中断，正在重试",
+    retryStatus: "重试查询",
     savingLogin: "已授权，正在保存 Provider",
     success: "Provider 已保存",
     successDetail: "在 AstrBot 模型配置中选择它即可使用。",
@@ -1168,9 +1170,11 @@ function renderLogin() {
       ? t.start
       : phase === "timeout"
         ? t.restartCode
-        : t.restart;
-  startButton.hidden = !formPhases.includes(phase) || (live && login.saving);
-  startButton.disabled = phase === "requesting";
+        : live && login.saving
+          ? t.retryStatus
+          : t.restart;
+  startButton.hidden = !formPhases.includes(phase);
+  startButton.disabled = phase === "requesting" || cancelling;
   doneButton.textContent = t.done;
   doneButton.hidden = phase !== "success";
   closeButton.disabled = phase === "requesting" || phase === "saving";
@@ -1294,6 +1298,18 @@ async function poll(sessionId, intervalSeconds) {
 }
 
 async function startLogin() {
+  if (login.phase === "requesting" || cancelling) return;
+  if (activeSessionId && login.saving) {
+    // Saving cannot be cancelled. Recover by checking the same session again.
+    clearPollTimer();
+    consecutivePollFailures = 0;
+    login.phase = "saving";
+    login.error = "";
+    login.retrying = true;
+    renderLogin();
+    await poll(activeSessionId, 2);
+    return;
+  }
   if (activeSessionId) {
     await cancelLogin();
     if (activeSessionId) return;
@@ -1508,9 +1524,20 @@ loginDialog.addEventListener("cancel", (event) => {
 });
 // The browser may still close the dialog itself (repeated Escape). Treat
 // that like the close button so no session keeps running unseen.
-loginDialog.addEventListener("close", () => {
-  if (login.phase === "success") completeLogin();
-  else if (activeSessionId && !cancelling) void cancelLogin();
+loginDialog.addEventListener("close", async () => {
+  // The close event is queued: it may arrive after the dialog was reopened.
+  if (loginDialog.open) return;
+  if (login.phase === "success") {
+    completeLogin();
+    return;
+  }
+  if (activeSessionId && !login.saving && !cancelling) await cancelLogin();
+  // Browsers can force-close a dialog despite its cancel handler. Keep an
+  // unresolved session visible, including a start request still in flight.
+  if (!loginDialog.open && (activeSessionId || login.phase === "requesting")) {
+    loginDialog.showModal();
+    renderLogin();
+  }
 });
 window.setInterval(() => {
   if (!document.hidden && !loginDialog.open) void queryUsage();
