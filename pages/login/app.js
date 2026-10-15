@@ -270,11 +270,12 @@ const plans = {
   enterprise: "Enterprise",
   edu: "Edu",
 };
+const codexIcon =
+  '<img class="codex-icon-light" src="./icons/codex-color.svg" alt="" width="34" height="34">' +
+  '<img class="codex-icon-dark" src="./icons/codex-color-dark.svg" alt="" width="34" height="34">';
 const providerIcons = {
-  local:
-    '<svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M7.5 9.5l2.5 2.5-2.5 2.5M12.5 14.5h4"/></svg>',
-  device:
-    '<svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M10.9 12.1L19.5 3.5M16 7l2.5 2.5"/></svg>',
+  local_codex: codexIcon,
+  device_oauth: '<span class="openai-icon"></span>',
 };
 const chevronIcon = '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>';
 // Rows persist across refreshes and are updated in place, so the detail
@@ -743,7 +744,7 @@ function providerRow(id) {
   toggle.append(element("span", "switch-track"));
   toggle.addEventListener("click", () => void toggleEnabled(id));
   row.append(main, toggle);
-  node = { row, main, icon, name, disabledTag, autoTag, sub, meta, metaText, toggle, mode: null };
+  node = { row, main, icon, name, disabledTag, autoTag, sub, meta, metaText, toggle, iconMode: null };
   rowNodes.set(id, node);
   return node;
 }
@@ -754,16 +755,15 @@ function renderProviders() {
     const provider = effective(confirmed);
     const node = providerRow(provider.id);
     const local = provider.credential_mode === "local_codex";
+    const iconMode = local ? "local_codex" : "device_oauth";
+    if (node.iconMode !== iconMode) {
+      node.iconMode = iconMode;
+      node.icon.innerHTML = providerIcons[iconMode];
+    }
     const selected = provider.id === selectedSourceId;
     const state = String(provider.status || "unknown");
-    const mode = local ? "local" : "device";
     const enabled = isEnabled(provider);
     const busy = isSaving(provider.id);
-    if (node.mode !== mode) {
-      node.mode = mode;
-      node.icon.className = "provider-icon " + mode;
-      node.icon.innerHTML = providerIcons[mode];
-    }
     node.row.className =
       "provider-row" +
       (selected ? " selected" : "") +

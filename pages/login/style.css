@@ -679,17 +679,24 @@ dialog::backdrop {
   width: 34px;
   height: 34px;
   flex-shrink: 0;
-  border-radius: var(--radius);
-  background: var(--muted-surface);
-  color: var(--secondary);
 }
-.provider-icon.local {
-  background: var(--primary-soft);
-  color: var(--primary);
+.provider-icon img {
+  display: block;
+  width: 34px;
+  height: 34px;
 }
-.provider-icon svg {
-  width: 18px;
-  height: 18px;
+.provider-icon .codex-icon-dark,
+:root[data-theme="dark"] .provider-icon .codex-icon-light {
+  display: none;
+}
+:root[data-theme="dark"] .provider-icon .codex-icon-dark {
+  display: block;
+}
+.provider-icon .openai-icon {
+  width: 28px;
+  height: 28px;
+  background-color: var(--text);
+  mask: url("./icons/openai.svg") center / contain no-repeat;
 }
 .provider-copy {
   display: grid;
