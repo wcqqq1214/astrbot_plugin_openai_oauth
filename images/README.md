@@ -1,7 +1,8 @@
 # README screenshots
 
-The provider screenshots were captured on 2026-10-16 from main commit
-`1d173430f47c45e2e37745104bded81a4e059aa2`.
+The provider screenshots were captured on 2026-10-16. The overview was refreshed
+from main commit `87d0fa6dfb67dd5dfe08233897eb3d03d861e9d2`; the settings dialog
+was captured from `1d173430f47c45e2e37745104bded81a4e059aa2`.
 
 - `providers-overview-zh.png` / `providers-overview-en.png`: two independent
   allowance panels expanded, with source settings and enable controls visible.
@@ -10,8 +11,9 @@ The provider screenshots were captured on 2026-10-16 from main commit
 
 These are browser captures of the unchanged production HTML, CSS, JavaScript,
 and icons in `pages/providers/`. A temporary local bridge fixture supplied
-sample accounts (`codex@example.com` and `backup@example.com`) and allowance
-values. No real credentials, sign-in sessions, or model requests were used.
+sample accounts: Plus (`codex@example.com`) with five-hour and weekly windows,
+and Pro (`backup@example.com`) with a weekly window only. Allowance values are
+examples. No real credentials, sign-in sessions, or model requests were used.
 The README captions identify these values as examples.
 
 Capture settings: headless Chrome, a 1024 × 800 CSS-pixel viewport, 2× device
