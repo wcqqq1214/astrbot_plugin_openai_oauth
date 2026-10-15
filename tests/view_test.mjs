@@ -161,8 +161,6 @@ const document = {
 };
 const copyCommands = [];
 let execCopyResult = true;
-const opened = [];
-let openResult = () => ({ opener: "page" });
 const clipboardWrites = [];
 let clipboardResult = "reject";
 let clipboardHold = null;
@@ -173,11 +171,7 @@ const window = {
     return 1;
   },
   clearTimeout() {},
-  open(url, target) {
-    const tab = openResult();
-    opened.push({ url, target, tab });
-    return tab;
-  },
+
 };
 const navigator = {
   clipboard: {
@@ -318,7 +312,7 @@ assert.match(read("status"), /登录会话已失效/);
 assert.equal(ids.get("error").hidden, true, "an expired session is not reported as a failure");
 assert.equal(ids.get("device-panel").hidden, true);
 assert.equal(ids.get("user-code").value, "");
-assert.equal(ids.get("open-verify").getAttribute("href"), null);
+assert.equal(ids.get("verify-url").value, "");
 assert.equal(ids.get("cancel").hidden, true);
 assert.equal(ids.get("start").hidden, false);
 assert.ok(listCalls > listsBeforeExpiry);
@@ -697,45 +691,23 @@ assert.ok(shown("login-name-field") && shown("login-intro"));
 assert.equal(read("start"), "获取设备码");
 assert.equal(shown("device-panel"), false);
 ids.get("login-name").value = "   ";
+ids.get("start").focus();
 let waitingLogin = page.startLogin();
 await tick();
 assert.deepEqual({...deviceBody}, {});
-// Waiting: the code and the main open action replace the form.
+// Waiting: both copy actions and the browser instructions replace the form.
 assert.ok(shown("device-panel"));
 assert.equal(ids.get("user-code").value, "test-code");
-assert.equal(ids.get("open-verify").getAttribute("href"), "https://example.com/");
+assert.equal(read("copy-code"), "复制设备码");
+assert.equal(read("copy-url"), "复制授权链接");
+assert.equal(read("device-hint"), "在浏览器中打开链接，输入设备码完成授权。");
+assert.equal(ids.has("open-verify"), false);
+assert.equal(document.activeElement, ids.get("copy-code"), "focus moves to the code copy action");
 assert.equal(ids.get("verify-url").value, "https://example.com/");
 assert.equal(shown("login-name-field") || shown("login-intro"), false);
-assert.match(read("status"), /输入设备码并确认/);
+assert.match(read("status"), /等待授权/);
 assert.equal(ids.get("status-dots").hidden, false);
 assert.ok(shown("cancel") && !shown("start") && !shown("done"));
-
-// Opening uses the server URL from the click itself and drops the opener.
-const openLink = ids.get("open-verify");
-let prevented = 0;
-const clickEvent = (extra = {}) => ({button: 0, preventDefault: () => { prevented += 1; }, ...extra});
-openLink.handlers.click(clickEvent());
-assert.equal(opened.length, 1);
-assert.equal(opened[0].url, "https://example.com/");
-assert.equal(opened[0].target, "_blank");
-assert.equal(opened[0].tab.opener, null);
-assert.equal(prevented, 1);
-// Modified clicks stay with the browser.
-openLink.handlers.click(clickEvent({ctrlKey: true}));
-assert.equal(opened.length, 1);
-assert.equal(prevented, 1);
-// A sandboxed page gets no window back: copy the link instead.
-openResult = () => null;
-openLink.handlers.click(clickEvent());
-await tick();
-assert.equal(copyCommands.at(-1), "https://example.com/");
-assert.match(read("copy-status"), /无法打开新标签页，已复制链接/);
-execCopyResult = false;
-openLink.handlers.click(clickEvent());
-await tick();
-assert.match(read("copy-status"), /请复制链接后在浏览器中打开/);
-execCopyResult = true;
-openResult = () => ({ opener: "page" });
 
 // Copying the code or the link reports which one was copied.
 await ids.get("copy-code").handlers.click();
@@ -780,7 +752,7 @@ clipboardHold.resolve();
 await slowCopy;
 await tick();
 assert.equal(read("copy-status"), "", "a late copy result must not describe the new code");
-assert.equal(read("copy-code"), "复制");
+assert.equal(read("copy-code"), "复制设备码");
 execCopyResult = true;
 clipboardResult = "reject";
 // Continue with the fresh session, as the server would.
@@ -922,7 +894,7 @@ waitingLogin = page.startLogin();
 await tick();
 assert.equal(ids.get("error").hidden, true);
 assert.ok(shown("device-panel"));
-// An unsafe verification URL is never linked.
+// An unsafe verification URL is never displayed or offered for copying.
 pollResult({status: "pending"});
 await waitingLogin;
 startResponse = {status: "pending", session_id: "device-two", interval: 5, user_code: "next-code", verify_url: "javascript:alert(1)"};
@@ -930,28 +902,29 @@ cancelResponse = {status: "cancelled"};
 waitingLogin = page.startLogin();
 await tick();
 assert.equal(ids.get("user-code").value, "next-code");
-assert.equal(ids.get("open-verify").getAttribute("href"), null);
-assert.equal(shown("open-verify") || shown("verify-row"), false);
+assert.equal(ids.get("verify-url").value, "");
+assert.equal(shown("verify-row"), false);
 // The previous session's late result cannot affect the new one.
 startResponse = null;
 const latePoll = page.poll("device-one", 5);
 pollResult({status: "success", source_id: "device"});
 await latePoll;
 assert.equal(ids.get("user-code").value, "next-code");
-assert.match(read("status"), /输入设备码并确认/);
+assert.match(read("status"), /等待授权/);
 
 // Labels and states follow a locale change while the dialog is open.
 page.openLogin();
 [waitingLogin] = await startDevice();
 contextHandler({locale: "en-US"});
-assert.equal(read("open-verify-label"), "Open OpenAI authorization page");
+assert.equal(read("device-hint"), "Open the link in your browser and enter the device code to authorize.");
+assert.equal(read("copy-code"), "Copy device code");
 assert.equal(read("code-label"), "Device code");
-assert.equal(read("copy-url"), "Copy link");
+assert.equal(read("copy-url"), "Copy authorization link");
 assert.equal(read("cancel"), "Cancel login");
-assert.match(read("status"), /Enter the code on the OpenAI page/);
+assert.match(read("status"), /Waiting for authorization/);
 assert.equal(ids.get("verify-url").attributes["aria-label"], "OpenAI authorization link");
 contextHandler({locale: "zh-CN"});
-assert.match(read("status"), /输入设备码并确认/);
+assert.match(read("status"), /等待授权/);
 await page.closeLogin();
 assert.equal(dialog.open, false);
 cancelResponse = null;
@@ -986,4 +959,4 @@ await dialog.handlers.close();
 assert.equal(dialog.open, false);
 assert.equal(shown("cancel"), false);
 cancelResponse = null;
-console.log("View regressions passed: device login dialog (open, copy, saving, success, done, failure recovery), quota windows, provider selection, stale-result isolation, login and cancellation races, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");
+console.log("View regressions passed: device login dialog (copy instructions, copy, saving, success, done, failure recovery), quota windows, provider selection, stale-result isolation, login and cancellation races, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");

@@ -95,25 +95,21 @@ const strings = {
       `Sign in to ChatGPT again for ${name}. Its name and settings stay the same.`,
     optional: "Optional",
     codeLabel: "Device code",
-    openVerify: "Open OpenAI authorization page",
+    deviceHint: "Open the link in your browser and enter the device code to authorize.",
     verifyLink: "OpenAI authorization link",
-    copyUrl: "Copy link",
-    copyCode: "Copy",
+    copyUrl: "Copy authorization link",
+    copyCode: "Copy device code",
     copiedShort: "Copied",
     copiedCode: "Device code copied.",
     copiedUrl: "Link copied. Open it in any browser or account.",
     copyFailed: "Copy failed. Select the text and copy it manually.",
-    openBlocked:
-      "This page cannot open new tabs. The link was copied; paste it into your browser.",
-    openBlockedManual:
-      "This page cannot open new tabs. Copy the link and open it in your browser.",
     start: "Get device code",
     restartCode: "Get a new code",
     restart: "Log in again",
     cancel: "Cancel login",
     done: "Done",
     requesting: "Getting a device code",
-    waiting: "Enter the code on the OpenAI page and confirm",
+    waiting: "Waiting for authorization",
     retrying: "Connection interrupted. Retrying",
     retryStatus: "Retry status check",
     savingLogin: "Authorized. Saving the provider",
@@ -212,23 +208,21 @@ const strings = {
     introRenew: (name) => `为「${name}」重新登录 ChatGPT，名称和设置保持不变。`,
     optional: "可选",
     codeLabel: "设备码",
-    openVerify: "打开 OpenAI 授权页",
+    deviceHint: "在浏览器中打开链接，输入设备码完成授权。",
     verifyLink: "授权链接",
-    copyUrl: "复制链接",
-    copyCode: "复制",
+    copyUrl: "复制授权链接",
+    copyCode: "复制设备码",
     copiedShort: "已复制",
     copiedCode: "设备码已复制。",
     copiedUrl: "链接已复制，可在其他浏览器或账号中打开。",
     copyFailed: "复制失败，请手动选择并复制。",
-    openBlocked: "当前页面无法打开新标签页，已复制链接，请粘贴到浏览器中打开。",
-    openBlockedManual: "当前页面无法打开新标签页，请复制链接后在浏览器中打开。",
     start: "获取设备码",
     restartCode: "重新获取设备码",
     restart: "重新登录",
     cancel: "取消登录",
     done: "完成",
     requesting: "正在获取设备码",
-    waiting: "在 OpenAI 授权页输入设备码并确认",
+    waiting: "等待授权",
     retrying: "连接暂时中断，正在重试",
     retryStatus: "重试查询",
     savingLogin: "已授权，正在保存 Provider",
@@ -254,7 +248,6 @@ const notice = byId("notice");
 const loginIntro = byId("login-intro");
 const loginNameInput = byId("login-name");
 const devicePanel = byId("device-panel");
-const openVerifyLink = byId("open-verify");
 const loginState = byId("login-state");
 const stateIcon = byId("state-icon");
 const statusDetail = byId("status-detail");
@@ -380,7 +373,7 @@ function applyLocale(locale) {
     "login-name-optional": t.optional,
     privacy: t.privacy,
     "code-label": t.codeLabel,
-    "open-verify-label": t.openVerify,
+    "device-hint": t.deviceHint,
     "copy-url": t.copyUrl,
     "copy-code": t.copyCode,
   }))
@@ -1133,9 +1126,6 @@ function renderLogin() {
   userCode.value = showCode ? login.code : "";
   const url = showCode ? safeVerifyUrl(login.url) : "";
   verifyUrl.value = url;
-  if (url) openVerifyLink.setAttribute("href", url);
-  else openVerifyLink.removeAttribute("href");
-  openVerifyLink.hidden = !url;
   byId("verify-row").hidden = !url;
   copyStatus.textContent = showCode ? login.note : "";
 
@@ -1188,8 +1178,8 @@ function focusLoginAction() {
   const unusable = (node) =>
     !node || node.hidden || node.disabled || Boolean(node.closest?.("[hidden]"));
   if (active && active !== document.body && !unusable(active)) return;
-  const next = [openVerifyLink, doneButton, startButton].find(
-    (node) => !unusable(node) && (node !== openVerifyLink || node.getAttribute("href")),
+  const next = [!devicePanel.hidden && copyCodeButton, doneButton, startButton].find(
+    (node) => !unusable(node),
   );
   next?.focus?.();
 }
@@ -1410,45 +1400,20 @@ function flashCopied(button) {
   );
 }
 
-async function copyField(field, button, messages = {}) {
+async function copyField(field, button) {
   const sessionId = activeSessionId;
   const copied = await copyText(field);
   // The session may have ended while the clipboard call was pending.
   if (activeSessionId !== sessionId || devicePanel.hidden) return;
   if (copied) {
-    login.note = messages.copied || (field === userCode ? t.copiedCode : t.copiedUrl);
-    if (button) flashCopied(button);
+    login.note = field === userCode ? t.copiedCode : t.copiedUrl;
+    flashCopied(button);
   } else {
-    login.note = messages.failed || t.copyFailed;
+    login.note = t.copyFailed;
     field.focus?.();
     field.select?.();
   }
   copyStatus.textContent = login.note;
-}
-
-// Open the server-provided URL from the click itself. A sandboxed plugin
-// page without popup permission gets null back, so copy the link instead.
-function openVerification(event) {
-  const url = openVerifyLink.getAttribute("href");
-  if (!url) return;
-  // Leave modified clicks (new window, background tab) to the browser.
-  if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  event.preventDefault();
-  let opened = null;
-  try {
-    opened = window.open(url, "_blank");
-  } catch {
-    opened = null;
-  }
-  if (opened) {
-    try {
-      opened.opener = null;
-    } catch {
-      // Nothing else to do; the tab is already open.
-    }
-    return;
-  }
-  void copyField(verifyUrl, null, { copied: t.openBlocked, failed: t.openBlockedManual });
 }
 
 // Close after a successful login and reveal the saved provider.
@@ -1488,7 +1453,6 @@ copyCodeButton.addEventListener(
   "click",
   () => void copyField(userCode, copyCodeButton),
 );
-openVerifyLink.addEventListener("click", openVerification);
 loginNameInput.addEventListener("keydown", (event) => {
   if (event.isComposing || event.keyCode === 229) return;
   if (event.key === "Enter" && !startButton.hidden && !startButton.disabled) {

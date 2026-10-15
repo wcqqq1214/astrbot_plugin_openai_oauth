@@ -511,7 +511,7 @@ dialog::backdrop {
   letter-spacing: 4px;
 }
 
-/* Device code, the main open action and the raw link for other browsers. */
+/* Device code and authorization link for copying into the browser. */
 .device-panel {
   display: grid;
   gap: 10px;
@@ -525,20 +525,20 @@ dialog::backdrop {
 .device-label + .code-row {
   margin-top: -4px;
 }
-.button.block {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  padding: 10px 14px;
-  font-size: 14px;
-  text-decoration: none;
+.device-hint {
+  font-size: 13px;
+  color: var(--secondary);
 }
-.button.block svg {
-  width: 15px;
-  height: 15px;
-  stroke-width: 2;
+@media (max-width: 520px) {
+  .code-row {
+    flex-wrap: wrap;
+  }
+  .code-row .device-code {
+    flex-basis: 100%;
+  }
+  .code-row button {
+    margin-left: auto;
+  }
 }
 .link-row {
   display: flex;
