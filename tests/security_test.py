@@ -152,7 +152,11 @@ class LoginBoundaryTests(unittest.TestCase):
                 status = await plugin._handle_account_status()
             with bind_request_context(_plugin_request(username="api_key:key-1")):
                 usage = await plugin._handle_account_usage()
-            return start, status, usage
+            with bind_request_context(_plugin_request(username="api_key:key-1")):
+                listing = await plugin._handle_providers_list()
+                update = await plugin._handle_provider_update()
+                delete = await plugin._handle_provider_delete()
+            return start, status, usage, listing, update, delete
 
         with mock.patch.object(
             plugin,
@@ -175,6 +179,9 @@ class LoginBoundaryTests(unittest.TestCase):
         self.assertEqual(
             routes,
             [
+                "/astrbot_plugin_openai_oauth/providers/list",
+                "/astrbot_plugin_openai_oauth/providers/update",
+                "/astrbot_plugin_openai_oauth/providers/delete",
                 "/astrbot_plugin_openai_oauth/device/start",
                 "/astrbot_plugin_openai_oauth/device/poll",
                 "/astrbot_plugin_openai_oauth/device/cancel",
@@ -214,15 +221,17 @@ class LoginBoundaryTests(unittest.TestCase):
 
         first, second, stolen_poll = asyncio.run(run())
         self.assertEqual(first.status_code, 200)
-        self.assertEqual(second.status_code, 409)
+        self.assertEqual(second.status_code, 429)
         self.assertEqual(stolen_poll.status_code, 404)
 
     def test_login_sessions_have_a_per_user_limit(self) -> None:
         async def wait_forever(*_args):
             await asyncio.Event().wait()
 
-        async def start(username: str):
-            with bind_request_context(_plugin_request(username=username)):
+        async def start(username: str, name: str = "ChatGPT"):
+            with bind_request_context(
+                _plugin_request({"name": name}, username=username)
+            ):
                 return await plugin._handle_device_start()
 
         async def run():
@@ -241,16 +250,18 @@ class LoginBoundaryTests(unittest.TestCase):
                 first = await start("owner-a")
                 same_owner = await start("owner-a")
                 other_owner = await start("owner-b")
-                return first, same_owner, other_owner
+                over_limit = await start("owner-a", "Another provider")
+                return first, same_owner, other_owner, over_limit
 
-        first, same_owner, other_owner = asyncio.run(run())
+        first, same_owner, other_owner, over_limit = asyncio.run(run())
         self.assertEqual(first.status_code, 200)
         self.assertEqual(same_owner.status_code, 200)
         self.assertEqual(
             _payload(first)["session_id"],
             _payload(same_owner)["session_id"],
         )
-        self.assertEqual(other_owner.status_code, 409)
+        self.assertEqual(other_owner.status_code, 200)
+        self.assertEqual(over_limit.status_code, 429)
 
     def test_expiry_cancels_task_and_removes_session(self) -> None:
         async def run():
@@ -309,7 +320,7 @@ class LoginBoundaryTests(unittest.TestCase):
                 session_id = _payload(start)["session_id"]
                 for _ in range(20):
                     session = plugin._login_sessions.get(session_id)
-                    if session and session.get("status") != "pending":
+                    if session and session.get("status") not in {"pending", "saving"}:
                         break
                     await asyncio.sleep(0)
                 with bind_request_context(
@@ -324,7 +335,9 @@ class LoginBoundaryTests(unittest.TestCase):
 
         first_poll, replay = asyncio.run(run())
         first_data = _payload(first_poll)
-        self.assertEqual(first_data, {"status": "success", "error": None})
+        self.assertEqual(first_data["status"], "success")
+        self.assertIsNone(first_data["error"])
+        self.assertEqual(set(first_data), {"status", "error", "source_id"})
         self.assertEqual(first_poll.headers["cache-control"], "no-store")
         self.assertEqual(replay.status_code, 404)
         source = fake_manager.default_conf["provider_sources"][0]
@@ -359,7 +372,7 @@ class LoginBoundaryTests(unittest.TestCase):
                 session_id = _payload(start)["session_id"]
                 for _ in range(20):
                     session = plugin._login_sessions.get(session_id)
-                    if session and session.get("status") != "pending":
+                    if session and session.get("status") not in {"pending", "saving"}:
                         break
                     await asyncio.sleep(0)
                 with bind_request_context(

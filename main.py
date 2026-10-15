@@ -214,12 +214,24 @@ class OpenAI_OAuth_Plugin(Star):
         super().__init__(context)
         _config_mgr = context.astrbot_config_mgr
         self.config = config if config is not None else AstrBotConfig()
-        _local_codex_store = (
-            LocalCodexStore(str(self.config.get("codex_auth_path", "") or ""))
-            if self.config.get("follow_local_codex", True)
-            else None
+        _local_codex_store = LocalCodexStore(
+            str(self.config.get("codex_auth_path", "") or "")
         )
-        _get_credential_coordinator()
+        coordinator = _get_credential_coordinator()
+        coordinator.legacy_follow_local = self.config.get("follow_local_codex", True)
+        manager = getattr(context, "provider_manager", None)
+        if manager is not None:
+            coordinator.providers.on_change = lambda sources: setattr(
+                manager, "provider_sources_config", sources
+            )
+        for route, handler in (
+            ("providers/list", _handle_providers_list),
+            ("providers/update", _handle_provider_update),
+            ("providers/delete", _handle_provider_delete),
+        ):
+            self.context.register_web_api(
+                "/astrbot_plugin_openai_oauth/" + route, handler, ["POST"], route
+            )
         self.context.register_web_api(
             "/astrbot_plugin_openai_oauth/device/start",
             _handle_device_start,
@@ -258,11 +270,21 @@ class OpenAI_OAuth_Plugin(Star):
     @filter.command("usage")
     async def usage(self, event: AstrMessageEvent) -> None:
         """查询 OpenAI 订阅剩余额度。"""
-        if not _is_logged_in():
-            # 未登录时命令不可用：静默拦截，不触发默认 LLM。
-            event.should_call_llm(False)
+        event.should_call_llm(False)
+        selected = event.get_extra("selected_provider")
+        provider = (
+            self.context.get_provider_by_id(selected)
+            if selected
+            else await self.context.get_using_provider_async(
+                umo=event.unified_msg_origin
+            )
+        )
+        if provider is None or provider.meta().type != _PROVIDER_TYPE:
+            await event.send(MessageChain().message("请先选择 OpenAI Subscribe 模型。"))
             return
-        await event.send(MessageChain().message(await build_usage_message()))
+        await event.send(
+            MessageChain().message(await build_usage_message(provider._source_id))
+        )
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("effort")
@@ -362,7 +384,7 @@ class OpenAI_OAuth_Plugin(Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("openai_login")
     async def openai_login(self, event: AstrMessageEvent) -> None:
-        """Start the administrator-only private-chat device login fallback."""
+        """Add a provider through administrator-only private-chat device login."""
         event.should_call_llm(False)
         if not _is_private_login_event(event):
             await event.send(
@@ -481,9 +503,19 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         self._bootstrap_access_token = str(
             bootstrap_creds.get("access_token", "") or ""
         )
-        self._source_id = str(
-            provider_config.get("provider_source_id") or _PROVIDER_TYPE
-        )
+        source_id = provider_config.get("provider_source_id")
+        if not source_id and _config_mgr is not None:
+            sources = _config_mgr.default_conf.get("provider_sources", [])
+            source_id = next(
+                (
+                    s["id"]
+                    for s in sources
+                    if s.get("id") == provider_config.get("id")
+                    and s.get("type") == _PROVIDER_TYPE
+                ),
+                None,
+            )
+        self._source_id = str(source_id or _PROVIDER_TYPE)
         self._originator = str(provider_config.get("originator", DEFAULT_ORIGINATOR))
         self._user_agent = str(provider_config.get("user_agent", DEFAULT_USER_AGENT))
         raw_headers = provider_config.get("custom_headers")
@@ -1207,10 +1239,10 @@ async def _fetch_source_usage(source_id: str = _PROVIDER_TYPE) -> dict[str, Any]
     return usage
 
 
-async def build_usage_message() -> str:
-    """Fetch the default source's quota through the credential coordinator."""
+async def build_usage_message(source_id: str = _PROVIDER_TYPE) -> str:
+    """Fetch the selected source's quota through the credential coordinator."""
     try:
-        usage = await _fetch_source_usage()
+        usage = await _fetch_source_usage(source_id)
     except CredentialCooldownError as exc:
         return _format_cooldown(exc.cooldown_until)
     except (CredentialsNotConfiguredError, ReauthenticationRequiredError):
@@ -1304,18 +1336,40 @@ async def _handle_device_start() -> Any:
     body = await request.json(default={}) or {}
     if not isinstance(body, dict):
         return _login_error_response("请求格式无效", 400)
+    coordinator = _get_credential_coordinator()
+    source_id = body.get("source_id")
+    creating = source_id is None
     try:
-        proxy = _get_credential_coordinator().source_settings()["proxy"]
-    except CredentialSourceError:
-        proxy = ""
+        if creating:
+            name = coordinator.providers.name(body.get("name", "ChatGPT"))
+            proxy = ""
+        else:
+            if not isinstance(source_id, str) or not source_id:
+                raise CredentialSourceError("Invalid provider ID.")
+            source = coordinator._source(source_id)
+            if source.get("credential_mode", "device_oauth") != "device_oauth":
+                raise CredentialSourceError(
+                    "Sign in to local Codex on the AstrBot host."
+                )
+            name = source.get("name") or source_id
+            proxy = coordinator.source_settings(source_id)["proxy"]
+    except CredentialError as exc:
+        return _login_error_response(str(exc), 400)
     owner = str(request.username)
     _prune_expired_login_sessions()
     for existing_id, existing in _login_sessions.items():
-        if existing.get("source_id") != _PROVIDER_TYPE or existing.get(
-            "status"
-        ) not in {"starting", "pending"}:
+        if existing.get("status") not in {"starting", "pending", "saving"}:
             continue
-        if secrets.compare_digest(str(existing.get("owner", "")), owner):
+        same_owner = secrets.compare_digest(str(existing.get("owner", "")), owner)
+        same_target = (
+            creating
+            and existing.get("creating")
+            and same_owner
+            and existing.get("name") == name
+        ) or (not creating and existing.get("source_id") == source_id)
+        if not same_target:
+            continue
+        if same_owner:
             if existing.get("status") != "pending":
                 return _login_error_response("设备登录正在启动，请稍后重试", 409)
             return json_response(
@@ -1328,7 +1382,7 @@ async def _handle_device_start() -> Any:
                 },
                 headers=_NO_STORE_HEADERS,
             )
-        return _login_error_response("另一位用户正在登录该 OpenAI source", 409)
+        return _login_error_response("另一位用户正在登录该 Provider", 409)
     if len(_login_sessions) >= _MAX_LOGIN_SESSIONS:
         return _login_error_response("设备登录会话已达上限，请稍后重试", 429)
     owner_sessions = sum(
@@ -1343,7 +1397,9 @@ async def _handle_device_start() -> Any:
     session_id = secrets.token_urlsafe(32)
     session = {
         "owner": owner,
-        "source_id": _PROVIDER_TYPE,
+        "source_id": coordinator.providers.new_id() if creating else source_id,
+        "name": name,
+        "creating": creating,
         "status": "starting",
         "device_auth_id": None,
         "user_code": None,
@@ -1391,9 +1447,18 @@ async def _handle_device_start() -> Any:
     )
 
 
-async def _persist_login_credentials(creds: dict[str, Any]) -> None:
-    """Persist credentials produced by the server-owned device session."""
-    await _get_credential_coordinator().replace_credentials(_PROVIDER_TYPE, creds)
+async def _persist_login_credentials(
+    creds: dict[str, Any],
+    *,
+    source_id: str | None = None,
+    name: str = "ChatGPT",
+    creating: bool = True,
+) -> str:
+    """Persist only the provider bound to the server-owned device session."""
+    registry = _get_credential_coordinator().providers
+    source_id = source_id or registry.new_id()
+    await registry.save_login(source_id, name, creds, creating=creating)
+    return source_id
 
 
 async def _complete_device_login(
@@ -1433,7 +1498,13 @@ async def _run_device_login(session_id: str, proxy: str) -> None:
             interval=session["interval"],
             proxy=proxy,
         )
-        await _persist_login_credentials(creds)
+        session["status"] = "saving"
+        await _persist_login_credentials(
+            creds,
+            source_id=session["source_id"],
+            name=session["name"],
+            creating=session["creating"],
+        )
         session["status"] = "success"
         logger.info("OpenAI Codex device login succeeded.")
     except asyncio.CancelledError:
@@ -1468,7 +1539,7 @@ async def _run_command_device_login(
             interval=interval,
             proxy=proxy,
         )
-        await _persist_login_credentials(creds)
+        source_id = await _persist_login_credentials(creds)
     except asyncio.CancelledError:
         raise
     except DeviceAuthTimeout:
@@ -1482,7 +1553,9 @@ async def _run_command_device_login(
         await event.send(MessageChain().message("OpenAI 登录或保存失败，请重试。"))
     else:
         await event.send(
-            MessageChain().message("OpenAI 登录成功，凭据已由 AstrBot 服务端保存。")
+            MessageChain().message(
+                f"OpenAI 登录成功，已新增 Provider：{source_id}。请在模型配置中选择此来源。"
+            )
         )
 
 
@@ -1504,6 +1577,8 @@ async def _handle_device_poll() -> Any:
         "status": session["status"],
         "error": session.get("error"),
     }
+    if session["status"] == "success":
+        payload["source_id"] = session["source_id"]
     if session["status"] in {"success", "error", "timeout"}:
         _discard_login_session(session_id, cancel_task=False)
     return json_response(payload, headers=_NO_STORE_HEADERS)
@@ -1522,8 +1597,66 @@ async def _handle_device_cancel() -> Any:
         str(session.get("owner", "")), owner
     ):
         return _login_error_response("登录会话不存在或已过期", 404)
+    if session["status"] in {"saving", "success"}:
+        return _login_error_response(
+            "授权已完成，正在保存或已保存 Provider，请等待登录结果。", 409
+        )
     _discard_login_session(session_id)
     return json_response({"status": "cancelled"}, headers=_NO_STORE_HEADERS)
+
+
+async def _requested_source_id() -> str:
+    body = await request.json(default={}) or {}
+    if not isinstance(body, dict):
+        raise CredentialSourceError("Invalid request body.")
+    source_id = body.get("source_id", _PROVIDER_TYPE)
+    if not isinstance(source_id, str) or not source_id:
+        raise CredentialSourceError("Invalid provider ID.")
+    _get_credential_coordinator()._source(source_id)
+    return source_id
+
+
+async def _handle_providers_list() -> Any:
+    if message := _login_request_error():
+        return _login_error_response(message, 403)
+    try:
+        coordinator = _get_credential_coordinator()
+        providers = [
+            coordinator.account_view(s["id"]) for s in coordinator.providers.owned()
+        ]
+        return json_response({"providers": providers}, headers=_NO_STORE_HEADERS)
+    except CredentialError:
+        return _login_error_response("Provider configuration is unavailable.", 400)
+
+
+async def _edit_provider(*, delete: bool) -> Any:
+    if message := _login_request_error():
+        return _login_error_response(message, 403)
+    try:
+        source_id = await _requested_source_id()
+        body = await request.json(default={}) or {}
+        if "source_id" not in body:
+            raise CredentialSourceError("Provider ID is required.")
+        await _get_credential_coordinator().providers.edit(
+            source_id,
+            name=body.get("name"),
+            delete=delete,
+        )
+        if delete:
+            for session_id, session in list(_login_sessions.items()):
+                if session.get("source_id") == source_id:
+                    _discard_login_session(session_id)
+        return json_response({"status": "success"}, headers=_NO_STORE_HEADERS)
+    except CredentialError as exc:
+        return _login_error_response(str(exc), 400)
+
+
+async def _handle_provider_update() -> Any:
+    return await _edit_provider(delete=False)
+
+
+async def _handle_provider_delete() -> Any:
+    return await _edit_provider(delete=True)
 
 
 async def _handle_account_status() -> Any:
@@ -1531,7 +1664,7 @@ async def _handle_account_status() -> Any:
         return _login_error_response(message, 403)
     try:
         coordinator = _get_credential_coordinator()
-        status = coordinator.account_view()
+        status = coordinator.account_view(await _requested_source_id())
     except CredentialError:
         status = {"status": "invalid"}
     return json_response(status, headers=_NO_STORE_HEADERS)
@@ -1542,10 +1675,11 @@ async def _handle_account_usage() -> Any:
         return _login_error_response(message, 403)
     before: dict[str, Any] = {}
     try:
+        source_id = await _requested_source_id()
         coordinator = _get_credential_coordinator()
-        before = coordinator.account_view()
-        usage = await _fetch_source_usage()
-        account = coordinator.account_view()
+        before = coordinator.account_view(source_id)
+        usage = await _fetch_source_usage(source_id)
+        account = coordinator.account_view(source_id)
         if before.get("account_revision") != account.get("account_revision"):
             return json_response(
                 {"status": "account_changed", "account": account},
@@ -1561,7 +1695,7 @@ async def _handle_account_usage() -> Any:
             headers=_NO_STORE_HEADERS,
         )
     except ReauthenticationRequiredError:
-        account = _get_credential_coordinator().account_view()
+        account = _get_credential_coordinator().account_view(source_id)
         state = (
             "account_changed"
             if before.get("account_revision") != account.get("account_revision")

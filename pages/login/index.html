@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>订阅与账号</title>
+    <title>Providers</title>
     <link rel="stylesheet" href="./style.css" />
     <script src="/api/plugin/page/bridge-sdk.js"></script>
   </head>
   <body>
     <main class="account-center">
       <header class="page-heading">
-        <h1 id="title">订阅与账号</h1>
+        <h1 id="title">Providers</h1>
         <span id="updated" class="updated" role="status"></span>
         <button id="usage" class="icon-button" type="button" aria-label="刷新状态">
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -18,9 +18,13 @@
             <path d="M20 4v5h-5" />
           </svg>
         </button>
+        <button id="add-provider" class="button primary" type="button">新增 Provider</button>
       </header>
+      <p id="provider-help" class="muted"></p>
+      <p id="page-error" class="error" role="alert" hidden></p>
+      <nav id="providers" class="provider-list" aria-label="Providers"></nav>
 
-      <section class="panel" aria-labelledby="source-name">
+      <section id="provider-detail" class="panel" aria-labelledby="source-name" hidden>
         <div id="account-view">
           <div class="panel-section">
             <div class="account-row">
@@ -59,44 +63,16 @@
               <span id="notice-text"></span>
             </p>
           </div>
-          <div id="backup-row" class="panel-section backup" hidden>
-            <div class="backup-copy">
-              <h3>
-                <span id="backup-title">备用登录</span>
-                <span id="backup-status" class="badge neutral"></span>
-              </h3>
-              <p id="backup-copy"></p>
-            </div>
-            <button id="open-login" class="button" type="button">添加备用登录</button>
+          <div class="panel-section provider-actions">
+            <label id="rename-label" for="provider-name">名称</label>
+            <input id="provider-name" type="text" maxlength="80" />
+            <button id="rename-provider" class="button" type="button">保存名称</button>
+            <button id="open-login" class="button" type="button">重新登录</button>
+            <button id="delete-provider" class="button quiet" type="button">删除</button>
           </div>
-        </div>
-
-        <div id="empty-view" class="empty" hidden>
-          <div class="empty-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path d="M9 7V3M15 7V3M6 7h12v4a6 6 0 0 1-12 0z" />
-              <path d="M12 17v4" />
-            </svg>
-          </div>
-          <h2 id="empty-title"></h2>
-          <p id="empty-copy"></p>
-          <button id="empty-login" class="button primary" type="button"></button>
         </div>
       </section>
 
-      <details class="help">
-        <summary id="help-title"></summary>
-        <dl>
-          <div>
-            <dt id="source-title"></dt>
-            <dd id="source-help"></dd>
-          </div>
-          <div>
-            <dt id="fallback-title"></dt>
-            <dd id="fallback-help"></dd>
-          </div>
-        </dl>
-      </details>
       <p class="footnote">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="4.5" y="11" width="15" height="10" rx="2" />
@@ -108,7 +84,7 @@
 
     <dialog id="login-dialog" aria-labelledby="instructions-title">
       <div class="dialog-heading">
-        <h2 id="instructions-title">备用登录</h2>
+        <h2 id="instructions-title">设备码登录</h2>
         <button id="close-login" class="icon-button" type="button" aria-label="关闭">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
@@ -117,6 +93,8 @@
       </div>
       <div class="dialog-body">
         <p id="login-intro" class="dialog-intro"></p>
+        <label id="login-name-label" for="login-name">Provider 名称</label>
+        <input id="login-name" type="text" maxlength="80" value="ChatGPT" />
         <ol id="instructions" class="steps" hidden>
           <li>
             <label id="open-label" for="verify-url"></label>

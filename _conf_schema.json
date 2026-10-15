@@ -1,10 +1,4 @@
 {
-  "follow_local_codex": {
-    "description": "默认跟随本地 Codex 账号",
-    "type": "bool",
-    "default": true,
-    "hint": "优先使用 AstrBot 所在机器的 Codex 当前登录账号，切换账号后自动跟随。找不到可用的本地凭据时使用 Plugin Page 保存的账号；关闭后仅使用插件登录。保存后重载插件生效。"
-  },
   "codex_auth_path": {
     "description": "Codex auth.json 路径（可选）",
     "type": "string",

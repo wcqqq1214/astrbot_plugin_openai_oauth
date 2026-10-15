@@ -456,30 +456,6 @@ summary:focus-visible {
   flex-shrink: 0;
 }
 
-/* ---------- Backup row ---------- */
-.backup {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.backup-copy {
-  flex: 1;
-  min-width: 0;
-}
-.backup h3 {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: var(--bold);
-}
-.backup p {
-  font-size: 12.5px;
-  color: var(--secondary);
-  margin-top: 3px;
-}
-
 /* ---------- Empty state ---------- */
 .empty {
   text-align: center;
@@ -630,7 +606,7 @@ dialog {
   overflow: auto;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--dialog-shadow);
@@ -803,12 +779,12 @@ dialog::backdrop {
   .quota-list {
     grid-template-columns: minmax(0, 1fr);
   }
-  .backup {
+  .provider-actions {
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
   }
-  .backup .button {
+  .provider-actions .button {
     align-self: flex-start;
   }
   .copy-row .device-code {
@@ -826,4 +802,24 @@ dialog::backdrop {
   .quiet-dots i {
     opacity: 1;
   }
+}
+
+.provider-list { display: grid; gap: 8px; margin: 20px 0; }
+.provider-row {
+  width: 100%; display: flex; align-items: center; gap: 16px;
+  padding: 18px 20px; text-align: left; color: inherit; font: inherit;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  cursor: pointer;
+}
+.provider-row.selected { border-color: var(--primary); background: var(--primary-soft); }
+.provider-copy { display: grid; flex: 1; gap: 6px; min-width: 0; }
+.provider-copy strong, .provider-copy .muted { overflow-wrap: anywhere; }
+.provider-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.provider-actions input { flex: 1; min-width: 120px; width: auto; }
+#login-name { margin: 8px 0 18px; }
+#source-caption { overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .page-heading { flex-wrap: wrap; }
+  .provider-row { padding: 14px; }
+  .provider-actions label { width: 100%; }
 }

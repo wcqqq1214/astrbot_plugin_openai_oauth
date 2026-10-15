@@ -70,10 +70,24 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
         self.source = {
             "id": "OpenAI Subscribe",
             "type": "OpenAI Subscribe",
-            "key": json.dumps(self.backup),
+            "key": "",
+            "credential_mode": "local_codex",
             "proxy": "",
         }
-        self.conf = Config(provider_sources=[self.source])
+        self.device = {
+            **self.source,
+            "id": "device",
+            "credential_mode": "device_oauth",
+            "key": json.dumps(self.backup),
+        }
+        self.conf = Config(provider_sources=[self.source, self.device])
+        requested = patch.object(
+            plugin,
+            "_requested_source_id",
+            new=AsyncMock(return_value="OpenAI Subscribe"),
+        )
+        requested.start()
+        self.addCleanup(requested.stop)
         self.refresh = AsyncMock()
         self.coordinator = local.LocalCredentialCoordinator(
             SimpleNamespace(default_conf=self.conf),
@@ -87,25 +101,30 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
     def write(self, document):
         self.path.write_text(json.dumps(document))
 
-    async def test_switch_logout_and_backup_login(self):
+    async def test_switch_logout_and_independent_login(self):
         self.write(auth())
         first = await self.coordinator.get_snapshot()
         self.assertEqual(first.account_id, "one")
         self.assertEqual(first.credential_origin, "local_codex")
         self.write(auth("two"))
         self.assertEqual((await self.coordinator.get_snapshot()).account_id, "two")
-        await self.coordinator.replace_credentials(
-            None, {**self.backup, "account_id": "new-backup"}
+        await self.coordinator.providers.save_login(
+            "device",
+            "ChatGPT",
+            {**self.backup, "account_id": "new-device"},
+            creating=False,
         )
         self.assertEqual((await self.coordinator.get_snapshot()).account_id, "two")
         self.path.unlink()
+        with self.assertRaises(store.ReauthenticationRequiredError):
+            await self.coordinator.get_snapshot()
         self.assertEqual(
-            (await self.coordinator.get_snapshot()).account_id, "new-backup"
+            (await self.coordinator.get_snapshot("device")).account_id, "new-device"
         )
-        self.assertEqual(self.coordinator.credential_origin(), "plugin")
+        self.assertEqual(self.coordinator.credential_origin(), "local_codex")
         self.refresh.assert_not_awaited()
 
-    async def test_missing_invalid_api_key_and_keyring_fall_back(self):
+    async def test_missing_invalid_api_key_and_keyring_never_switch_provider(self):
         for document in (
             {},
             [],
@@ -114,19 +133,23 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
             {**auth(), "tokens": {"access_token": "invalid"}},
         ):
             self.write(document)
+            with self.assertRaises(store.ReauthenticationRequiredError):
+                await self.coordinator.get_snapshot()
             self.assertEqual(
-                (await self.coordinator.get_snapshot()).account_id, "backup"
+                (await self.coordinator.get_snapshot("device")).account_id, "backup"
             )
         self.path.write_text('{"tokens":')
-        self.assertEqual((await self.coordinator.get_snapshot()).account_id, "backup")
+        with self.assertRaises(store.ReauthenticationRequiredError):
+            await self.coordinator.get_snapshot()
         self.refresh.assert_not_awaited()
 
-    async def test_explicit_plugin_mode_and_other_sources(self):
+    async def test_explicit_modes_and_other_sources(self):
         self.write(auth())
         self.coordinator.local_store = None
-        self.assertEqual((await self.coordinator.get_snapshot()).account_id, "backup")
+        with self.assertRaises(store.ReauthenticationRequiredError):
+            await self.coordinator.get_snapshot()
         self.coordinator.local_store = self.local
-        self.conf["provider_sources"].append({**self.source, "id": "other"})
+        self.conf["provider_sources"].append({**self.device, "id": "other"})
         self.assertEqual(
             (await self.coordinator.get_snapshot("other")).account_id, "backup"
         )
@@ -154,7 +177,7 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(written["future_field"], original["future_field"])
         self.assertEqual(written["tokens"]["refresh_token"], "rotated")
         self.assertEqual(written["tokens"]["id_token"], "rotated-id")
-        self.assertEqual(json.loads(self.source["key"]), self.backup)
+        self.assertEqual(json.loads(self.device["key"]), self.backup)
         self.assertEqual(list(self.path.parent.glob(".astrbot-auth-*")), [])
         if os.name != "nt":
             self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
@@ -185,8 +208,22 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
 
         self.refresh.side_effect = refresh
         # A removed file is a changed login, not a failed persistence attempt.
-        self.assertEqual((await self.coordinator.get_snapshot()).account_id, "backup")
+        with self.assertRaises(store.ReauthenticationRequiredError):
+            await self.coordinator.get_snapshot()
         self.assertFalse(self.path.exists())
+
+    async def test_logout_while_waiting_for_refresh_lock_never_returns_empty_token(
+        self,
+    ):
+        self.write(auth())
+        lock = self.coordinator._source_lock("OpenAI Subscribe")
+        await lock.acquire()
+        waiting = asyncio.create_task(self.coordinator.get_snapshot())
+        await asyncio.sleep(0)
+        self.path.unlink()
+        lock.release()
+        with self.assertRaises(store.ReauthenticationRequiredError):
+            await waiting
 
     async def test_refresh_failure_observes_new_login(self):
         self.write(auth(expires=1))
@@ -231,7 +268,7 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
             None, 9999999999, expected_access_token=jwt()
         )
         self.assertFalse((await self.coordinator.get_snapshot()).is_cooling_down())
-        self.assertEqual(json.loads(self.source["key"]), self.backup)
+        self.assertEqual(json.loads(self.device["key"]), self.backup)
         self.write(auth())
         self.assertEqual(self.coordinator.status().state, "cooling")
 
@@ -391,8 +428,8 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
             data = json.loads(response.body)
             self.assertEqual(data["status"], "ready")
             self.assertEqual(data["credential_source"], "local_codex")
-            self.assertTrue(data["follow_local_codex"])
-            self.assertEqual(data["backup_status"], "saved")
+            self.assertEqual(data["credential_mode"], "local_codex")
+            self.assertNotIn("backup_status", data)
             self.assertEqual(len(data["account_revision"]), 64)
 
     async def test_view_identity_tracks_account_not_token_rotation(self):
@@ -406,15 +443,8 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
         serialized = json.dumps(second)
         for secret in ("second-account", jwt("second-account"), "backup-refresh"):
             self.assertNotIn(secret, serialized)
-        self.source["key"] = ""
-        self.assertEqual(
-            self.coordinator.account_view()["backup_status"], "not_configured"
-        )
-        self.source["key"] = "invalid-credential"
-        self.assertEqual(self.coordinator.account_view()["backup_status"], "invalid")
-        self.assertEqual(
-            self.coordinator.account_view()["credential_source"], "local_codex"
-        )
+        self.assertNotIn("backup_status", second)
+        self.assertEqual(second["credential_mode"], "local_codex")
 
     async def test_usage_api_reports_switch_during_network_fetch(self):
         self.write(auth())
@@ -439,7 +469,7 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
     async def test_usage_api_rejects_previous_account_result(self):
         self.write(auth())
 
-        async def switched_usage():
+        async def switched_usage(source_id):
             self.write(auth("second-account"))
             return {"windows": [{"used_percent": 99}]}
 

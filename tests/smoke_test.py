@@ -145,7 +145,7 @@ def main() -> int:
     check("window.AstrBotPluginPage" in page_app, "Plugin Page uses the AstrBot bridge")
     check("await bridge.ready()" in page_app, "Plugin Page waits for bridge readiness")
     check(
-        'bridge.apiPost("device/start", {})' in page_app,
+        'bridge.apiPost("device/start",' in page_app,
         "Plugin Page uses scoped device/start",
     )
     check(
@@ -157,8 +157,8 @@ def main() -> int:
         "Plugin Page uses scoped device/cancel",
     )
     check(
-        'bridge.apiPost("account/status"' in page_app,
-        "Plugin Page uses scoped account/status",
+        'bridge.apiPost("providers/list"' in page_app,
+        "Plugin Page uses scoped providers/list",
     )
     check(
         'bridge.apiPost("account/usage"' in page_app,

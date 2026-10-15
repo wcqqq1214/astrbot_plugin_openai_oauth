@@ -24,8 +24,8 @@ from .credential_store import (
     CredentialSourceError,
     CredentialStatus,
     ReauthenticationRequiredError,
-    find_source,
 )
+from .provider_registry import DEVICE, LOCAL, ProviderRegistry
 
 
 def _claims(token: str) -> dict[str, Any]:
@@ -152,55 +152,60 @@ class LocalCodexStore:
 
 
 class LocalCredentialCoordinator(CredentialCoordinator):
-    """Prefer local Codex for the default source; retain device login as backup."""
+    """Resolve each provider through its own explicit credential source."""
 
     def __init__(
-        self, *args: Any, local_store: LocalCodexStore | None = None, **kwargs: Any
+        self,
+        *args: Any,
+        local_store: LocalCodexStore | None = None,
+        legacy_follow_local: bool = True,
+        **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.local_store = local_store
+        self.legacy_follow_local = legacy_follow_local
+        self.providers = ProviderRegistry(self)
         self._identities: dict[str, tuple[str, str, str]] = {}
         self._local_cooldowns: dict[str, tuple[int | None, str]] = {}
         self._view_secret = secrets.token_bytes(32)
 
-    def account_view(self) -> dict[str, Any]:
-        """Return display metadata and an opaque, process-local account revision."""
-        result = self.status().as_dict()
-        result["follow_local_codex"] = self.local_store is not None
-        result["backup_status"] = "not_configured"
+    def account_view(self, source_id: str | None = None) -> dict[str, Any]:
+        """Return provider metadata and a revision without exposing credentials."""
+        source_id = source_id or self._default_source_id
+        source = self._source(source_id)
+        mode = source.get("credential_mode", DEVICE)
+        result = self.status(source_id).as_dict()
+        result.update(
+            id=source_id,
+            name=source.get("name") or source_id,
+            credential_mode=mode,
+            credential_source="local_codex" if mode == LOCAL else "plugin",
+        )
         try:
-            backup = super()._read_snapshot(self._default_source_id)
-            if backup.access_token:
-                result["backup_status"] = "saved"
-        except CredentialSourceError:
-            pass
-        except CredentialError:
-            result["backup_status"] = "invalid"
-        try:
-            snapshot = self._read_snapshot(self._default_source_id)
+            snapshot = self._read_snapshot(source_id)
         except CredentialError:
             return result
         if snapshot.access_token:
-            result["credential_source"] = snapshot.credential_origin
             identity = json.dumps(
-                [
-                    snapshot.credential_origin,
-                    snapshot.account_id or snapshot.access_token,
-                ]
+                [mode, snapshot.account_id or snapshot.access_token]
             ).encode()
             result["account_revision"] = hmac.new(
                 self._view_secret, identity, hashlib.sha256
             ).hexdigest()
+            claims = _claims(snapshot.access_token)
+            profile = claims.get("https://api.openai.com/profile", {})
+            auth = claims.get("https://api.openai.com/auth", {})
+            if isinstance(profile, dict) and isinstance(profile.get("email"), str):
+                result["email"] = profile["email"]
+            if isinstance(auth, dict) and isinstance(
+                auth.get("chatgpt_plan_type"), str
+            ):
+                result["plan_type"] = auth["chatgpt_plan_type"]
         return result
 
     async def ensure_default_source(self) -> None:
-        """Make the source available in the model picker before any device login."""
-        if (
-            find_source(self._conf(), self._default_source_id, self._provider_type)
-            is None
-        ):
-            self._source(self._default_source_id, create=True)
-            await self._conf().save_config_async()
+        """Migrate once and keep a local Codex provider available in the picker."""
+        await self.providers.migrate()
 
     def credential_origin(self, source_id: str | None = None) -> str:
         """Expose the credential location without disclosing the account or tokens."""
@@ -214,16 +219,29 @@ class LocalCredentialCoordinator(CredentialCoordinator):
         self._local_cooldowns.clear()
 
     def _login(self, source_id: str) -> LocalLogin | None:
-        if self.local_store is not None and source_id == self._default_source_id:
+        if (
+            self.local_store is not None
+            and self._source(source_id).get("credential_mode") == LOCAL
+        ):
             return self.local_store.read()
         return None
 
     def _read_snapshot(self, source_id: str) -> CredentialSnapshot:
+        if self._source(source_id).get("credential_mode", DEVICE) not in {
+            LOCAL,
+            DEVICE,
+        }:
+            raise CredentialSourceError("Unsupported provider credential mode.")
         login = self._login(source_id)
         if login is None:
-            snapshot = super()._read_snapshot(source_id)
+            if self._source(source_id).get("credential_mode") == LOCAL:
+                snapshot = replace(
+                    self._snapshot_from_source(source_id, {"key": ""}),
+                    credential_origin=LOCAL,
+                )
+            else:
+                snapshot = super()._read_snapshot(source_id)
         else:
-            self._source(source_id, create=True)
             snapshot = self._snapshot_from_source(source_id, {"key": login.credentials})
             cooldown = self._local_cooldowns.get(snapshot.account_id, (None, None))
             snapshot = replace(
@@ -253,6 +271,10 @@ class LocalCredentialCoordinator(CredentialCoordinator):
     ) -> CredentialSnapshot:
         source_id = source_id or self._default_source_id
         initial = self._read_snapshot(source_id)
+        if initial.credential_origin == LOCAL and not initial.access_token:
+            raise ReauthenticationRequiredError(
+                "Sign in to local Codex on the AstrBot host."
+            )
         if initial.credential_origin != "local_codex":
             return await super().get_snapshot(
                 source_id, force_refresh=force_refresh, check_cooldown=check_cooldown
@@ -260,6 +282,10 @@ class LocalCredentialCoordinator(CredentialCoordinator):
         async with self._source_lock(source_id):
             snapshot = self._read_snapshot(source_id)
             if snapshot.credential_origin == "local_codex":
+                if not snapshot.access_token:
+                    raise ReauthenticationRequiredError(
+                        "Sign in to local Codex on the AstrBot host."
+                    )
                 if check_cooldown and snapshot.is_cooling_down():
                     raise CredentialCooldownError(
                         snapshot.cooldown_until, snapshot.cooldown_reason

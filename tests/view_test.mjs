@@ -47,9 +47,11 @@ const ids = new Map(
   [...html.matchAll(/id="([^"]+)"/g)].map((x) => [x[1], new Element()]),
 );
 const account = {
+  id: "local",
+  name: "Local Codex",
   status: "ready",
+  credential_mode: "local_codex",
   credential_source: "local_codex",
-  backup_status: "saved",
   account_revision: "one",
 };
 let usage = {
@@ -62,16 +64,25 @@ let usage = {
   },
 };
 let pollResult;
+let cancelResponse = null;
+const device = {id: "device", name: "Work", status: "ready", credential_mode: "device_oauth", account_revision: "device-one"};
+let slowUsage = null;
+let deviceBody;
+const usageBodies = [];
 const bridge = {
   ready: async () => ({ locale: "zh-CN" }),
   getLocale: () => "zh-CN",
-  apiPost: async (endpoint) => {
-    if (endpoint === "account/status") return account;
+  apiPost: async (endpoint, body) => {
+    if (endpoint === "providers/list") return { providers: [account, device] };
     if (endpoint === "account/usage") {
+      usageBodies.push(body);
+      if (body.source_id === "device") return {status: "success", account: device, usage: {windows: [{label_seconds: 604800, used_percent: 60}]}};
+      if (slowUsage) return slowUsage;
       if (usage instanceof Error) throw usage;
       return usage;
     }
-    if (endpoint === "device/start")
+    if (endpoint === "device/start") {
+      deviceBody = body;
       return {
         status: "pending",
         session_id: "device-one",
@@ -79,11 +90,12 @@ const bridge = {
         user_code: "test-code",
         verify_url: "https://example.com",
       };
+    }
     if (endpoint === "device/poll")
       return new Promise((resolve) => {
         pollResult = resolve;
       });
-    if (endpoint === "device/cancel") return { status: "cancelled" };
+    if (endpoint === "device/cancel") return cancelResponse || { status: "cancelled" };
     throw new Error("Unexpected endpoint");
   },
 };
@@ -109,7 +121,7 @@ const source = readFileSync(
   "utf8",
 );
 const page = await vm.runInNewContext(
-  `(async () => {${source}\n await queryUsage(); return {queryUsage, startLogin, cancelLogin};})()`,
+  `(async () => {${source}\n await queryUsage(); return {queryUsage, startLogin, cancelLogin, selectProvider, openLogin};})()`,
   { window, document, navigator: {}, console },
 );
 const read = (id) => ids.get(id).textContent;
@@ -118,7 +130,9 @@ assert.match(read("usage-result"), /每周额度.*96%/);
 // label must be absent.
 assert.doesNotMatch(read("usage-result"), /5 小时额度/);
 assert.equal(read("plan"), "Pro");
-assert.equal(read("backup-status"), "已保存");
+assert.match(read("providers"), /本地 Codex.*Work/);
+assert.doesNotMatch(read("providers"), /备用/);
+assert.equal(usageBodies.at(-1).source_id, "local");
 assert.match(read("quota-policy"), /没有独立的 5 小时窗口/);
 
 usage = {
@@ -169,14 +183,49 @@ assert.match(read("usage-result"), /暂时无法获取/);
 assert.match(read("account-status"), /已登录/);
 assert.doesNotMatch(read("usage-result"), /96%/);
 
+// Switching rows while an old lookup is pending must never paint its quota.
+let resolveOld;
+slowUsage = new Promise((resolve) => { resolveOld = resolve; });
+const oldQuery = page.queryUsage();
+await new Promise((resolve) => setImmediate(resolve));
+await page.selectProvider("device");
+assert.match(read("usage-result"), /40%/);
+assert.equal(read("source-name"), "Work");
+resolveOld({status: "success", account, usage: {windows: [{label_seconds: 604800, used_percent: 1}]}});
+await oldQuery;
+assert.match(read("usage-result"), /40%/);
+assert.equal(read("source-name"), "Work");
+assert.equal(ids.get("open-login").hidden, false);
+slowUsage = null;
+account.status = "not_logged_in";
+await page.selectProvider("local");
+assert.match(read("providers"), /本地 Codex/);
+assert.match(read("usage-result"), /未检测到本地登录/);
+assert.equal(ids.get("open-login").hidden, true);
+page.openLogin();
+ids.get("login-name").value = "Personal";
 const pendingLogin = page.startLogin();
 await new Promise((resolve) => setImmediate(resolve));
+assert.equal(deviceBody.name, "Personal");
+assert.equal(deviceBody.source_id, undefined);
 await page.cancelLogin();
 pollResult({ status: "success" });
 await pendingLogin;
 assert.equal(read("status"), "已取消登录。");
 assert.equal(ids.get("instructions").hidden, true);
 assert.equal(ids.get("cancel").hidden, true);
-console.log(
-  "View regressions passed: weekly-only Pro, missing quota, lookup error, cancelled-session race.",
-);
+// A successful poll must survive a concurrent cancellation rejected by the server.
+page.openLogin("device");
+const successfulLogin = page.startLogin();
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(deviceBody.source_id, "device");
+let rejectCancel;
+cancelResponse = new Promise((resolve, reject) => { rejectCancel = reject; });
+const refusedCancellation = page.cancelLogin();
+pollResult({status: "success", source_id: "device"});
+await successfulLogin;
+rejectCancel(new Error("Already saved"));
+await refusedCancellation;
+assert.match(read("status"), /Provider 已保存/);
+assert.equal(ids.get("error").hidden, true);
+console.log("View regressions passed: quota windows, provider selection, stale-result isolation, login and cancellation races.");

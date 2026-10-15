@@ -188,6 +188,7 @@ def test_hot_reload_and_offline_models() -> None:
 def test_source_model_listing_preserves_credentials() -> None:
     print("\n=== Dashboard source model listing preserves credentials ===")
     source = make_source(credentials())
+    source["id"] = "independent-source"
     source["custom_headers"] = {"X-Test": "preserved"}
     original = deepcopy(source)
     conf = _FakeConfig(provider_sources=[source])

@@ -220,13 +220,18 @@ def test_server_owned_web_login_and_source_proxy() -> None:
                 ),
             ),
         ):
-            with request_context({"proxy": "http://browser-controlled:8080"}):
+            with request_context(
+                {
+                    "source_id": plugin._PROVIDER_TYPE,
+                    "proxy": "http://browser-controlled:8080",
+                }
+            ):
                 started = await plugin._handle_device_start()
             start = payload(started)
             for _ in range(20):
                 await asyncio.sleep(0)
                 session = plugin._login_sessions.get(start["session_id"])
-                if session and session["status"] != "pending":
+                if session and session["status"] not in {"pending", "saving"}:
                     break
             with request_context({"session_id": start["session_id"]}):
                 completed = await plugin._handle_device_poll()
@@ -239,7 +244,8 @@ def test_server_owned_web_login_and_source_proxy() -> None:
     check(start["status"] == "pending", "device start returns a pending session")
     check(start["user_code"] == "CODE-1234", "device code is returned to its owner")
     check(
-        done == {"status": "success", "error": None},
+        done
+        == {"status": "success", "error": None, "source_id": plugin._PROVIDER_TYPE},
         "completed poll returns no credential",
     )
     check(
@@ -619,10 +625,10 @@ def test_plugin_page_assets() -> None:
     check("./app.js" in html, "Plugin Page loads external JavaScript")
     check("/api/plugin/page/bridge-sdk.js" in html, "Plugin Page loads the bridge SDK")
     check("window.AstrBotPluginPage" in app, "Plugin Page uses the scoped bridge")
-    check('bridge.apiPost("device/start", {})' in app, "page starts through the bridge")
+    check('bridge.apiPost("device/start",' in app, "page starts through the bridge")
     check('bridge.apiPost("device/poll"' in app, "page polls through the bridge")
     check('bridge.apiPost("device/cancel"' in app, "page can cancel through the bridge")
-    check('bridge.apiPost("account/status"' in app, "page reads safe account status")
+    check('bridge.apiPost("providers/list"' in app, "page reads safe provider status")
     check('bridge.apiPost("account/usage"' in app, "page queries quota explicitly")
     check("fetch(" not in app, "page does not bypass the bridge")
     check(

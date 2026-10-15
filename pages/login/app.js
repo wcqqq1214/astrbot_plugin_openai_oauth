@@ -3,8 +3,15 @@ const context = await bridge.ready();
 
 const strings = {
   en: {
-    title: "Subscription & account",
+    title: "Providers",
     refresh: "Refresh status",
+    providerHelp: "Local Codex follows the host login. Select a provider to view its allowance; choose its source in AstrBot model settings to use it.",
+    name: "Provider name",
+    saveName: "Save name",
+    remove: "Delete",
+    confirmRemove: "Confirm deletion",
+    listFailed: "Could not load providers. Try refreshing.",
+    localMissing: "No local Codex login detected. Sign in to Codex on the AstrBot host.",
     refreshing: "Refreshing…",
     updated: "Updated",
     automatic: "Refreshes every 30 seconds while visible",
@@ -34,32 +41,10 @@ const strings = {
     plugin: "Saved plugin account",
     follow: "Follows the active Codex account on the AstrBot host",
     savedSource: "Uses the credential saved by device login",
-    backup: "Backup login",
     deviceLogin: "Device login",
-    add: "Add backup login",
+    add: "Add provider",
     renew: "Authorize again",
-    saved: "Saved",
-    missing: "Not added",
-    needsAction: "Needs attention",
-    active: "In use",
-    backupCopy:
-      "Used when local Codex is unavailable. Local Codex keeps priority while local following is enabled.",
-    activeCopy: "This saved account is currently used for model requests.",
-    emptyTitle: "No OpenAI account connected",
-    invalidTitle: "Sign in again",
-    emptyCopy:
-      "Sign in to Codex on the AstrBot host and it will be picked up automatically, or sign in here with a device code.",
-    emptyAction: "Sign in with device code",
-    helpTitle: "How account sources and backup login work",
-    sourceTitle: "Current source",
-    fallbackTitle: "Backup login",
-    localHelp:
-      "Following Codex on the AstrBot host. Account changes take effect on the next request.",
-    pluginHelp:
-      "Using the saved Plugin Page account. Enable local following in plugin settings to prioritize Codex.",
-    noHelp: "Sign in to Codex on the AstrBot host, or add a backup login.",
-    fallbackHelp:
-      "A backup is used when local credentials are unavailable. Quota exhaustion does not switch accounts. Disable local following in plugin settings to use the backup explicitly.",
+    noHelp: "Sign in to this provider to view its allowance.",
     privacy: "Credentials stay on the server and are never displayed here.",
     loading: "Loading allowance",
     noWindows:
@@ -92,7 +77,7 @@ const strings = {
     denied: "The service reports this allowance is currently unavailable.",
     close: "Close",
     intro:
-      "The plugin follows local Codex by default. Device login saves a backup account; disable local following in plugin settings to use it exclusively.",
+      "Authorize this provider with a device code. Other providers keep their own logins.",
     open: "Open the verification URL in a new tab",
     code: "Enter this device code",
     confirm: "Confirm on the OpenAI page. This dialog updates automatically.",
@@ -108,13 +93,20 @@ const strings = {
     waiting: "Waiting for authorization",
     retrying: "Connection interrupted. Retrying",
     success:
-      "Backup login saved. Local Codex still takes priority while local following is enabled.",
+      "Provider saved. Select this source in AstrBot model settings to use it.",
     failedLogin: "Login failed.",
     expired: "The device code expired. Please start again.",
   },
   zh: {
-    title: "订阅与账号",
+    title: "Providers",
     refresh: "刷新状态",
+    providerHelp: "本地 Codex 跟随主机上的登录。点击 Provider 查看额度；实际使用的来源请在 AstrBot 模型配置中选择。",
+    name: "Provider 名称",
+    saveName: "保存名称",
+    remove: "删除",
+    confirmRemove: "确认删除",
+    listFailed: "无法加载 Provider，请刷新重试。",
+    localMissing: "未检测到本地登录，请在 AstrBot 所在机器登录 Codex。",
     refreshing: "正在刷新…",
     updated: "更新于",
     automatic: "页面可见时每 30 秒自动刷新",
@@ -142,31 +134,10 @@ const strings = {
     plugin: "插件保存的账号",
     follow: "自动跟随 AstrBot 主机上当前激活的 Codex 账号",
     savedSource: "使用设备码登录保存的凭据",
-    backup: "备用登录",
     deviceLogin: "设备码登录",
-    add: "添加备用登录",
+    add: "新增 Provider",
     renew: "重新授权",
-    saved: "已保存",
-    missing: "未添加",
-    needsAction: "需要处理",
-    active: "当前使用",
-    backupCopy: "本地 Codex 不可用时使用。启用本地跟随时，Codex 仍然优先。",
-    activeCopy: "这个账号正在用于模型请求，可重新授权以更新登录。",
-    emptyTitle: "尚未连接 OpenAI 账号",
-    invalidTitle: "需要重新登录",
-    emptyCopy:
-      "在 AstrBot 所在机器上登录 Codex 后会自动识别；也可以在这里通过设备码登录。",
-    emptyAction: "通过设备码登录",
-    helpTitle: "账号来源与备用登录的工作方式",
-    sourceTitle: "当前来源",
-    fallbackTitle: "备用登录",
-    localHelp:
-      "正在跟随 AstrBot 所在机器的 Codex。切换账号后，下次请求自动生效。",
-    pluginHelp:
-      "正在使用 Plugin Page 保存的账号。可在插件设置中开启本地跟随，优先使用 Codex。",
-    noHelp: "先在 AstrBot 所在机器登录 Codex，或添加备用登录。",
-    fallbackHelp:
-      "本地凭据不可用时使用备用登录。额度耗尽不会自动换号；如需手动启用备用账号，可在插件设置中关闭本地跟随。",
+    noHelp: "登录此 Provider 后可查看额度。",
     privacy: "登录凭据仅由服务端处理，不会在此页面展示。",
     loading: "正在查询额度",
     noWindows: "账号尚未返回额度窗口，暂无数据不代表无限额度。",
@@ -187,14 +158,14 @@ const strings = {
     proWeekly: "Pro · 当前仅返回每周额度，没有独立的 5 小时窗口。",
     weeklyOnly: "仅显示已返回的每周窗口；未返回不代表无限额度。",
     exhausted:
-      "已达到额度上限，请查看窗口重置时间。当前不会自动切换到备用账号。",
+      "已达到额度上限，请查看窗口重置时间。当前不会自动切换 Provider。",
     exhaustedUntil: (when) =>
-      `已达到额度上限，将于 ${when} 恢复。当前不会自动切换到备用账号。`,
+      `已达到额度上限，将于 ${when} 恢复。当前不会自动切换 Provider。`,
     coolingUntil: (when) => `订阅额度冷却中，预计 ${when} 恢复。`,
     denied: "服务端返回当前额度不可用。",
     close: "关闭",
     intro:
-      "默认跟随本地 Codex 账号。设备码登录用于保存备用账号；在插件设置中关闭本地跟随后，可仅使用备用账号。",
+      "通过设备码授权此 Provider。每个 Provider 独立保存登录。",
     open: "在新标签页打开验证网址",
     code: "输入下面的设备码",
     confirm: "在 OpenAI 页面确认授权，完成后这里会自动更新。",
@@ -209,7 +180,7 @@ const strings = {
     cancelled: "已取消登录。",
     waiting: "等待授权",
     retrying: "连接暂时中断，正在重试",
-    success: "备用账号已保存。启用本地跟随时，仍会优先使用本地 Codex 账号。",
+    success: "Provider 已保存。请在 AstrBot 模型配置中选择此来源。",
     failedLogin: "登录失败。",
     expired: "设备码已过期，请重新开始登录。",
   },
@@ -246,6 +217,10 @@ let pollTimer = null;
 let activeSessionId = null;
 let consecutivePollFailures = 0;
 let account = {};
+let providers = [];
+let selectedSourceId = null;
+let loginSourceId = null;
+let deletingSourceId = null;
 let viewGeneration = 0;
 let refreshPromise = null;
 let cancelling = false;
@@ -264,12 +239,13 @@ function applyLocale(locale) {
   document.title = t.title;
   for (const [id, value] of Object.entries({
     title: t.title,
-    "backup-title": t.backup,
-    "empty-login": t.emptyAction,
-    "help-title": t.helpTitle,
-    "source-title": t.sourceTitle,
-    "fallback-title": t.fallbackTitle,
-    "fallback-help": t.fallbackHelp,
+    "add-provider": t.add,
+    "provider-help": t.providerHelp,
+    "rename-label": t.name,
+    "rename-provider": t.saveName,
+    "delete-provider": t.remove,
+    "open-login": t.renew,
+    "login-name-label": t.name,
     privacy: t.privacy,
     "login-intro": t.intro,
     "open-label": t.open,
@@ -322,6 +298,7 @@ function schedulePoll(sessionId, intervalSeconds) {
 
 function finishSession() {
   activeSessionId = null;
+  byId("login-name").disabled = false;
   cancelButton.hidden = true;
   startButton.hidden = false;
 }
@@ -395,51 +372,17 @@ function renderAccountStatus(result) {
           ? ""
           : " neutral");
 
-  const signedOut = signedOutStates.includes(state);
-  byId("account-view").hidden = signedOut;
-  byId("empty-view").hidden = !signedOut;
-  byId("empty-title").textContent =
-    state === "invalid" ? t.invalidTitle : t.emptyTitle;
-  byId("empty-copy").textContent =
-    state === "invalid" ? t.details.invalid : t.emptyCopy;
-
-  const local = account.credential_source === "local_codex";
-  const plugin = account.credential_source === "plugin";
-  byId("icon-local").hidden = plugin;
-  byId("icon-plugin").hidden = !plugin;
-  byId("source-name").textContent = local ? t.local : plugin ? t.plugin : "—";
-  byId("source-caption").textContent = local
-    ? t.follow
-    : plugin
-      ? t.savedSource
-      : t.noHelp;
-  byId("source-help").textContent = local
-    ? t.localHelp
-    : plugin
-      ? t.pluginHelp
-      : t.noHelp;
-
-  // The backup row stays hidden until a real status arrives, so the first
-  // paint never offers "add backup" for an account that already has one.
-  byId("backup-row").hidden = !result;
-  const backupStatus = byId("backup-status");
-  byId("backup-copy").textContent = plugin ? t.activeCopy : t.backupCopy;
-  backupStatus.textContent = plugin
-    ? t.active
-    : account.backup_status === "saved"
-      ? t.saved
-      : account.backup_status === "not_configured"
-        ? t.missing
-        : t.needsAction;
-  backupStatus.className =
-    "badge" +
-    (plugin
-      ? ""
-      : ["saved", "not_configured"].includes(account.backup_status)
-        ? " neutral"
-        : " warning");
-  byId("open-login").textContent =
-    account.backup_status === "saved" || plugin ? t.renew : t.add;
+  const local = account.credential_mode === "local_codex";
+  byId("icon-local").hidden = !local;
+  byId("icon-plugin").hidden = local;
+  byId("source-name").textContent = providerName(account);
+  byId("source-caption").textContent = [
+    local ? t.follow : t.savedSource, account.email, account.id,
+  ].filter(Boolean).join(" · ");
+  if (document.activeElement !== byId("provider-name"))
+    byId("provider-name").value = account.name || "";
+  byId("open-login").hidden = local;
+  byId("delete-provider").hidden = local;
   updateNotice();
 }
 
@@ -619,45 +562,119 @@ function setRefreshing(busy) {
   usageButton.setAttribute("aria-label", busy ? t.refreshing : t.refresh);
 }
 
+function providerName(provider) {
+  return provider.credential_mode === "local_codex" && provider.name === "Local Codex"
+    ? t.local : provider.name || provider.id || "—";
+}
+
+function renderProviders() {
+  const rows = providers.map((provider) => {
+    const row = element("button", "provider-row" + (provider.id === selectedSourceId ? " selected" : ""));
+    row.type = "button";
+    row.setAttribute("aria-pressed", String(provider.id === selectedSourceId));
+    const copy = element("span", "provider-copy");
+    copy.append(element("strong", "", providerName(provider)));
+    copy.append(element("span", "muted", [
+      provider.credential_mode === "local_codex" ? t.follow : t.savedSource,
+      provider.email, provider.plan_type,
+    ].filter(Boolean).join(" · ")));
+    row.append(copy, element("span", "badge" + (provider.status === "ready" ? "" : " neutral"), t.states[provider.status] || t.states.unknown));
+    row.addEventListener("click", () => void selectProvider(provider.id));
+    return row;
+  });
+  byId("providers").replaceChildren(...rows);
+}
+
+async function selectProvider(id) {
+  ++viewGeneration;
+  refreshPromise = null;
+  selectedSourceId = id;
+  deletingSourceId = null;
+  byId("delete-provider").textContent = t.remove;
+  byId("page-error").hidden = true;
+  lastUpdated = null;
+  byId("updated").textContent = "";
+  clearUsage("loading");
+  const selected = providers.find((p) => p.id === id);
+  if (selected) renderAccountStatus(selected);
+  renderProviders();
+  await queryUsage();
+}
+
 async function queryUsage() {
   if (refreshPromise) return refreshPromise;
   const generation = ++viewGeneration;
-  refreshPromise = (async () => {
+  const pending = (async () => {
     setRefreshing(true);
-    // Only show a placeholder when there is nothing to keep on screen.
     if (!lastUsage) showUsageMessage("loading");
     try {
-      const latest = await bridge.apiPost("account/status", {});
+      const list = await bridge.apiPost("providers/list", {});
       if (generation !== viewGeneration) return;
+      providers = list.providers;
+      if (!Array.isArray(providers)) throw new Error(t.listFailed);
+      byId("page-error").hidden = true;
+      if (!providers.some((p) => p.id === selectedSourceId)) {
+        selectedSourceId = providers[0]?.id || null;
+        clearUsage("loading");
+      }
+      renderProviders();
+      const latest = providers.find((p) => p.id === selectedSourceId);
+      byId("provider-detail").hidden = !latest;
+      if (!latest) return;
       renderAccountStatus(latest);
       if (signedOutStates.includes(latest.status)) {
-        clearUsage("noHelp");
+        clearUsage(latest.credential_mode === "local_codex" ? "localMissing" : "noHelp");
         return;
       }
-      if (lastUsage && shownRevision !== (latest.account_revision ?? null)) {
-        clearUsage("changed");
-      }
-      let result = await bridge.apiPost("account/usage", {});
-      if (result?.status === "account_changed")
-        result = await bridge.apiPost("account/usage", {});
+      if (lastUsage && shownRevision !== (latest.account_revision ?? null)) clearUsage("changed");
+      const body = { source_id: selectedSourceId };
+      let result = await bridge.apiPost("account/usage", body);
+      if (generation !== viewGeneration) return;
+      if (result?.status === "account_changed") result = await bridge.apiPost("account/usage", body);
       if (generation !== viewGeneration) return;
       renderUsage(result);
+      providers = providers.map((p) => p.id === selectedSourceId ? account : p);
+      renderProviders();
       lastUpdated = new Date();
       renderUpdated();
-    } catch {
-      if (generation === viewGeneration) clearUsage("failed");
+    } catch (reason) {
+      if (generation === viewGeneration) {
+        clearUsage("failed");
+        byId("page-error").textContent = reason?.message || t.listFailed;
+        byId("page-error").hidden = false;
+      }
     } finally {
-      setRefreshing(false);
+      if (generation === viewGeneration) setRefreshing(false);
     }
   })();
-  try {
-    await refreshPromise;
-  } finally {
-    refreshPromise = null;
+  refreshPromise = pending;
+  try { await pending; }
+  finally { if (refreshPromise === pending) refreshPromise = null; }
+}
+
+async function editProvider(remove = false) {
+  const sourceId = selectedSourceId;
+  if (!sourceId) return;
+  if (remove && deletingSourceId !== sourceId) {
+    deletingSourceId = sourceId;
+    byId("delete-provider").textContent = t.confirmRemove;
+    return;
   }
+  const button = byId(remove ? "delete-provider" : "rename-provider");
+  button.disabled = true;
+  try {
+    await bridge.apiPost(remove ? "providers/delete" : "providers/update", {
+      source_id: sourceId, name: byId("provider-name").value,
+    });
+    await selectProvider(remove && selectedSourceId === sourceId ? null : selectedSourceId);
+  } catch (reason) {
+    byId("page-error").textContent = reason?.message || t.failed;
+    byId("page-error").hidden = false;
+  } finally { button.disabled = false; }
 }
 
 function rerender() {
+  renderProviders();
   renderAccountStatus(account);
   if (lastUsage) {
     renderUsage({ status: "success", usage: lastUsage });
@@ -674,7 +691,7 @@ bridge.onContext?.((next) => {
   rerender();
 });
 
-function finishSuccess() {
+function finishSuccess(sourceId) {
   clearPollTimer();
   finishSession();
   setStatus(t.success);
@@ -683,7 +700,9 @@ function finishSuccess() {
   showInstructions(false);
   verifyUrl.value = "";
   userCode.value = "";
-  void queryUsage();
+  startButton.hidden = true;
+  byId("login-name").disabled = false;
+  void selectProvider(sourceId);
 }
 
 async function poll(sessionId, intervalSeconds) {
@@ -691,10 +710,13 @@ async function poll(sessionId, intervalSeconds) {
     const result = await bridge.apiPost("device/poll", {
       session_id: sessionId,
     });
-    if (activeSessionId !== sessionId || cancelling) return;
+    if (activeSessionId !== sessionId) return;
+    // A successful poll consumes the server result. Keep it even if a
+    // concurrent cancellation is refused because saving already finished.
+    if (cancelling && result.status !== "success") return;
     consecutivePollFailures = 0;
     if (result.status === "success") {
-      finishSuccess();
+      finishSuccess(result.source_id);
       return;
     }
     if (result.status === "timeout") {
@@ -735,7 +757,10 @@ async function startLogin() {
   setStatus(t.waiting, true);
 
   try {
-    const result = await bridge.apiPost("device/start", {});
+    byId("login-name").disabled = true;
+    const result = await bridge.apiPost("device/start", loginSourceId
+      ? { source_id: loginSourceId }
+      : { name: byId("login-name").value.trim() });
     if (result.status !== "pending") {
       throw new Error(result.message || t.failedLogin);
     }
@@ -753,6 +778,7 @@ async function startLogin() {
     showError(reason?.message || t.failedLogin, false);
   } finally {
     closeButton.disabled = false;
+    if (!activeSessionId) byId("login-name").disabled = false;
   }
 }
 
@@ -771,7 +797,9 @@ async function cancelLogin() {
     startButton.disabled = false;
     setStartLabel("restart");
   } catch (reason) {
+    if (!activeSessionId) return;
     showError(reason?.message || t.failedLogin, false);
+    schedulePoll(activeSessionId, 2);
   } finally {
     cancelButton.disabled = false;
     cancelling = false;
@@ -803,13 +831,19 @@ async function copyField(field, button) {
   }
 }
 
-function openLogin() {
-  byId("instructions-title").textContent = signedOutStates.includes(
-    account.status,
-  )
-    ? t.deviceLogin
-    : t.backup;
-  if (!activeSessionId) showInstructions(false);
+function openLogin(sourceId = null) {
+  loginSourceId = sourceId;
+  byId("instructions-title").textContent = sourceId ? t.renew : t.add;
+  byId("login-name").value = sourceId ? account.name : "ChatGPT";
+  byId("login-name").hidden = Boolean(sourceId);
+  byId("login-name-label").hidden = Boolean(sourceId);
+  if (!activeSessionId) {
+    showInstructions(false);
+    setStatus("");
+    setStartLabel("start");
+    startButton.hidden = false;
+    byId("login-name").disabled = false;
+  }
   loginDialog.showModal();
 }
 
@@ -824,8 +858,10 @@ copyCodeButton.addEventListener(
   "click",
   () => void copyField(userCode, copyCodeButton),
 );
-byId("open-login").addEventListener("click", openLogin);
-byId("empty-login").addEventListener("click", openLogin);
+byId("open-login").addEventListener("click", () => openLogin(selectedSourceId));
+byId("add-provider").addEventListener("click", () => openLogin());
+byId("rename-provider").addEventListener("click", () => void editProvider());
+byId("delete-provider").addEventListener("click", () => void editProvider(true));
 async function closeLogin() {
   if (closeButton.disabled || cancelling) return;
   if (activeSessionId) await cancelLogin();

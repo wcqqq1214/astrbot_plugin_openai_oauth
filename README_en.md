@@ -29,7 +29,7 @@ account, not your prepaid OpenAI API balance.
 - If your Dashboard is publicly reachable, use HTTPS, a VPN, or an SSH tunnel.
   Device-code sign-in also works over plain HTTP, but the Dashboard session can
   be intercepted, so it is not recommended.
-- For backup device-code login, open ChatGPT **Settings → Security and login** and turn on
+- For device-code login, open ChatGPT **Settings → Security and login** and turn on
   **Enable device code authorization for Codex**.
 
 ![Enable Codex device-code authorization in ChatGPT settings](images/enable-device-code-auth-codex.png)
@@ -57,35 +57,44 @@ AstrBot's model configuration. No Plugin Page login is required.
   the container. A single-file mount may prevent atomic replacement. A remote
   AstrBot server cannot read credentials from your personal computer directly.
 - Supports file-backed ChatGPT OAuth credentials. Keyring-only logins, API-key
-  logins and browser ChatGPT sessions need the backup device-login flow instead.
+  logins and browser ChatGPT sessions need the device-login flow instead.
 
-Missing, unreadable or unsupported local credentials fall back to the account
-saved through the Plugin Page. Exhausted quota or a failed refresh does not
-automatically switch accounts: sign in to Codex again, or disable
-`follow_local_codex` to use the saved plugin account exclusively. Reload the
-plugin after changing settings. The Plugin Page identifies the active credential source.
+Plugin Views lists all providers together, with Local Codex first even when signed out.
+Each provider has its own credential source. Missing local credentials, exhausted quota,
+or refresh failures never switch a request to a different provider. Reload the plugin
+after changing `codex_auth_path`.
 
-## Backup: device-code login
+## Add a provider with device-code login
 
-1. Install the plugin from the AstrBot plugin marketplace. For a manual
-   installation, place the project in `data/plugins/`.
-2. Open this plugin's detail page and enter its **Plugin Views** (formerly Plugin Page). Click **Add backup login**, then
-   **Start login**.
-3. The page shows an OpenAI verification URL and a device code. Open the URL,
-   sign in to ChatGPT, enter the code, and approve the request.
-4. Return to AstrBot and wait for the “Backup login saved” message. Credentials are
-   stored only on the AstrBot server; they are not shown in the browser or chat.
-5. Local Codex still takes priority if available. To use the backup immediately,
-   disable `follow_local_codex` and reload the plugin, then select a model from
-   the `OpenAI Subscribe` source.
+1. Open **Plugin Views** in the plugin detail page, click **Add provider**, enter a name,
+   then click **Start login**.
+2. Open the OpenAI verification URL, sign in to ChatGPT, enter the code, and approve.
+3. Wait for “Provider saved”. Each new login creates an independent model source;
+   it does not overwrite an existing login.
+4. Select that source in AstrBot model settings (its ID is shown in the detail panel)
+   and add or bind a model. Selecting a row only displays its quota; it does not
+   change the model used by a conversation.
 
-The account page shows the active source, sign-in health, saved backup status,
-and the actual subscription plan. It refreshes every 30 seconds while visible.
-Quota bars follow the returned window durations: a weekly-only Pro response
-shows one weekly bar and its reset time. Missing data and lookup failures are
-unavailable, never unlimited or a fabricated full allowance. You can select
-**Cancel login** while a device code is still waiting for approval. After you
-sign in, `/usage` in chat also shows your quota.
+Every provider has its own status, plan and quota. Device-login providers can be
+renamed, reauthorized or deleted. Reauthorization updates only the selected provider.
+Remove its model bindings in AstrBot before deleting a provider; Local Codex stays listed.
+The list and selected provider's quota refresh every 30 seconds while visible. Only
+reported quota windows are shown; missing data never implies unlimited allowance.
+Cancel a pending login without leaving an empty provider. `/usage` in chat reports
+the source bound to the currently selected OpenAI Subscribe model.
+
+### Migrating existing configurations
+
+Initialization migrates old configurations once, preserving source IDs and model bindings:
+
+- When local following was enabled and the local login is available, the existing ID
+  stays with Local Codex. Any stored device login becomes a separate provider.
+- When local following was disabled, or the local login is unavailable and a stored
+  credential exists, the existing ID stays with the device login and Local Codex is added.
+- Other existing OpenAI Subscribe sources retain their IDs, credentials and connection settings.
+
+The old `follow_local_codex` option is used only for migration. Invalid stored credentials
+are retained and shown as needing attention so the provider can be reauthorized.
 
 If the WebUI is unavailable, an administrator can send this in a **private
 chat** with the bot:
@@ -95,7 +104,8 @@ chat** with the bot:
 ```
 
 The bot replies with the verification URL and a one-time device code. Complete
-the sign-in in that private chat; the flow will not start in group chats.
+the sign-in in that private chat; success adds an independent provider and returns its ID
+for model configuration. The flow will not start in group chats.
 
 ## Want to set the reasoning effort? (Optional)
 
@@ -154,7 +164,7 @@ default. It does not change other sessions or the model's global configuration.
   set both `HTTP_PROXY` and `HTTPS_PROXY` in the **AstrBot container** and leave
   the plugin's own `proxy` empty. A non-empty plugin `proxy` takes precedence.
 - Credentials are never returned to the browser or sent to chat. Local mode uses
-  Codex's `auth.json`; backup device credentials are stored in plaintext in
+  Codex's `auth.json`; device-login credentials are stored in plaintext in
   AstrBot's `data/cmd_config.json`. Limit read access to these files and their backups.
 - One `OpenAI Subscribe` model source represents one ChatGPT account. When the
   quota is exhausted, the page shows the cooldown and reset time; the plugin
