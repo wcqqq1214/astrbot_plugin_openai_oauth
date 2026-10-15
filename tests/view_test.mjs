@@ -47,9 +47,6 @@ class Element {
   addEventListener(name, handler) {
     (this.handlers ||= {})[name] = handler;
   }
-  focus() {
-    document.activeElement = this;
-  }
   showModal() {
     this.open = true;
   }
@@ -1041,6 +1038,18 @@ for (const dismiss of [
   await click(ids.get("settings-cancel"));
 }
 assert.doesNotMatch(read("providers"), /Draft only/);
+
+// A queued native close event belongs to the dismissed dialog, not a
+// settings session reopened before the browser dispatches that event.
+await openSettings("Work");
+await click(ids.get("settings-cancel"));
+await openSettings("本地 Codex");
+typeName("New session draft");
+await settingsBox.handlers.close();
+assert.equal(settingsBox.open, true, "an old close event must not dismiss a reopened settings dialog");
+assert.equal(nameInput.value, "New session draft");
+assert.equal(read("settings-title"), "本地 Codex");
+await click(ids.get("settings-cancel"));
 
 // Blank names cannot be saved, even with another change pending.
 await openSettings("Work");

@@ -1739,7 +1739,9 @@ settingsDialog.addEventListener("cancel", (event) => {
 // Browsers may close a modal without a cancellable event. Keep a busy
 // session on screen; otherwise treat it like Cancel.
 settingsDialog.addEventListener("close", () => {
-  if (!settings || settings.suspended) return;
+  // Native close events are queued and can arrive after a new session opens
+  // or after a suspended session resumes from device login.
+  if (settingsDialog.open || !settings || settings.suspended) return;
   if (settings.busy) settingsDialog.showModal();
   else endSettings();
 });
