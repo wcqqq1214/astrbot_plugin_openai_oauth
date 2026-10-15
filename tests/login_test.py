@@ -616,7 +616,7 @@ def test_effort_command() -> None:
 
 def test_plugin_page_assets() -> None:
     print("\n=== Plugin Page bridge assets ===")
-    page_root = os.path.join(os.path.dirname(__file__), "..", "pages", "login")
+    page_root = os.path.join(os.path.dirname(__file__), "..", "pages", "providers")
     with open(os.path.join(page_root, "index.html"), encoding="utf-8") as source_file:
         html = source_file.read()
     with open(os.path.join(page_root, "app.js"), encoding="utf-8") as source_file:

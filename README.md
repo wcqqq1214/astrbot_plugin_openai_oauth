@@ -59,7 +59,7 @@ Plugin Views 统一展示 Provider，本地 Codex 默认排在第一项，即使
 
 ## 新增 Provider：设备码登录
 
-1. 打开插件详情页的 **Plugin Views**，点击 **新增 Provider**，输入名称，再点击 **开始登录**。
+1. 打开插件详情页的 **Plugin Views → providers**，点击 **新增 Provider**，输入名称，再点击 **开始登录**。
 2. 在 OpenAI 验证网址登录 ChatGPT，输入设备码并确认授权。
 3. 回到 AstrBot，等待“Provider 已保存”。每次新增都会创建独立模型来源，不覆盖已有登录。
 4. 在 AstrBot 模型配置中选择对应来源（页面详情显示其 ID），添加或绑定模型后使用。

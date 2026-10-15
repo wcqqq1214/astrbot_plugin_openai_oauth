@@ -4,7 +4,7 @@ The offline preview uses the production `app.js` and `style.css`, with a mock
 Plugin Views bridge from `prototype.js`. Its accounts, quotas and device codes
 are examples only. It does not read local credentials or contact OpenAI.
 
-Run `python pages/login/serve_prototype.py`, then open
+Run `python pages/providers/serve_prototype.py`, then open
 <http://127.0.0.1:8769/prototype.html>.
 
 - Local Codex is the first provider, followed by independent device-login providers.

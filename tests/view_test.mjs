@@ -42,11 +42,11 @@ class Element {
   }
 }
 const html = readFileSync(
-  new URL("../pages/login/index.html", import.meta.url),
+  new URL("../pages/providers/index.html", import.meta.url),
   "utf8",
 );
 const prototypeHtml = readFileSync(
-  new URL("../pages/login/prototype.html", import.meta.url),
+  new URL("../pages/providers/prototype.html", import.meta.url),
   "utf8",
 );
 assert.equal(
@@ -148,7 +148,7 @@ const window = {
   clearTimeout() {},
 };
 const source = readFileSync(
-  new URL("../pages/login/app.js", import.meta.url),
+  new URL("../pages/providers/app.js", import.meta.url),
   "utf8",
 );
 const page = await vm.runInNewContext(
@@ -310,7 +310,7 @@ assert.equal(switchFor("本地 Codex").attributes.role, "switch");
 assert.equal(checked("本地 Codex"), "true");
 assert.equal(checked("工作"), "true");
 assert.equal(ids.get("routing-fixed").attributes["aria-pressed"], "true");
-assert.match(read("routing-help"), /只使用它/);
+assert.match(read("routing-help"), /仅使用此 Provider/);
 assert.match(read("enabled-note"), /已启用/);
 
 // Local Codex can be disabled; only the changed field is sent and the

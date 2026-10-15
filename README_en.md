@@ -66,7 +66,7 @@ after changing `codex_auth_path`.
 
 ## Add a provider with device-code login
 
-1. Open **Plugin Views** in the plugin detail page, click **Add provider**, enter a name,
+1. Open **Plugin Views → providers** in the plugin detail page, click **Add provider**, enter a name,
    then click **Start login**.
 2. Open the OpenAI verification URL, sign in to ChatGPT, enter the code, and approve.
 3. Wait for “Provider saved”. Each new login creates an independent model source;

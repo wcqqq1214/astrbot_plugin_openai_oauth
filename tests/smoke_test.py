@@ -135,7 +135,7 @@ def main() -> int:
     )
 
     page_root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "pages", "login")
+        os.path.join(os.path.dirname(__file__), "..", "pages", "providers")
     )
     with open(os.path.join(page_root, "index.html"), encoding="utf-8") as fh:
         page_html = fh.read()
