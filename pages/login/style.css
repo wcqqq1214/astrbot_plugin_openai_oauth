@@ -282,130 +282,98 @@ summary:focus-visible {
 
 /* ---------- Quota ---------- */
 .quota-list {
+  margin-top: 10px;
+}
+.quota-rows {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 12px;
+  gap: 6px;
 }
-/* Cards and the single-window note share one grid. */
-.quota-cards {
-  display: contents;
-}
-.quota-cards.single-window > .quota {
-  grid-column: 1 / -1;
-}
-.quota-cards > .muted {
-  grid-column: 1 / -1;
+.quota-rows > .muted {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 18px 16px;
-  border-radius: var(--radius);
-  background: var(--surface-low);
-  box-shadow: var(--surface-ring);
   font-size: 13px;
   color: var(--secondary);
 }
-.quota {
-  padding: 12px 14px 11px;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--surface-ring);
-  min-width: 0;
+.quota-row {
+  display: grid;
+  grid-template-columns: 56px 150px 96px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+  min-height: 24px;
+  font-size: 13px;
 }
-.quota-figure {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-.quota-title {
-  font-size: 12.5px;
+.quota-name {
   color: var(--secondary);
-}
-.quota-figure strong {
-  font-size: 20px;
-  font-weight: var(--bold);
-  letter-spacing: -0.4px;
-  line-height: 1.25;
-  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.quota-figure small {
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--muted);
-  margin-left: 4px;
-  letter-spacing: 0;
-}
-.track {
-  height: 6px;
-  margin: 10px 0 8px;
+.quota-bar {
+  height: 5px;
   border-radius: 99px;
   background: var(--track);
   overflow: hidden;
 }
-.fill {
+.quota-fill {
+  display: block;
   height: 100%;
   border-radius: inherit;
   background: var(--primary);
   transition: width 500ms var(--out);
 }
-.reset {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
+.quota-value {
+  font-weight: var(--bold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.quota-value small {
+  margin-left: 3px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.quota-reset {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-.reset span:last-child {
-  text-align: right;
-}
-.quota.low strong {
-  color: var(--warn-text);
-}
-.quota.low .fill {
+.quota-row.low .quota-fill {
   background: var(--warn);
 }
-.quota.exhausted {
-  background: color-mix(in srgb, var(--bad) 7%, var(--surface));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bad) 24%, transparent);
+.quota-row.low .quota-value {
+  color: var(--warn-text);
 }
-.quota.exhausted strong {
+.quota-row.exhausted .quota-bar {
+  background: color-mix(in srgb, var(--bad) 18%, transparent);
+}
+.quota-row.exhausted .quota-value {
   color: var(--bad-text);
 }
-.quota.exhausted .track {
-  background: color-mix(in oklab, var(--bad) 16%, transparent);
+.quota-row.unknown .quota-bar {
+  background: repeating-linear-gradient(90deg, var(--track) 0 6px, transparent 6px 10px);
 }
-.quota.unknown strong {
+.quota-row.unknown .quota-value {
   color: var(--muted);
 }
-.quota-placeholder {
-  display: flex;
-  align-items: center;
-  padding: 14px 16px;
-  border-radius: var(--radius);
-  border: 1px dashed var(--line-strong);
-  min-width: 0;
-  font-size: 12.5px;
+.quota-note {
+  margin-top: 6px;
+  font-size: 12px;
   color: var(--muted);
 }
 .notice {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  margin-top: 14px;
-  padding: 11px 14px;
-  border-radius: var(--radius);
-  background: var(--warn-soft);
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12.5px;
   color: var(--warn-text);
-  font-size: 13px;
 }
 .notice svg {
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
   flex-shrink: 0;
 }
 
@@ -905,8 +873,12 @@ dialog::backdrop {
   .editor {
     padding: 2px 12px 14px;
   }
-  .quota-list {
-    grid-template-columns: minmax(0, 1fr);
+  .quota-row {
+    grid-template-columns: 52px minmax(0, 1fr) auto;
+    row-gap: 2px;
+  }
+  .quota-reset {
+    grid-column: 2 / -1;
   }
   .editor-row {
     grid-template-columns: minmax(0, 1fr);

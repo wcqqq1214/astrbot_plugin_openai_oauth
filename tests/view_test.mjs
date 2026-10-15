@@ -142,17 +142,15 @@ const page = await vm.runInNewContext(
   { window, document, navigator: {}, console },
 );
 const read = (id) => ids.get(id).textContent;
-assert.match(read("usage-result"), /每周额度.*96%/);
-// Relative reset text can legitimately read "5 小时后重置"; only the window
-// label must be absent.
-assert.doesNotMatch(read("usage-result"), /5 小时额度/);
+assert.match(read("usage-result"), /每周.*96%/);
+// A weekly-only Pro response renders exactly one compact quota line.
+assert.equal(ids.get("usage-result").children.length, 1);
 assert.equal(read("plan"), "Pro");
 assert.match(read("providers"), /本地 Codex.*Work/);
 assert.doesNotMatch(read("providers"), /备用/);
 assert.equal(usageBodies.at(-1).source_id, "local");
 assert.equal(ids.get("quota-policy").hidden, true);
 assert.equal(read("quota-policy"), "");
-assert.match(ids.get("usage-result").className, /single-window/);
 
 usage = {
   status: "success",
@@ -165,11 +163,11 @@ usage = {
   },
 };
 await page.queryUsage();
-assert.match(read("usage-result"), /5 小时额度.*—.*暂不可用.*每周额度.*0%/);
+assert.match(read("usage-result"), /5 小时.*—.*暂不可用.*每周.*0%/);
+assert.equal(ids.get("usage-result").children.length, 2);
 assert.doesNotMatch(read("usage-result"), /100%/);
 assert.equal(ids.get("plan").hidden, true);
 assert.equal(ids.get("quota-policy").hidden, true);
-assert.equal(ids.get("usage-result").className, "quota-cards");
 
 // Both exhausted windows must reset before the included allowance recovers.
 const laterReset = new Date(Date.now() + 2 * 86400000);
@@ -211,6 +209,9 @@ await new Promise((resolve) => setImmediate(resolve));
 await page.selectProvider("device");
 assert.match(read("usage-result"), /40%/);
 assert.equal(read("source-name"), "Work");
+// Without a confirmed Pro plan, a lone weekly window keeps its caveat.
+assert.equal(ids.get("quota-policy").hidden, false);
+assert.match(read("quota-policy"), /不代表无限额度/);
 resolveOld({status: "success", account, usage: {windows: [{label_seconds: 604800, used_percent: 1}]}});
 await oldQuery;
 assert.match(read("usage-result"), /40%/);

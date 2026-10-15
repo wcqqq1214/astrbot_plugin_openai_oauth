@@ -64,6 +64,7 @@ const strings = {
     remaining: "left",
     usedUp: "used up",
     fiveHour: "5-hour allowance",
+    shortWindows: { 18000: "5 hours", 604800: "Weekly", 2592000: "30 days" },
     week: "Weekly allowance",
     month: "30-day allowance",
     hours: "hours",
@@ -161,6 +162,7 @@ const strings = {
     remaining: "剩余",
     usedUp: "已用尽",
     fiveHour: "5 小时额度",
+    shortWindows: { 18000: "5 小时", 604800: "每周", 2592000: "30 天" },
     week: "每周额度",
     month: "30 天额度",
     hours: "小时",
@@ -438,7 +440,8 @@ function syncRename() {
   renameButton.disabled = !value || value === (account.name || "");
 }
 
-function windowLabel(seconds) {
+function windowLabel(seconds, short = false) {
+  if (short && t.shortWindows[seconds]) return t.shortWindows[seconds];
   if (seconds === 18000) return t.fiveHour;
   if (seconds === 604800) return t.week;
   if (seconds === 2592000) return t.month;
@@ -478,12 +481,15 @@ function remainingOf(item) {
     : null;
 }
 
-function quotaCard(item) {
+// One compact line per returned window: a short name, a fixed-width bar,
+// the remaining share and when it resets. The bar never stretches with the
+// panel, so a single weekly window reads as one line rather than a banner.
+function quotaRow(item) {
   const remaining = remainingOf(item);
   const label = windowLabel(item.label_seconds);
-  const card = element(
-    "section",
-    "quota" +
+  const row = element(
+    "div",
+    "quota-row" +
       (remaining === null
         ? " unknown"
         : remaining === 0
@@ -492,10 +498,21 @@ function quotaCard(item) {
             ? " low"
             : ""),
   );
-  const figure = element("div", "quota-figure");
+  row.setAttribute("title", label);
+  const track = element("span", "quota-bar");
+  if (remaining !== null) {
+    track.setAttribute("role", "progressbar");
+    track.setAttribute("aria-label", `${label} ${t.remaining}`);
+    track.setAttribute("aria-valuemin", "0");
+    track.setAttribute("aria-valuemax", "100");
+    track.setAttribute("aria-valuenow", String(remaining));
+    const fill = element("span", "quota-fill");
+    fill.style.width = `${remaining}%`;
+    track.append(fill);
+  }
   const value = element(
     "strong",
-    "",
+    "quota-value",
     remaining === null ? "—" : `${Math.round(remaining)}%`,
   );
   value.append(
@@ -505,28 +522,15 @@ function quotaCard(item) {
       remaining === null ? t.unknown : remaining === 0 ? t.usedUp : t.remaining,
     ),
   );
-  figure.append(element("span", "quota-title", label), value);
-  card.append(figure);
-  const track = element("div", "track");
-  if (remaining !== null) {
-    track.setAttribute("role", "progressbar");
-    track.setAttribute("aria-label", `${label} ${t.remaining}`);
-    track.setAttribute("aria-valuemin", "0");
-    track.setAttribute("aria-valuemax", "100");
-    track.setAttribute("aria-valuenow", String(remaining));
-    const fill = element("div", "fill");
-    fill.style.width = `${remaining}%`;
-    track.append(fill);
-  }
-  card.append(track);
   const reset = resetSeconds(item.reset_at, item.reset_after_seconds);
-  const resetRow = element("div", "reset");
-  resetRow.append(
-    element("span", "", formatRelative(reset)),
-    element("span", "", formatAbsolute(reset)),
+  const when = [formatRelative(reset), formatAbsolute(reset)].filter(Boolean);
+  row.append(
+    element("span", "quota-name", windowLabel(item.label_seconds, true)),
+    track,
+    value,
+    element("span", "quota-reset", when.join(" · ")),
   );
-  card.append(resetRow);
-  return card;
+  return row;
 }
 
 function usageWindows(usage) {
@@ -551,16 +555,16 @@ function renderUsage(result) {
   if (!windows.length) {
     showUsageMessage("noWindows");
   } else {
-    usageResult.replaceChildren(...windows.map(quotaCard));
+    usageResult.replaceChildren(...windows.map(quotaRow));
   }
   const plan = plans[usage.plan_type];
   byId("plan").textContent = plan || "";
   byId("plan").hidden = !plan;
   const weeklyOnly =
     windows.length === 1 && windows[0].label_seconds === 604800;
-  const proWeekly = weeklyOnly && usage.plan_type === "pro";
-  usageResult.className = "quota-cards" + (proWeekly ? " single-window" : "");
-  quotaPolicy.hidden = !weeklyOnly || proWeekly;
+  // Pro accounts currently return only a weekly window; that single line
+  // needs no caveat. Other plans keep the "missing is not unlimited" note.
+  quotaPolicy.hidden = !weeklyOnly || usage.plan_type === "pro";
   quotaPolicy.textContent = quotaPolicy.hidden ? "" : t.weeklyOnly;
   updateNotice();
 }
