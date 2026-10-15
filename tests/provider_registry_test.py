@@ -76,6 +76,12 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         await self.registry.migrate()
         self.assertEqual(self.conf, snapshot)
         self.assertEqual(self.conf.saved, 1)
+        self.assertTrue(
+            all(
+                self.registry.routing_mode(s["id"]) == "fixed"
+                for s in self.registry.owned()
+            )
+        )
         self.assertEqual((await self.coordinator.get_snapshot()).account_id, "local")
         self.assertEqual(
             (await self.coordinator.get_snapshot(device["id"])).account_id, "device"

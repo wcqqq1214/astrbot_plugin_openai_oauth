@@ -17,8 +17,8 @@ import time
 from typing import Any
 
 from astrbot import logger
-from astrbot.core.utils.network_utils import create_proxy_client
-from openai import APIError
+from astrbot.core.utils.network_utils import create_proxy_client, is_connection_error
+from openai import APIConnectionError, APIError
 
 CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
@@ -217,6 +217,8 @@ def _error_details(error: BaseException) -> tuple[str, str]:
 
 def classify_codex_error(error: BaseException) -> str:
     """Classify an upstream failure without exposing its raw payload."""
+    if isinstance(error, APIConnectionError) or is_connection_error(error):
+        return "temporary"
     status_code = _status_code(error)
     code, message = _error_details(error)
     if status_code in {401, 403} or code in {"invalid_grant", "invalid_token"}:

@@ -179,6 +179,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
             id=source_id,
             name=source.get("name") or source_id,
             enabled=self.providers.enabled(source_id),
+            routing_mode=self.providers.routing_mode(source_id),
             credential_mode=mode,
             credential_source="local_codex" if mode == LOCAL else "plugin",
         )
@@ -203,6 +204,71 @@ class LocalCredentialCoordinator(CredentialCoordinator):
             ):
                 result["plan_type"] = auth["chatgpt_plan_type"]
         return result
+
+    def account_cooldown(self, snapshot: CredentialSnapshot) -> CredentialSnapshot:
+        """Share quota exhaustion across sources representing the same account."""
+        if not snapshot.account_id:
+            return snapshot
+        cooling = snapshot
+        local_until, local_reason = self._local_cooldowns.get(
+            snapshot.account_id, (None, None)
+        )
+        if (local_until or 0) > (cooling.cooldown_until or 0):
+            cooling = replace(
+                snapshot, cooldown_until=local_until, cooldown_reason=local_reason
+            )
+        for source in self.providers.owned():
+            try:
+                other = self._read_snapshot(source["id"])
+            except CredentialError:
+                continue
+            if (
+                other.account_id == snapshot.account_id
+                and other.is_cooling_down()
+                and (other.cooldown_until or 0) > (cooling.cooldown_until or 0)
+            ):
+                cooling = replace(
+                    snapshot,
+                    cooldown_until=other.cooldown_until,
+                    cooldown_reason=other.cooldown_reason,
+                )
+        return cooling
+
+    def status(self, source_id: str | None = None) -> CredentialStatus:
+        status = super().status(source_id)
+        try:
+            snapshot = self.account_cooldown(
+                self._read_snapshot(source_id or self._default_source_id)
+            )
+        except CredentialError:
+            return status
+        if snapshot.is_cooling_down():
+            return CredentialStatus(
+                "cooling", snapshot.cooldown_until, snapshot.cooldown_reason
+            )
+        return status
+
+    def ensure_inference_available(self, source_id: str) -> CredentialSnapshot:
+        self.providers.ensure_enabled(source_id)
+        snapshot = self.account_cooldown(self._read_snapshot(source_id))
+        if snapshot.is_access_token_expired() and not snapshot.refresh_token:
+            self._states[source_id] = CredentialStatus("reauth_required")
+        if snapshot.is_cooling_down():
+            raise CredentialCooldownError(
+                snapshot.cooldown_until, snapshot.cooldown_reason
+            )
+        if (
+            self._states.get(source_id, CredentialStatus("ready")).state
+            == "reauth_required"
+        ):
+            raise ReauthenticationRequiredError("Sign in to this Provider again.")
+        return snapshot
+
+    def mark_reauthentication(self, snapshot: CredentialSnapshot) -> None:
+        """Do not mark a replacement login as broken after an old request fails."""
+        current = self._read_snapshot(snapshot.source_id)
+        if current.access_token == snapshot.access_token:
+            self._states[snapshot.source_id] = CredentialStatus("reauth_required")
 
     async def ensure_default_source(self) -> None:
         """Migrate once and keep a local Codex provider available in the picker."""

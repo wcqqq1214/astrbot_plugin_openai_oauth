@@ -439,7 +439,7 @@ class CredentialCoordinator:
                     _as_string(source.get("proxy")) or None,
                 )
             except Exception as exc:
-                if not snapshot.is_access_token_expired():
+                if not snapshot.is_access_token_expired() and not force_refresh:
                     self._states[resolved_source_id] = CredentialStatus("degraded")
                     return snapshot
                 self._states[resolved_source_id] = CredentialStatus("reauth_required")
