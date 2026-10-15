@@ -350,6 +350,101 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["account"]["id"], device_id)
         self.assertNotIn("backup_status", result["account"])
 
+    async def test_usage_cooldown_does_not_follow_a_replaced_login(self):
+        await self.registry.migrate()
+        sid = self.registry.owned()[1]["id"]
+        exhausted = {
+            "allowed": False,
+            "limit_reached": True,
+            "windows": [{"used_percent": 100, "reset_at": 9999999999}],
+        }
+        replacement = {
+            **self.creds,
+            "access_token": jwt("replacement"),
+            "account_id": "replacement",
+        }
+        for cached in (False, True):
+            with self.subTest(cached=cached):
+                await self.registry.save_login(
+                    sid, "ChatGPT", self.creds, creating=False
+                )
+                if cached:
+                    await self.coordinator.get_usage(
+                        sid, AsyncMock(return_value=exhausted)
+                    )
+                saving_started, cooling_started = asyncio.Event(), asyncio.Event()
+                mark_cooling = self.coordinator.mark_cooling
+
+                async def replace_login(started=saving_started):
+                    started.set()
+                    await self.registry.save_login(
+                        sid, "ChatGPT", replacement, creating=False
+                    )
+
+                async def delayed_cooling(
+                    *args, started=cooling_started, mark=mark_cooling, **kwargs
+                ):
+                    started.set()
+                    return await mark(*args, **kwargs)
+
+                tasks = []
+                try:
+                    with (
+                        patch.object(
+                            oauth,
+                            "fetch_rate_limits",
+                            new=AsyncMock(return_value=exhausted),
+                        ) as fetch,
+                        patch.object(
+                            self.coordinator,
+                            "mark_cooling",
+                            side_effect=delayed_cooling,
+                        ),
+                    ):
+                        # Queue the new login before the old usage result writes its cooldown.
+                        async with self.coordinator._source_lock(sid):
+                            tasks.append(asyncio.create_task(replace_login()))
+                            await asyncio.wait_for(saving_started.wait(), 5)
+                            tasks.append(
+                                asyncio.create_task(
+                                    usage_service._fetch_source_usage(sid)
+                                )
+                            )
+                            await asyncio.wait_for(cooling_started.wait(), 5)
+                        await asyncio.gather(*tasks)
+                        self.assertEqual(fetch.await_count, 0 if cached else 1)
+                    snapshot = self.coordinator._read_snapshot(sid)
+                    self.assertEqual(snapshot.account_id, "replacement")
+                    self.assertFalse(snapshot.is_cooling_down())
+                finally:
+                    for task in tasks:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def test_usage_cooldown_uses_refreshed_credentials(self):
+        await self.registry.migrate()
+        sid = self.registry.owned()[1]["id"]
+        expired = {**self.creds, "access_token": jwt("device", expires=1), "expires": 1}
+        await self.registry.save_login(sid, "ChatGPT", expired, creating=False)
+        refreshed = {**self.creds, "access_token": jwt("device", generation=1)}
+        exhausted = {
+            "allowed": False,
+            "windows": [{"used_percent": 100, "reset_at": 9999999999}],
+        }
+        with (
+            patch.object(
+                self.coordinator,
+                "_refresh_credentials",
+                new=AsyncMock(return_value=refreshed),
+            ),
+            patch.object(
+                oauth, "fetch_rate_limits", new=AsyncMock(return_value=exhausted)
+            ) as fetch,
+        ):
+            await usage_service._fetch_source_usage(sid)
+        self.assertEqual(fetch.call_args.args[0], refreshed["access_token"])
+        self.assertTrue(self.coordinator._read_snapshot(sid).is_cooling_down())
+
     async def test_cancellation_cannot_interrupt_a_started_save(self):
         await self.registry.migrate()
         entered, release = asyncio.Event(), asyncio.Event()

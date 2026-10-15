@@ -131,8 +131,12 @@ async def _fetch_source_usage(
     source_id: str = runtime._PROVIDER_TYPE,
 ) -> dict[str, Any]:
     coordinator = runtime._get_credential_coordinator()
+    # Cache hits belong to the current login; fresh lookups may refresh its token.
+    expected_access_token = coordinator._read_snapshot(source_id).access_token
 
     async def fetch_usage(snapshot: CredentialSnapshot) -> dict:
+        nonlocal expected_access_token
+        expected_access_token = snapshot.access_token
         settings = coordinator.source_settings(snapshot.source_id)
         return await retry_provider_request(
             "OpenAI Codex",
@@ -153,7 +157,7 @@ async def _fetch_source_usage(
             await coordinator.mark_cooling(
                 source_id,
                 cooldown_until,
-                expected_access_token=None,
+                expected_access_token=expected_access_token,
             )
     return usage
 
