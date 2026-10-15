@@ -37,40 +37,39 @@
             <span id="plan" hidden></span>
             <span id="account-status"></span>
           </div>
-          <p id="source-caption" class="editor-caption"></p>
-          <div class="quota-list" aria-live="polite">
-            <div id="usage-result" class="quota-rows"></div>
-            <p id="quota-policy" class="quota-note" hidden></p>
+          <div class="editor-row">
+            <span id="quota-label" class="editor-label compact">额度</span>
+            <div class="editor-body">
+              <div class="quota-list" aria-live="polite">
+                <div id="usage-result" class="quota-rows"></div>
+                <p id="quota-policy" class="quota-note" hidden></p>
+              </div>
+              <p id="notice" class="notice" role="status" hidden>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 9v4M12 17h.01" />
+                  <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+                </svg>
+                <span id="notice-text"></span>
+              </p>
+            </div>
           </div>
-          <p id="notice" class="notice" role="status" hidden>
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 9v4M12 17h.01" />
-              <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
-            </svg>
-            <span id="notice-text"></span>
-          </p>
-          <div class="editor-grid">
-            <div class="editor-row">
-              <label id="rename-label" class="editor-label" for="provider-name">名称</label>
-              <div class="editor-field">
-                <input id="provider-name" class="text-input" type="text" maxlength="80" autocomplete="off" />
-                <button id="rename-provider" class="button small" type="button">保存</button>
-              </div>
+          <div class="editor-row">
+            <label id="rename-label" class="editor-label" for="provider-name">名称</label>
+            <div class="editor-body editor-inline">
+              <input id="provider-name" class="text-input" type="text" maxlength="80" autocomplete="off" />
+              <button id="rename-provider" class="button small" type="button">保存</button>
             </div>
-            <div id="login-row" class="editor-row">
-              <span id="login-label" class="editor-label">登录</span>
-              <div class="editor-field">
-                <span id="login-hint" class="editor-hint"></span>
-                <button id="open-login" class="button small" type="button">重新授权</button>
-              </div>
+          </div>
+          <div class="editor-row">
+            <span id="source-label" class="editor-label">来源</span>
+            <div class="editor-body editor-inline">
+              <span id="source-caption" class="editor-text"></span>
+              <button id="open-login" class="button small" type="button">重新授权</button>
             </div>
-            <div id="delete-row" class="editor-row">
-              <span id="delete-label" class="editor-label">删除</span>
-              <div class="editor-field">
-                <span id="delete-hint" class="editor-hint"></span>
-                <button id="delete-provider" class="button small danger" type="button">删除</button>
-              </div>
-            </div>
+          </div>
+          <div id="delete-row" class="editor-foot">
+            <button id="delete-provider" class="link-button danger" type="button">移除此 Provider</button>
+            <span id="delete-hint" class="editor-hint"></span>
           </div>
         </section>
       </div>

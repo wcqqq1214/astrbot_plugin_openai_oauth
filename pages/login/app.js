@@ -9,15 +9,14 @@ const strings = {
     name: "Provider name",
     nameShort: "Name",
     saveName: "Save",
-    loginLabel: "Login",
-    loginHint: "Authorize this provider again with a device code.",
-    removeLabel: "Remove",
-    removeHint: "Deletes this provider and its saved login.",
+    quotaLabel: "Allowance",
+    sourceLabel: "Source",
+    removeHint: "Its saved login is deleted too.",
     confirmHint: "Click again to delete permanently.",
     localShort: "Follows the host Codex login",
     deviceShort: "Device-code login",
-    remove: "Delete",
-    confirmRemove: "Confirm deletion",
+    remove: "Remove provider",
+    confirmRemove: "Confirm removal",
     listFailed: "Could not load providers. Try refreshing.",
     localMissing: "No local Codex login detected. Sign in to Codex on the AstrBot host.",
     refreshing: "Refreshing…",
@@ -111,15 +110,14 @@ const strings = {
     name: "Provider 名称",
     nameShort: "名称",
     saveName: "保存",
-    loginLabel: "授权",
-    loginHint: "通过设备码重新授权此 Provider。",
-    removeLabel: "移除",
-    removeHint: "删除此 Provider 及其保存的登录凭据。",
+    quotaLabel: "额度",
+    sourceLabel: "来源",
+    removeHint: "会同时删除它保存的登录凭据。",
     confirmHint: "再次点击即永久删除。",
     localShort: "跟随主机上的 Codex 登录",
     deviceShort: "设备码登录",
-    remove: "删除",
-    confirmRemove: "确认删除",
+    remove: "移除此 Provider",
+    confirmRemove: "确认移除",
     listFailed: "无法加载 Provider，请刷新重试。",
     localMissing: "未检测到本地登录，请在 AstrBot 所在机器登录 Codex。",
     refreshing: "正在刷新…",
@@ -283,9 +281,8 @@ function applyLocale(locale) {
     "provider-help": t.providerHelp,
     "rename-label": t.nameShort,
     "rename-provider": t.saveName,
-    "login-label": t.loginLabel,
-    "login-hint": t.loginHint,
-    "delete-label": t.removeLabel,
+    "quota-label": t.quotaLabel,
+    "source-label": t.sourceLabel,
     "delete-hint": t.removeHint,
     "delete-provider": t.remove,
     "open-login": t.renew,
@@ -422,14 +419,11 @@ function renderAccountStatus(result) {
 
   const local = account.credential_mode === "local_codex";
   byId("source-name").textContent = providerName(account);
-  byId("source-caption").textContent = local ? t.follow : t.savedSource;
-  // Without an email the row already says how the provider signs in.
-  byId("source-caption").hidden = !account.email;
+  byId("source-caption").textContent = local ? t.follow : t.deviceShort;
   if (document.activeElement !== providerNameInput)
     providerNameInput.value = account.name || "";
   syncRename();
   byId("open-login").hidden = local;
-  byId("login-row").hidden = local;
   byId("delete-provider").hidden = local;
   byId("delete-row").hidden = local;
   updateNotice();
