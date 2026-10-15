@@ -57,6 +57,54 @@ Plugin Views 统一展示 Provider，本地 Codex 默认排在第一项，即使
 每个 Provider 独立绑定凭据；本地文件不可用、额度耗尽或刷新失败时不会切到其他 Provider。
 修改 `codex_auth_path` 后重载插件生效。
 
+## 本地 Claude 订阅
+
+新增独立的 `Claude Subscribe` 模型来源，复用 **AstrBot 所在环境**中官方 Claude Code 的订阅登录。
+
+1. 在 AstrBot 主机安装 Claude Code，并以 AstrBot 的运行用户执行 `claude auth login`，选择 Claude 订阅账号。
+2. 重载插件，打开 **Plugin Views → 本地 Claude**，点击刷新检查登录状态。
+3. 在 AstrBot 模型配置中选择 `Claude Subscribe`，添加 `sonnet`、`opus` 或 `haiku`。
+   这些是官方 CLI 的模型别名，具体模型与可用性由账号决定，也可手动填写完整模型 ID。
+4. 如自动检测不到 CLI，在插件设置填写 `claude_command`（可执行文件路径，不含参数）；
+   多配置目录用户可填写 `claude_config_dir`。保存后重载插件。
+
+留空配置目录时沿用 `$CLAUDE_CONFIG_DIR` 或 Claude Code 默认目录。macOS 钥匙串与
+Linux/Windows 凭据文件均交给官方 CLI 处理；插件通过 `claude auth status` 检查状态，
+不读取、复制或保存订阅 Token。切换本机账号后新请求跟随新账号；工具调用中的请求不会跨账号续接。
+API Key、网关或云平台登录会显示“需订阅登录”，不会自动改用其他计费来源。
+
+支持文本、图片、流式回复及 AstrBot 工具调用。Claude Code 的内置工具关闭，
+仅将当前请求的 AstrBot 工具通过 MCP 提供给 CLI，执行仍由 AstrBot 管理。
+同一 AstrBot 会话连续聊天时复用 CLI 进程，只向 CLI 发送新增消息；工具往返也复用同一进程，
+等待工具结果最多 5 分钟。每个模型实例最多运行 8 个进程，其中最多保留 4 个空闲进程；
+空闲 5 分钟后回收，下一轮通过 `--resume` 恢复已完成的会话，再发送新增消息。
+插件重载后也可恢复。每个模型实例最多保存 32 个会话，24 小时过期，在后续请求或清理时移除。
+
+复用要求会话 ID、登录账号、模型、系统提示、工具定义、思考强度和历史前缀一致。
+历史被修改、清空或压缩，配置改变，或保存的会话无法加载时，会从 AstrBot 完整上下文重新开始。
+恢复失败只在发送新消息之前回退；已输出内容的请求不会自动重放。
+没有会话 ID 或无法确认账号时使用独立运行，不续接终端聊天。
+
+桥接索引、会话正文和临时文件保存在 AstrBot `data/plugin_data/astrbot_plugin_openai_oauth/claude` 下。
+索引仅记录匹配指纹，不保存 Token；CLI 会话正文含聊天内容。插件在 Claude 配置目录的
+`projects` 下为自己的工作目录建立链接，让 CLI 将会话正文写入上述数据目录，不改动其他项目。
+如果系统不允许建立目录链接（例如未启用相应权限的 Windows），仍支持进程内跨轮次复用，
+但不保存可恢复的会话。AstrBot 仍提供完整历史用于匹配，CLI 仍按其自身机制管理模型上下文和缓存；
+此优化减少重复输入和进程启动，不保证所有历史 Token 都免计费。
+
+本地 Claude 条目支持重命名，登录在主机上完成。当前页面仅显示登录状态和套餐；
+订阅额度请在 Claude Code 中执行 `/usage` 查看。插件聊天命令 `/usage` 和 `/effort`
+仍用于 OpenAI。Claude 可通过模型的 `anth_thinking_config.effort` 配置思考强度；
+暂不支持自定义 HTTP 请求体及强制工具选择。
+
+Docker 需要在容器中安装并登录 Claude Code；宿主机 Mac 的钥匙串不能直接挂载给 Linux 容器。
+参考验证版本为 Claude Code `2.1.287`，旧版需支持 `auth status` 与 `stream-json` 参数。
+本功能用于用户自己的订阅登录；使用条件参见 [Claude Code 官方说明](https://code.claude.com/docs/en/legal-and-compliance)。
+
+开发验证：`tests/claude_test.py` 覆盖多轮复用、会话恢复、工具往返和取消隔离。
+可用 AstrBot 的 Python 运行 `tests/native_claude_smoke.py --binary /path/to/claude`，
+以真实 CLI、隔离配置及本地模拟模型接口验证复用和恢复，不使用真实订阅凭据。
+
 ## 新增 Provider：设备码登录
 
 1. 打开插件详情页的 **Plugin Views**，点击 **新增 Provider**，输入名称，再点击 **开始登录**。

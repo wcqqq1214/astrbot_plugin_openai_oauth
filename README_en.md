@@ -64,6 +64,69 @@ Each provider has its own credential source. Missing local credentials, exhauste
 or refresh failures never switch a request to a different provider. Reload the plugin
 after changing `codex_auth_path`.
 
+## Local Claude subscription
+
+The independent `Claude Subscribe` source follows the official Claude Code login in
+**the environment running AstrBot**.
+
+1. Install Claude Code on the host and run `claude auth login` as AstrBot's OS user,
+   selecting a Claude subscription account.
+2. Reload the plugin and refresh **Plugin Views → Local Claude**.
+3. Select `Claude Subscribe` in AstrBot model settings and add `sonnet`, `opus`, or
+   `haiku`. These CLI aliases follow the models available to your account. Explicit
+   model IDs can also be entered manually.
+4. If discovery fails, set `claude_command` to the executable path without arguments.
+   Set `claude_config_dir` for a non-default account directory. Reload after saving.
+
+An empty config directory follows `$CLAUDE_CONFIG_DIR` or the CLI default. The official
+CLI handles macOS Keychain and Linux/Windows credential files. The plugin checks
+`claude auth status` and never reads, copies, or stores subscription tokens. New
+requests follow account switches; pending tool requests cannot resume across accounts.
+API-key, gateway, and cloud-provider logins are rejected instead of changing billing.
+
+Supports text, images, streaming, and AstrBot tool calls. CLI built-in tools are disabled;
+only the current AstrBot tools are offered through MCP, and AstrBot executes them.
+Consecutive turns in the same AstrBot conversation reuse the CLI process and send only
+new messages. Tool round trips keep that process for up to five minutes awaiting results.
+Each model instance allows eight running processes, including up to four idle ones.
+After five idle minutes the process is stopped; the next turn restores its completed
+session with `--resume` before sending new messages. Recovery also works after plugin
+reload. Up to 32 saved sessions per model instance are retained for 24 hours and removed
+on subsequent requests or cleanup.
+
+Reuse requires the same conversation ID, account, model, system prompt, tools, reasoning
+effort, and history prefix. Edited, cleared, or compacted history, changed settings, and
+unloadable checkpoints start a fresh run from AstrBot's full context. Recovery falls back
+only before sending new user input; requests that have emitted output are never replayed
+automatically. Requests without a conversation ID or identifiable account use independent
+runs. Terminal conversations are never adopted.
+
+Indexes, transcripts, and temporary bridge files live under AstrBot's
+`data/plugin_data/astrbot_plugin_openai_oauth/claude`. Indexes contain matching fingerprints,
+not tokens; CLI transcripts contain conversation content. A directory link under the
+Claude configuration's `projects` directory redirects only the bridge's own project to
+that data directory. Other projects are untouched. If directory links are unavailable
+(for example, on Windows without the required permissions), live reuse still works but
+disk recovery is disabled. AstrBot still supplies full history for matching, and Claude
+Code manages model context and caching itself; this reduces repeated input and startup
+overhead without guaranteeing that historical tokens incur no usage.
+
+Local Claude can be renamed; sign-in happens on the host. The page shows login and plan
+status only; check subscription allowance using `/usage` inside Claude Code. The plugin's
+chat `/usage` and `/effort` commands still target OpenAI. Claude accepts
+`anth_thinking_config.effort` in model settings. Custom HTTP bodies and forced tool
+selection are not supported yet.
+
+Docker needs Claude Code installed and signed in inside the container. A macOS Keychain
+login cannot be mounted directly into a Linux container. CLI flag/status verification
+used Claude Code `2.1.287`; older versions need `auth status` and `stream-json` support.
+Use your own subscription subject to the [official Claude Code conditions](https://code.claude.com/docs/en/legal-and-compliance).
+
+Developer checks: `tests/claude_test.py` covers live reuse, recovery, tool turns, and
+cancellation isolation. Run `tests/native_claude_smoke.py --binary /path/to/claude` with
+AstrBot's Python for an opt-in check using the real CLI, isolated configuration, and a
+local model fixture, without real subscription credentials.
+
 ## Add a provider with device-code login
 
 1. Open **Plugin Views** in the plugin detail page, click **Add provider**, enter a name,

@@ -78,6 +78,7 @@ let pollResult;
 let cancelResponse = null;
 const device = {id: "device", name: "Work", status: "ready", credential_mode: "device_oauth", account_revision: "device-one"};
 let slowUsage = null;
+let claude = null;
 let deviceBody;
 const usageBodies = [];
 const providerUpdates = [];
@@ -90,7 +91,7 @@ const bridge = {
       device.name = body.name;
       return { status: "success" };
     }
-    if (endpoint === "providers/list") return { providers: [account, device] };
+    if (endpoint === "providers/list") return { providers: [account, device, claude].filter(Boolean) };
     if (endpoint === "account/usage") {
       usageBodies.push(body);
       if (body.source_id === "device") return {status: "success", account: device, usage: {windows: [{label_seconds: 604800, used_percent: 60}]}};
@@ -266,4 +267,20 @@ await new Promise((resolve) => setImmediate(resolve));
 assert.equal(providerUpdates.length, 1);
 assert.equal(providerUpdates[0].source_id, "device");
 assert.equal(providerUpdates[0].name, "工作");
-console.log("View regressions passed: preview parity, quota windows, provider selection, stale-result isolation, login and cancellation races, IME-safe rename.");
+claude = {id: "Claude Subscribe", name: "Local Claude", credential_mode: "local_claude", status: "ready", plan_type: "max"};
+await page.queryUsage();
+const quotaCalls = usageBodies.length;
+await page.selectProvider(claude.id);
+assert.match(read("source-name"), /本地 Claude/);
+assert.match(read("usage-result"), /已检测到本地登录/);
+assert.match(read("providers"), /Claude Max/);
+assert.equal(ids.get("open-login").hidden, true);
+assert.equal(ids.get("delete-row").hidden, true);
+assert.equal(ids.get("source-caption").hidden, false);
+for (const [state, hint] of [["not_logged_in", /claude auth login/], ["cli_missing", /安装 Claude Code/], ["wrong_auth", /API Key/], ["unknown", /无法检查/]]) {
+  claude.status = state;
+  await page.queryUsage();
+  assert.match(read("usage-result"), hint);
+}
+assert.equal(usageBodies.length, quotaCalls, "Claude must never query the Codex quota endpoint");
+console.log("View regressions passed, including Claude discovery, login guidance and quota isolation.");

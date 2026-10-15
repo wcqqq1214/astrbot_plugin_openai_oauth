@@ -1,6 +1,7 @@
 // Offline preview of the production page. All accounts and quotas are examples.
 const previewProviders = [
   {id: "local-codex", name: "Local Codex", credential_mode: "local_codex", status: "ready", email: "local@example.com", plan_type: "pro", account_revision: "local-one"},
+  {id: "local-claude", name: "Local Claude", credential_mode: "local_claude", status: "ready", email: "claude@example.com", plan_type: "max"},
   {id: "personal", name: "ChatGPT · 个人", credential_mode: "device_oauth", status: "ready", email: "personal@example.com", plan_type: "plus", account_revision: "personal-one"},
   {id: "work", name: "ChatGPT · 工作", credential_mode: "device_oauth", status: "not_logged_in"},
 ];

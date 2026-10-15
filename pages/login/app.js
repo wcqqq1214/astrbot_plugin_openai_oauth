@@ -14,6 +14,14 @@ const strings = {
     removeHint: "Its saved login is deleted too.",
     confirmHint: "Click again to delete permanently.",
     localShort: "Follows the host Codex login",
+    claudeLocal: "Local Claude",
+    claudeShort: "Follows the host Claude Code login",
+    claudeFollow: "Uses the official Claude Code CLI. Configure its path and config directory in plugin settings.",
+    claudeReady: "Local login detected. Select Claude Subscribe in AstrBot model settings. Check allowance with /usage in Claude Code.",
+    claudeMissing: "Run claude auth login as the AstrBot host user, then refresh here.",
+    claudeCliMissing: "Install Claude Code on the AstrBot host, or set its executable path in plugin settings.",
+    claudeWrongAuth: "Claude Code is using an API key or gateway. Sign in with your Claude subscription in the configured directory.",
+    claudeUnknown: "Could not check Claude Code login. Check the CLI version and host permissions, then refresh.",
     deviceShort: "Device-code login",
     remove: "Remove provider",
     confirmRemove: "Confirm removal",
@@ -24,6 +32,8 @@ const strings = {
     automatic: "Refreshes every 30 seconds while visible",
     states: {
       ready: "Signed in",
+      cli_missing: "CLI not found",
+      wrong_auth: "Subscription required",
       refreshing: "Refreshing",
       cooling: "Cooling down",
       degraded: "Needs attention",
@@ -115,6 +125,14 @@ const strings = {
     removeHint: "会同时删除它保存的登录凭据。",
     confirmHint: "再次点击即永久删除。",
     localShort: "跟随主机上的 Codex 登录",
+    claudeLocal: "本地 Claude",
+    claudeShort: "跟随主机上的 Claude Code 登录",
+    claudeFollow: "通过官方 Claude Code 使用本地登录；可在插件设置中指定 CLI 路径与配置目录。",
+    claudeReady: "已检测到本地登录。请在 AstrBot 模型配置中选择 Claude Subscribe；额度可在 Claude Code 中通过 /usage 查看。",
+    claudeMissing: "请以 AstrBot 的运行用户在主机上运行 claude auth login，登录后刷新此页面。",
+    claudeCliMissing: "请在 AstrBot 所在环境安装 Claude Code，或在插件设置中指定可执行文件路径。",
+    claudeWrongAuth: "Claude Code 当前使用 API Key 或网关，请在指定配置目录中登录 Claude 订阅账号。",
+    claudeUnknown: "无法检查 Claude Code 登录，请检查 CLI 版本与主机权限后刷新。",
     deviceShort: "设备码登录",
     remove: "移除此 Provider",
     confirmRemove: "确认移除",
@@ -125,6 +143,8 @@ const strings = {
     automatic: "页面可见时每 30 秒自动刷新",
     states: {
       ready: "已登录",
+      cli_missing: "未找到 CLI",
+      wrong_auth: "需订阅登录",
       refreshing: "刷新中",
       cooling: "冷却中",
       degraded: "需要留意",
@@ -228,6 +248,7 @@ const plans = {
   go: "Go",
   plus: "Plus",
   pro: "Pro",
+  max: "Max",
   team: "Team",
   business: "Business",
   enterprise: "Enterprise",
@@ -245,7 +266,7 @@ const chevronIcon = '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>';
 const rowNodes = new Map();
 const maxConsecutivePollFailures = 5;
 const warningStates = ["cooling", "degraded"];
-const dangerStates = ["reauth_required", "invalid"];
+const dangerStates = ["reauth_required", "invalid", "cli_missing", "wrong_auth"];
 const signedOutStates = ["not_logged_in", "invalid"];
 
 let isEnglish = false;
@@ -417,9 +438,10 @@ function renderAccountStatus(result) {
   accountStatus.setAttribute("title", t.details[state] || t.details.unknown);
   accountStatus.className = "badge" + statusClass(state);
 
-  const local = account.credential_mode === "local_codex";
+  const claude = account.credential_mode === "local_claude";
+  const local = claude || account.credential_mode === "local_codex";
   byId("source-name").textContent = providerName(account);
-  byId("source-caption").textContent = local ? t.follow : t.deviceShort;
+  byId("source-caption").textContent = claude ? t.claudeFollow : local ? t.follow : t.deviceShort;
   if (document.activeElement !== providerNameInput)
     providerNameInput.value = account.name || "";
   syncRename();
@@ -604,6 +626,7 @@ function setRefreshing(busy) {
 }
 
 function providerName(provider) {
+  if (provider.credential_mode === "local_claude" && provider.name === "Local Claude") return t.claudeLocal;
   return provider.credential_mode === "local_codex" && provider.name === "Local Codex"
     ? t.local : provider.name || provider.id || "—";
 }
@@ -639,7 +662,8 @@ function renderProviders() {
   const order = [];
   for (const provider of providers) {
     const node = providerRow(provider.id);
-    const local = provider.credential_mode === "local_codex";
+    const claude = provider.credential_mode === "local_claude";
+    const local = claude || provider.credential_mode === "local_codex";
     const selected = provider.id === selectedSourceId;
     const state = String(provider.status || "unknown");
     const mode = local ? "local" : "device";
@@ -653,10 +677,10 @@ function renderProviders() {
     node.row.setAttribute("aria-expanded", String(selected && expanded));
     node.name.textContent = providerName(provider);
     const plan = plans[provider.plan_type];
-    node.sub.textContent = provider.email || (local ? t.localShort : t.deviceShort);
+    node.sub.textContent = provider.email || (claude ? t.claudeShort : local ? t.localShort : t.deviceShort);
     const healthy = state === "ready";
     node.metaText.textContent =
-      healthy && plan ? `ChatGPT ${plan}` : t.states[state] || t.states.unknown;
+      healthy && plan ? `${claude ? "Claude" : "ChatGPT"} ${plan}` : t.states[state] || t.states.unknown;
     node.meta.className = "provider-meta" + statusClass(state);
     node.meta.setAttribute("title", t.details[state] || t.details.unknown);
     order.push(node.row);
@@ -725,6 +749,13 @@ async function queryUsage() {
       providerDetail.hidden = !latest || !expanded;
       if (!latest) return;
       renderAccountStatus(latest);
+      if (latest.credential_mode === "local_claude") {
+        const message = {ready: "claudeReady", not_logged_in: "claudeMissing", cli_missing: "claudeCliMissing", wrong_auth: "claudeWrongAuth"}[latest.status] || "claudeUnknown";
+        clearUsage(message);
+        lastUpdated = new Date();
+        renderUpdated();
+        return;
+      }
       if (signedOutStates.includes(latest.status)) {
         clearUsage(latest.credential_mode === "local_codex" ? "localMissing" : "noHelp");
         return;

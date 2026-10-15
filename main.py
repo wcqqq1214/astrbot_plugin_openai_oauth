@@ -39,6 +39,7 @@ from astrbot.core.provider.sources.request_retry import (
 from astrbot.core.utils.config_number import coerce_int_config
 from astrbot.core.workspace import API_KEY_USERNAME_PREFIX
 
+from . import claude_provider
 from .credential_store import (
     CredentialCooldownError,
     CredentialError,
@@ -49,6 +50,7 @@ from .credential_store import (
     ReauthenticationRequiredError,
     parse_credentials,
 )
+from .local_claude import CLAUDE_PROVIDER_TYPE
 from .local_codex import LocalCodexStore
 from .local_codex import LocalCredentialCoordinator as CredentialCoordinator
 from .oauth import (
@@ -214,6 +216,7 @@ class OpenAI_OAuth_Plugin(Star):
         super().__init__(context)
         _config_mgr = context.astrbot_config_mgr
         self.config = config if config is not None else AstrBotConfig()
+        claude_provider.configure_claude(self.config)
         _local_codex_store = LocalCodexStore(
             str(self.config.get("codex_auth_path", "") or "")
         )
@@ -266,6 +269,7 @@ class OpenAI_OAuth_Plugin(Star):
     async def initialize(self) -> None:
         """Expose the default model source without requiring a device login."""
         await _get_credential_coordinator().ensure_default_source()
+        await claude_provider.ensure_source(_get_credential_coordinator().providers)
 
     @filter.command("usage")
     async def usage(self, event: AstrMessageEvent) -> None:
@@ -463,6 +467,7 @@ class OpenAI_OAuth_Plugin(Star):
         tasks = _cancel_all_command_login_tasks()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        await claude_provider.close_claude()
 
 
 def _register_provider_adapter_if_absent(cls: type) -> type:
@@ -1612,8 +1617,20 @@ async def _requested_source_id() -> str:
     source_id = body.get("source_id", _PROVIDER_TYPE)
     if not isinstance(source_id, str) or not source_id:
         raise CredentialSourceError("Invalid provider ID.")
-    _get_credential_coordinator()._source(source_id)
+    if _claude_source(source_id) is None:
+        _get_credential_coordinator()._source(source_id)
     return source_id
+
+
+def _claude_source(source_id: str) -> dict | None:
+    return next(
+        (
+            s
+            for s in _get_credential_coordinator().providers.sources()
+            if s["id"] == source_id and s.get("type") == CLAUDE_PROVIDER_TYPE
+        ),
+        None,
+    )
 
 
 async def _handle_providers_list() -> Any:
@@ -1624,6 +1641,9 @@ async def _handle_providers_list() -> Any:
         providers = [
             coordinator.account_view(s["id"]) for s in coordinator.providers.owned()
         ]
+        for source in coordinator.providers.sources():
+            if source.get("type") == CLAUDE_PROVIDER_TYPE:
+                providers.append(await claude_provider.account_view(source))
         return json_response({"providers": providers}, headers=_NO_STORE_HEADERS)
     except CredentialError:
         return _login_error_response("Provider configuration is unavailable.", 400)
@@ -1637,6 +1657,20 @@ async def _edit_provider(*, delete: bool) -> Any:
         body = await request.json(default={}) or {}
         if "source_id" not in body:
             raise CredentialSourceError("Provider ID is required.")
+        if _claude_source(source_id) is not None:
+            if delete:
+                raise CredentialSourceError(
+                    "The local Claude provider cannot be deleted."
+                )
+            registry = _get_credential_coordinator().providers
+            async with registry.lock:
+                source = _claude_source(source_id)
+                if source is None:
+                    raise CredentialSourceError("Provider no longer exists.")
+                previous = deepcopy(registry.sources())
+                source["name"] = registry.name(body.get("name"))
+                await registry._save(previous)
+            return json_response({"status": "success"}, headers=_NO_STORE_HEADERS)
         await _get_credential_coordinator().providers.edit(
             source_id,
             name=body.get("name"),
@@ -1664,7 +1698,13 @@ async def _handle_account_status() -> Any:
         return _login_error_response(message, 403)
     try:
         coordinator = _get_credential_coordinator()
-        status = coordinator.account_view(await _requested_source_id())
+        source_id = await _requested_source_id()
+        source = _claude_source(source_id)
+        status = (
+            await claude_provider.account_view(source)
+            if source is not None
+            else coordinator.account_view(source_id)
+        )
     except CredentialError:
         status = {"status": "invalid"}
     return json_response(status, headers=_NO_STORE_HEADERS)
@@ -1676,6 +1716,15 @@ async def _handle_account_usage() -> Any:
     before: dict[str, Any] = {}
     try:
         source_id = await _requested_source_id()
+        source = _claude_source(source_id)
+        if source is not None:
+            return json_response(
+                {
+                    "status": "unsupported",
+                    "account": await claude_provider.account_view(source),
+                },
+                headers=_NO_STORE_HEADERS,
+            )
         coordinator = _get_credential_coordinator()
         before = coordinator.account_view(source_id)
         usage = await _fetch_source_usage(source_id)

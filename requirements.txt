@@ -1,1 +1,2 @@
-# No runtime dependencies. httpx and the openai SDK are provided by AstrBot.
+# httpx and the model SDKs are provided by AstrBot.
+aiohttp>=3.11.18,<4

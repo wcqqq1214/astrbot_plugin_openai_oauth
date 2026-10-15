@@ -1,4 +1,16 @@
 {
+  "claude_command": {
+    "description": "Claude Code 可执行文件路径（可选）",
+    "type": "string",
+    "default": "",
+    "hint": "留空自动检测 claude。请先在 AstrBot 所在环境以同一系统用户运行 claude auth login。填写完整可执行文件路径，不含命令参数；保存后重载插件。"
+  },
+  "claude_config_dir": {
+    "description": "Claude Code 配置目录（可选）",
+    "type": "string",
+    "default": "",
+    "hint": "留空使用 $CLAUDE_CONFIG_DIR 或 Claude Code 默认目录。支持复用本机订阅登录，不导入 Token。Docker 需要在容器中安装并登录 Claude Code；保存后重载插件。"
+  },
   "codex_auth_path": {
     "description": "Codex auth.json 路径（可选）",
     "type": "string",
