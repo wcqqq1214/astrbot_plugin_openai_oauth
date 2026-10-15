@@ -66,6 +66,8 @@ let usage = {
   },
 };
 let pollResult;
+let pollFailure;
+let loginStarts = 0;
 let cancelResponse = null;
 const device = {id: "device", name: "Work", status: "ready", credential_mode: "device_oauth", account_revision: "device-one"};
 let slowUsage = null;
@@ -104,6 +106,7 @@ const bridge = {
       return usage;
     }
     if (endpoint === "device/start") {
+      loginStarts += 1;
       deviceBody = body;
       return {
         status: "pending",
@@ -114,8 +117,9 @@ const bridge = {
       };
     }
     if (endpoint === "device/poll")
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
         pollResult = resolve;
+        pollFailure = reject;
       });
     if (endpoint === "device/cancel") return cancelResponse || { status: "cancelled" };
     throw new Error("Unexpected endpoint");
@@ -143,7 +147,7 @@ const source = readFileSync(
   "utf8",
 );
 const page = await vm.runInNewContext(
-  `(async () => {${source}\n await queryUsage(); return {queryUsage, startLogin, cancelLogin, selectProvider, openLogin};})()`,
+  `(async () => {${source}\n await queryUsage(); return {queryUsage, startLogin, cancelLogin, closeLogin, poll, selectProvider, openLogin};})()`,
   { window, document, navigator: {}, console },
 );
 const read = (id) => ids.get(id).textContent;
@@ -254,6 +258,78 @@ rejectCancel(new Error("Already saved"));
 await refusedCancellation;
 assert.match(read("status"), /Provider 已保存/);
 assert.equal(ids.get("error").hidden, true);
+
+// A missing session is terminal: refresh potentially saved providers and allow retry.
+cancelResponse = null;
+page.openLogin();
+const expiredLogin = page.startLogin();
+await new Promise((resolve) => setImmediate(resolve));
+const listsBeforeExpiry = listCalls;
+pollResult({status: "expired"});
+await expiredLogin;
+await new Promise((resolve) => setImmediate(resolve));
+assert.match(read("error"), /登录会话已失效/);
+assert.equal(ids.get("instructions").hidden, true);
+assert.equal(ids.get("cancel").hidden, true);
+assert.equal(ids.get("start").hidden, false);
+assert.ok(listCalls > listsBeforeExpiry);
+await page.closeLogin();
+assert.equal(ids.get("login-dialog").open, false);
+page.openLogin();
+const startsBeforeRetry = loginStarts;
+const retriedLogin = page.startLogin();
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(loginStarts, startsBeforeRetry + 1);
+pollResult({status: "pending"});
+await retriedLogin;
+
+// Closing before the next poll must also recover an expired session.
+cancelResponse = {status: "expired"};
+const listsBeforeClose = listCalls;
+await page.closeLogin();
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(ids.get("login-dialog").open, false);
+assert.ok(listCalls > listsBeforeClose);
+
+// Network failure remains nonterminal; retry can recover when cancel confirms expiry.
+page.openLogin();
+const networkLogin = page.startLogin();
+await new Promise((resolve) => setImmediate(resolve));
+pollFailure(new Error("Network unavailable"));
+await networkLogin;
+for (let attempt = 1; attempt < 5; attempt += 1) {
+  const failedPoll = page.poll("device-one", 5);
+  pollFailure(new Error("Network unavailable"));
+  await failedPoll;
+}
+assert.match(read("error"), /Network unavailable/);
+assert.equal(ids.get("start").hidden, false);
+cancelResponse = Promise.reject(new Error("Still saving or network unavailable"));
+await page.closeLogin();
+assert.equal(ids.get("login-dialog").open, true);
+assert.equal(ids.get("cancel").hidden, false);
+cancelResponse = {status: "expired"};
+const startsAfterNetwork = loginStarts;
+const recoveredLogin = page.startLogin();
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(loginStarts, startsAfterNetwork + 1);
+pollResult({status: "success", source_id: "device"});
+await recoveredLogin;
+
+// A late expired cancel response must not overwrite a concurrently received success.
+page.openLogin();
+const racingLogin = page.startLogin();
+await new Promise((resolve) => setImmediate(resolve));
+let resolveExpiredCancel;
+cancelResponse = new Promise((resolve) => { resolveExpiredCancel = resolve; });
+const racingCancel = page.cancelLogin();
+pollResult({status: "success", source_id: "device"});
+await racingLogin;
+resolveExpiredCancel({status: "expired"});
+await racingCancel;
+assert.match(read("status"), /Provider 已保存/);
+assert.equal(ids.get("error").hidden, true);
+cancelResponse = null;
 
 // Confirming an IME candidate must not save an unfinished provider name.
 await page.queryUsage();

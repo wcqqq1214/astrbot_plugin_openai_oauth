@@ -1796,7 +1796,9 @@ async def _handle_device_poll() -> Any:
     if session is None or not secrets.compare_digest(
         str(session.get("owner", "")), owner
     ):
-        return _login_error_response("登录会话不存在或已过期", 404)
+        # The WebUI bridge exposes non-2xx errors as text, not structured data.
+        # Do not reveal whether an inaccessible session belongs to another user.
+        return json_response({"status": "expired"}, headers=_NO_STORE_HEADERS)
     payload = {
         "status": session["status"],
         "error": session.get("error"),
@@ -1815,12 +1817,13 @@ async def _handle_device_cancel() -> Any:
     if not isinstance(body, dict):
         return _login_error_response("请求格式无效", 400)
     session_id = str(body.get("session_id", "") or "")
+    _prune_expired_login_sessions()
     session = _login_sessions.get(session_id)
     owner = str(request.username)
     if session is None or not secrets.compare_digest(
         str(session.get("owner", "")), owner
     ):
-        return _login_error_response("登录会话不存在或已过期", 404)
+        return json_response({"status": "expired"}, headers=_NO_STORE_HEADERS)
     if session["status"] in {"saving", "success"}:
         return _login_error_response(
             "授权已完成，正在保存或已保存 Provider，请等待登录结果。", 409

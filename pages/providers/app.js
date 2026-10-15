@@ -111,6 +111,7 @@ const strings = {
       "Provider saved. Select this source in AstrBot model settings to use it.",
     failedLogin: "Login failed.",
     expired: "The device code expired. Please start again.",
+    sessionExpired: "The sign-in session expired. Check the provider list or sign in again.",
   },
   zh: {
     title: "Providers",
@@ -213,6 +214,7 @@ const strings = {
     success: "Provider 已保存。请在 AstrBot 模型配置中选择此来源。",
     failedLogin: "登录失败。",
     expired: "设备码已过期，请重新开始登录。",
+    sessionExpired: "登录会话已失效，请检查 Provider 列表或重新登录。",
   },
 };
 
@@ -1061,6 +1063,15 @@ function finishSuccess(sourceId) {
   void openProvider(sourceId || selectedSourceId);
 }
 
+function finishExpiredSession() {
+  showError(t.sessionExpired);
+  showInstructions(false);
+  verifyUrl.value = "";
+  userCode.value = "";
+  // A lost terminal response may have followed a successful provider save.
+  void queryUsage();
+}
+
 async function poll(sessionId, intervalSeconds) {
   try {
     const result = await bridge.apiPost("device/poll", {
@@ -1073,6 +1084,10 @@ async function poll(sessionId, intervalSeconds) {
     consecutivePollFailures = 0;
     if (result.status === "success") {
       finishSuccess(result.source_id);
+      return;
+    }
+    if (result.status === "expired") {
+      finishExpiredSession();
       return;
     }
     if (result.status === "timeout") {
@@ -1144,8 +1159,14 @@ async function cancelLogin() {
   }
   cancelling = true;
   cancelButton.disabled = true;
+  const sessionId = activeSessionId;
   try {
-    await bridge.apiPost("device/cancel", { session_id: activeSessionId });
+    const result = await bridge.apiPost("device/cancel", { session_id: sessionId });
+    if (activeSessionId !== sessionId) return;
+    if (result.status === "expired") {
+      finishExpiredSession();
+      return;
+    }
     clearPollTimer();
     finishSession();
     showInstructions(false);
@@ -1153,7 +1174,7 @@ async function cancelLogin() {
     startButton.disabled = false;
     setStartLabel("restart");
   } catch (reason) {
-    if (!activeSessionId) return;
+    if (activeSessionId !== sessionId) return;
     showError(reason?.message || t.failedLogin, false);
     schedulePoll(activeSessionId, 2);
   } finally {

@@ -299,13 +299,20 @@ def test_login_error_and_cancel() -> None:
             session_id = payload(started)["session_id"]
             with request_context({"session_id": session_id}, username="owner-b"):
                 stolen = await plugin._handle_device_cancel()
+            check(
+                plugin._login_sessions[session_id]["status"] == "pending",
+                "another WebUI user leaves the owner's session unchanged",
+            )
             with request_context({"session_id": session_id}, username="owner-a"):
                 cancelled = await plugin._handle_device_cancel()
             await asyncio.sleep(0)
             return stolen, cancelled, session_id
 
     stolen, cancelled, session_id = asyncio.run(run_cancel())
-    check(stolen.status_code == 404, "another WebUI user cannot cancel a session")
+    check(
+        stolen.status_code == 200 and payload(stolen) == {"status": "expired"},
+        "another WebUI user receives no session information",
+    )
     check(
         payload(cancelled) == {"status": "cancelled"},
         "owner can cancel a login session",

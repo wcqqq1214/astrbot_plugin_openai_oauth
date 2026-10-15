@@ -222,7 +222,29 @@ class LoginBoundaryTests(unittest.TestCase):
         first, second, stolen_poll = asyncio.run(run())
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 429)
-        self.assertEqual(stolen_poll.status_code, 404)
+        self.assertEqual(stolen_poll.status_code, 200)
+        self.assertEqual(_payload(stolen_poll), {"status": "expired"})
+
+    def test_missing_and_expired_sessions_return_a_terminal_status(self) -> None:
+        async def run():
+            for handler in (plugin._handle_device_poll, plugin._handle_device_cancel):
+                for session_id in ("missing", "expired"):
+                    if session_id == "expired":
+                        plugin._login_sessions[session_id] = {
+                            "owner": "owner-a",
+                            "status": "pending",
+                            "expires_at": 0,
+                        }
+                    with bind_request_context(
+                        _plugin_request({"session_id": session_id}, username="owner-a")
+                    ):
+                        response = await handler()
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(_payload(response), {"status": "expired"})
+                    self.assertEqual(response.headers["cache-control"], "no-store")
+                    self.assertNotIn(session_id, plugin._login_sessions)
+
+        asyncio.run(run())
 
     def test_login_sessions_have_a_per_user_limit(self) -> None:
         async def wait_forever(*_args):
@@ -339,7 +361,8 @@ class LoginBoundaryTests(unittest.TestCase):
         self.assertIsNone(first_data["error"])
         self.assertEqual(set(first_data), {"status", "error", "source_id"})
         self.assertEqual(first_poll.headers["cache-control"], "no-store")
-        self.assertEqual(replay.status_code, 404)
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(_payload(replay), {"status": "expired"})
         source = fake_manager.default_conf["provider_sources"][0]
         self.assertEqual(json.loads(source["key"])["access_token"], "fake-access")
         self.assertEqual(fake_manager.default_conf.saved, 1)
