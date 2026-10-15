@@ -233,11 +233,9 @@ const plans = {
   enterprise: "Enterprise",
   edu: "Edu",
 };
-const providerIcons = {
-  local: '<img src="./icons/codex-color.svg" alt="" width="34" height="34">',
-  device:
-    '<svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M10.9 12.1L19.5 3.5M16 7l2.5 2.5"/></svg>',
-};
+const codexIcon =
+  '<img class="codex-icon-light" src="./icons/codex-color.svg" alt="" width="34" height="34">' +
+  '<img class="codex-icon-dark" src="./icons/codex-color-dark.svg" alt="" width="34" height="34">';
 const chevronIcon = '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>';
 // Rows persist across refreshes and are updated in place, so the detail
 // editor (and a name being typed in it) is never detached by a re-render.
@@ -615,6 +613,7 @@ function providerRow(id) {
   row.setAttribute("aria-controls", "provider-detail");
   const icon = element("span", "provider-icon");
   icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = codexIcon;
   const copy = element("span", "provider-copy");
   const name = element("strong", "provider-name");
   const sub = element("span", "provider-sub");
@@ -629,7 +628,7 @@ function providerRow(id) {
   chevron.innerHTML = chevronIcon;
   row.append(icon, copy, meta, chevron);
   row.addEventListener("click", () => void selectProvider(id));
-  node = { row, icon, name, sub, meta, metaText, mode: null };
+  node = { row, name, sub, meta, metaText };
   rowNodes.set(id, node);
   return node;
 }
@@ -641,12 +640,6 @@ function renderProviders() {
     const local = provider.credential_mode === "local_codex";
     const selected = provider.id === selectedSourceId;
     const state = String(provider.status || "unknown");
-    const mode = local ? "local" : "device";
-    if (node.mode !== mode) {
-      node.mode = mode;
-      node.icon.className = "provider-icon " + mode;
-      node.icon.innerHTML = providerIcons[mode];
-    }
     node.row.className =
       "provider-row" + (selected ? " selected" : "") + (selected && expanded ? " open" : "");
     node.row.setAttribute("aria-expanded", String(selected && expanded));

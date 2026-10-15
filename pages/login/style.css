@@ -672,21 +672,18 @@ dialog::backdrop {
   width: 34px;
   height: 34px;
   flex-shrink: 0;
-  border-radius: var(--radius);
-  background: var(--muted-surface);
-  color: var(--secondary);
-}
-.provider-icon.local {
-  background: transparent;
 }
 .provider-icon img {
   display: block;
   width: 34px;
   height: 34px;
 }
-.provider-icon svg {
-  width: 18px;
-  height: 18px;
+.provider-icon .codex-icon-dark,
+:root[data-theme="dark"] .provider-icon .codex-icon-light {
+  display: none;
+}
+:root[data-theme="dark"] .provider-icon .codex-icon-dark {
+  display: block;
 }
 .provider-copy {
   display: grid;
