@@ -31,7 +31,9 @@ class Element {
   setAttribute(key, value) {
     this.attributes[key] = value;
   }
-  addEventListener() {}
+  addEventListener(name, handler) {
+    (this.handlers ||= {})[name] = handler;
+  }
   showModal() {
     this.open = true;
   }
@@ -42,6 +44,15 @@ class Element {
 const html = readFileSync(
   new URL("../pages/login/index.html", import.meta.url),
   "utf8",
+);
+const prototypeHtml = readFileSync(
+  new URL("../pages/login/prototype.html", import.meta.url),
+  "utf8",
+);
+assert.equal(
+  prototypeHtml,
+  html.replace('/api/plugin/page/bridge-sdk.js', './prototype.js'),
+  "Offline preview must retain the production page structure",
 );
 const ids = new Map(
   [...html.matchAll(/id="([^"]+)"/g)].map((x) => [x[1], new Element()]),
@@ -69,10 +80,16 @@ const device = {id: "device", name: "Work", status: "ready", credential_mode: "d
 let slowUsage = null;
 let deviceBody;
 const usageBodies = [];
+const providerUpdates = [];
 const bridge = {
   ready: async () => ({ locale: "zh-CN" }),
   getLocale: () => "zh-CN",
   apiPost: async (endpoint, body) => {
+    if (endpoint === "providers/update") {
+      providerUpdates.push(body);
+      device.name = body.name;
+      return { status: "success" };
+    }
     if (endpoint === "providers/list") return { providers: [account, device] };
     if (endpoint === "account/usage") {
       usageBodies.push(body);
@@ -228,4 +245,21 @@ rejectCancel(new Error("Already saved"));
 await refusedCancellation;
 assert.match(read("status"), /Provider 已保存/);
 assert.equal(ids.get("error").hidden, true);
-console.log("View regressions passed: quota windows, provider selection, stale-result isolation, login and cancellation races.");
+
+// Confirming an IME candidate must not save an unfinished provider name.
+await page.queryUsage();
+const nameInput = ids.get("provider-name");
+document.activeElement = nameInput;
+nameInput.value = "gongzuo";
+nameInput.handlers.input();
+nameInput.handlers.keydown({ key: "Enter", isComposing: true, keyCode: 13 });
+nameInput.handlers.keydown({ key: "Enter", isComposing: false, keyCode: 229 });
+assert.equal(providerUpdates.length, 0);
+nameInput.value = "工作";
+nameInput.handlers.input();
+nameInput.handlers.keydown({ key: "Enter", isComposing: false, keyCode: 13 });
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(providerUpdates.length, 1);
+assert.equal(providerUpdates[0].source_id, "device");
+assert.equal(providerUpdates[0].name, "工作");
+console.log("View regressions passed: preview parity, quota windows, provider selection, stale-result isolation, login and cancellation races, IME-safe rename.");

@@ -5,9 +5,17 @@ const strings = {
   en: {
     title: "Providers",
     refresh: "Refresh status",
-    providerHelp: "Local Codex follows the host login. Select a provider to view its allowance; choose its source in AstrBot model settings to use it.",
+    providerHelp: "Select a provider to see its allowance and settings. Choose which source to use in AstrBot model settings.",
     name: "Provider name",
-    saveName: "Save name",
+    nameShort: "Name",
+    saveName: "Save",
+    loginLabel: "Login",
+    loginHint: "Authorize this provider again with a device code.",
+    removeLabel: "Remove",
+    removeHint: "Deletes this provider and its saved login.",
+    confirmHint: "Click again to delete permanently.",
+    localShort: "Follows the host Codex login",
+    deviceShort: "Device-code login",
     remove: "Delete",
     confirmRemove: "Confirm deletion",
     listFailed: "Could not load providers. Try refreshing.",
@@ -100,9 +108,17 @@ const strings = {
   zh: {
     title: "Providers",
     refresh: "刷新状态",
-    providerHelp: "本地 Codex 跟随主机上的登录。点击 Provider 查看额度；实际使用的来源请在 AstrBot 模型配置中选择。",
+    providerHelp: "点击 Provider 查看额度与设置；实际使用哪个来源，请在 AstrBot 模型配置中选择。",
     name: "Provider 名称",
-    saveName: "保存名称",
+    nameShort: "名称",
+    saveName: "保存",
+    loginLabel: "授权",
+    loginHint: "通过设备码重新授权此 Provider。",
+    removeLabel: "移除",
+    removeHint: "删除此 Provider 及其保存的登录凭据。",
+    confirmHint: "再次点击即永久删除。",
+    localShort: "跟随主机上的 Codex 登录",
+    deviceShort: "设备码登录",
     remove: "删除",
     confirmRemove: "确认删除",
     listFailed: "无法加载 Provider，请刷新重试。",
@@ -206,6 +222,30 @@ const statusDots = byId("status-dots");
 const error = byId("error");
 const loginDialog = byId("login-dialog");
 const closeButton = byId("close-login");
+const providerList = byId("providers");
+const providerDetail = byId("provider-detail");
+const providerNameInput = byId("provider-name");
+const renameButton = byId("rename-provider");
+const plans = {
+  free: "Free",
+  go: "Go",
+  plus: "Plus",
+  pro: "Pro",
+  team: "Team",
+  business: "Business",
+  enterprise: "Enterprise",
+  edu: "Edu",
+};
+const providerIcons = {
+  local:
+    '<svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M7.5 9.5l2.5 2.5-2.5 2.5M12.5 14.5h4"/></svg>',
+  device:
+    '<svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M10.9 12.1L19.5 3.5M16 7l2.5 2.5"/></svg>',
+};
+const chevronIcon = '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>';
+// Rows persist across refreshes and are updated in place, so the detail
+// editor (and a name being typed in it) is never detached by a re-render.
+const rowNodes = new Map();
 const maxConsecutivePollFailures = 5;
 const warningStates = ["cooling", "degraded"];
 const dangerStates = ["reauth_required", "invalid"];
@@ -219,6 +259,7 @@ let consecutivePollFailures = 0;
 let account = {};
 let providers = [];
 let selectedSourceId = null;
+let expanded = true;
 let loginSourceId = null;
 let deletingSourceId = null;
 let viewGeneration = 0;
@@ -239,10 +280,14 @@ function applyLocale(locale) {
   document.title = t.title;
   for (const [id, value] of Object.entries({
     title: t.title,
-    "add-provider": t.add,
+    "add-provider-label": t.add,
     "provider-help": t.providerHelp,
-    "rename-label": t.name,
+    "rename-label": t.nameShort,
     "rename-provider": t.saveName,
+    "login-label": t.loginLabel,
+    "login-hint": t.loginHint,
+    "delete-label": t.removeLabel,
+    "delete-hint": t.removeHint,
     "delete-provider": t.remove,
     "open-login": t.renew,
     "login-name-label": t.name,
@@ -279,6 +324,8 @@ function setStatus(message, busy = false) {
 function showInstructions(visible) {
   instructions.hidden = !visible;
   loginIntro.hidden = visible;
+  // The name only matters before a session starts.
+  byId("login-name-field").hidden = visible || Boolean(loginSourceId);
 }
 
 function clearPollTimer() {
@@ -357,33 +404,41 @@ function element(tag, className, value) {
   return node;
 }
 
+function statusClass(state) {
+  return warningStates.includes(state)
+    ? " warning"
+    : dangerStates.includes(state)
+      ? " danger"
+      : state === "ready"
+        ? ""
+        : " neutral";
+}
+
 function renderAccountStatus(result) {
   account = result || {};
   const state = String(account.status || "unknown");
   accountStatus.textContent = t.states[state] || t.states.unknown;
   accountStatus.setAttribute("title", t.details[state] || t.details.unknown);
-  accountStatus.className =
-    "badge" +
-    (warningStates.includes(state)
-      ? " warning"
-      : dangerStates.includes(state)
-        ? " danger"
-        : state === "ready"
-          ? ""
-          : " neutral");
+  accountStatus.className = "badge" + statusClass(state);
 
   const local = account.credential_mode === "local_codex";
-  byId("icon-local").hidden = !local;
-  byId("icon-plugin").hidden = local;
   byId("source-name").textContent = providerName(account);
-  byId("source-caption").textContent = [
-    local ? t.follow : t.savedSource, account.email, account.id,
-  ].filter(Boolean).join(" · ");
-  if (document.activeElement !== byId("provider-name"))
-    byId("provider-name").value = account.name || "";
+  byId("source-caption").textContent = local ? t.follow : t.savedSource;
+  // Without an email the row already says how the provider signs in.
+  byId("source-caption").hidden = !account.email;
+  if (document.activeElement !== providerNameInput)
+    providerNameInput.value = account.name || "";
+  syncRename();
   byId("open-login").hidden = local;
+  byId("login-row").hidden = local;
   byId("delete-provider").hidden = local;
+  byId("delete-row").hidden = local;
   updateNotice();
+}
+
+function syncRename() {
+  const value = String(providerNameInput.value || "").trim();
+  renameButton.disabled = !value || value === (account.name || "");
 }
 
 function windowLabel(seconds) {
@@ -501,16 +556,6 @@ function renderUsage(result) {
   } else {
     usageResult.replaceChildren(...windows.map(quotaCard));
   }
-  const plans = {
-    free: "Free",
-    go: "Go",
-    plus: "Plus",
-    pro: "Pro",
-    team: "Team",
-    business: "Business",
-    enterprise: "Enterprise",
-    edu: "Edu",
-  };
   const plan = plans[usage.plan_type];
   byId("plan").textContent = plan || "";
   byId("plan").hidden = !plan;
@@ -567,30 +612,91 @@ function providerName(provider) {
     ? t.local : provider.name || provider.id || "—";
 }
 
+function providerRow(id) {
+  let node = rowNodes.get(id);
+  if (node) return node;
+  const row = element("button", "provider-row");
+  row.type = "button";
+  row.setAttribute("aria-controls", "provider-detail");
+  const icon = element("span", "provider-icon");
+  icon.setAttribute("aria-hidden", "true");
+  const copy = element("span", "provider-copy");
+  const title = element("span", "provider-title");
+  const name = element("strong", "provider-name");
+  const plan = element("span", "plan-tag");
+  title.append(name, plan);
+  const sub = element("span", "provider-sub");
+  copy.append(title, sub);
+  const badge = element("span", "badge");
+  const chevron = element("span", "chevron");
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.innerHTML = chevronIcon;
+  row.append(icon, copy, badge, chevron);
+  row.addEventListener("click", () => void selectProvider(id));
+  node = { row, icon, name, plan, sub, badge, mode: null };
+  rowNodes.set(id, node);
+  return node;
+}
+
 function renderProviders() {
-  const rows = providers.map((provider) => {
-    const row = element("button", "provider-row" + (provider.id === selectedSourceId ? " selected" : ""));
-    row.type = "button";
-    row.setAttribute("aria-pressed", String(provider.id === selectedSourceId));
-    const copy = element("span", "provider-copy");
-    copy.append(element("strong", "", providerName(provider)));
-    copy.append(element("span", "muted", [
-      provider.credential_mode === "local_codex" ? t.follow : t.savedSource,
-      provider.email, provider.plan_type,
-    ].filter(Boolean).join(" · ")));
-    row.append(copy, element("span", "badge" + (provider.status === "ready" ? "" : " neutral"), t.states[provider.status] || t.states.unknown));
-    row.addEventListener("click", () => void selectProvider(provider.id));
-    return row;
-  });
-  byId("providers").replaceChildren(...rows);
+  const order = [];
+  for (const provider of providers) {
+    const node = providerRow(provider.id);
+    const local = provider.credential_mode === "local_codex";
+    const selected = provider.id === selectedSourceId;
+    const state = String(provider.status || "unknown");
+    const mode = local ? "local" : "device";
+    if (node.mode !== mode) {
+      node.mode = mode;
+      node.icon.className = "provider-icon " + mode;
+      node.icon.innerHTML = providerIcons[mode];
+    }
+    node.row.className =
+      "provider-row" + (selected ? " selected" : "") + (selected && expanded ? " open" : "");
+    node.row.setAttribute("aria-expanded", String(selected && expanded));
+    node.name.textContent = providerName(provider);
+    const plan = plans[provider.plan_type];
+    node.plan.textContent = plan || "";
+    node.plan.hidden = !plan;
+    node.sub.textContent = provider.email || (local ? t.localShort : t.deviceShort);
+    node.badge.textContent = t.states[state] || t.states.unknown;
+    node.badge.className = "badge" + statusClass(state);
+    node.badge.setAttribute("title", t.details[state] || t.details.unknown);
+    order.push(node.row);
+    if (selected) order.push(providerDetail);
+  }
+  for (const id of [...rowNodes.keys()])
+    if (!providers.some((provider) => provider.id === id)) rowNodes.delete(id);
+  if (!order.includes(providerDetail)) order.push(providerDetail);
+  // Reorder only when the sequence changed: moving the editor would blur
+  // a focused name field during the 30-second refresh.
+  const current = [...providerList.children];
+  if (
+    current.length !== order.length ||
+    current.some((child, index) => child !== order[index])
+  )
+    providerList.replaceChildren(...order);
 }
 
 async function selectProvider(id) {
+  if (id && id === selectedSourceId) {
+    // Clicking the open row folds its editor away.
+    expanded = !expanded;
+    providerDetail.hidden = !expanded;
+    renderProviders();
+    return;
+  }
+  await openProvider(id);
+}
+
+async function openProvider(id) {
+  expanded = true;
   ++viewGeneration;
   refreshPromise = null;
   selectedSourceId = id;
   deletingSourceId = null;
   byId("delete-provider").textContent = t.remove;
+  byId("delete-hint").textContent = t.removeHint;
   byId("page-error").hidden = true;
   lastUpdated = null;
   byId("updated").textContent = "";
@@ -619,7 +725,7 @@ async function queryUsage() {
       }
       renderProviders();
       const latest = providers.find((p) => p.id === selectedSourceId);
-      byId("provider-detail").hidden = !latest;
+      providerDetail.hidden = !latest || !expanded;
       if (!latest) return;
       renderAccountStatus(latest);
       if (signedOutStates.includes(latest.status)) {
@@ -658,6 +764,7 @@ async function editProvider(remove = false) {
   if (remove && deletingSourceId !== sourceId) {
     deletingSourceId = sourceId;
     byId("delete-provider").textContent = t.confirmRemove;
+    byId("delete-hint").textContent = t.confirmHint;
     return;
   }
   const button = byId(remove ? "delete-provider" : "rename-provider");
@@ -666,7 +773,8 @@ async function editProvider(remove = false) {
     await bridge.apiPost(remove ? "providers/delete" : "providers/update", {
       source_id: sourceId, name: byId("provider-name").value,
     });
-    await selectProvider(remove && selectedSourceId === sourceId ? null : selectedSourceId);
+    if (remove && selectedSourceId === sourceId) await openProvider(null);
+    else await queryUsage();
   } catch (reason) {
     byId("page-error").textContent = reason?.message || t.failed;
     byId("page-error").hidden = false;
@@ -702,7 +810,7 @@ function finishSuccess(sourceId) {
   userCode.value = "";
   startButton.hidden = true;
   byId("login-name").disabled = false;
-  void selectProvider(sourceId);
+  void openProvider(sourceId || selectedSourceId);
 }
 
 async function poll(sessionId, intervalSeconds) {
@@ -837,6 +945,7 @@ function openLogin(sourceId = null) {
   byId("login-name").value = sourceId ? account.name : "ChatGPT";
   byId("login-name").hidden = Boolean(sourceId);
   byId("login-name-label").hidden = Boolean(sourceId);
+  byId("login-name-field").hidden = Boolean(sourceId);
   if (!activeSessionId) {
     showInstructions(false);
     setStatus("");
@@ -861,6 +970,12 @@ copyCodeButton.addEventListener(
 byId("open-login").addEventListener("click", () => openLogin(selectedSourceId));
 byId("add-provider").addEventListener("click", () => openLogin());
 byId("rename-provider").addEventListener("click", () => void editProvider());
+providerNameInput.addEventListener("input", syncRename);
+providerNameInput.addEventListener("keydown", (event) => {
+  // Some browsers report the composition-ending Enter only as keyCode 229.
+  if (event.isComposing || event.keyCode === 229) return;
+  if (event.key === "Enter" && !renameButton.disabled) void editProvider();
+});
 byId("delete-provider").addEventListener("click", () => void editProvider(true));
 async function closeLogin() {
   if (closeButton.disabled || cancelling) return;
