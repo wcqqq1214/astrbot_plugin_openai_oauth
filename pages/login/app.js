@@ -234,8 +234,7 @@ const plans = {
   edu: "Edu",
 };
 const providerIcons = {
-  local:
-    '<svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M7.5 9.5l2.5 2.5-2.5 2.5M12.5 14.5h4"/></svg>',
+  local: '<img src="./icons/codex-color.svg" alt="" width="34" height="34">',
   device:
     '<svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M10.9 12.1L19.5 3.5M16 7l2.5 2.5"/></svg>',
 };

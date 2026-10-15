@@ -677,8 +677,12 @@ dialog::backdrop {
   color: var(--secondary);
 }
 .provider-icon.local {
-  background: var(--primary-soft);
-  color: var(--primary);
+  background: transparent;
+}
+.provider-icon img {
+  display: block;
+  width: 34px;
+  height: 34px;
 }
 .provider-icon svg {
   width: 18px;
