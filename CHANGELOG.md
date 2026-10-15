@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [v1.3.3] - 2026-10-16
+## [v2.0.0] - 2026-10-16
 
 ### Added
 
@@ -15,6 +15,8 @@
 
 - Refined provider rows, inline settings, theme-aware icons, and compact quota windows.
 - Renamed the Plugin Page from `login` to `providers` and simplified its copy.
+- Release publishing now requires pushing a matching version tag; pushes to `main`
+  do not publish a release.
 
 ### Fixed
 

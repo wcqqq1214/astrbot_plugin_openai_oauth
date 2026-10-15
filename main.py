@@ -211,7 +211,7 @@ def _get_credential_coordinator() -> CredentialCoordinator:
     "astrbot_plugin_openai_oauth",
     "wcqqq1214",
     "ChatGPT 订阅 (Codex OAuth) provider 插件",
-    "1.3.3",
+    "2.0.0",
 )
 class OpenAI_OAuth_Plugin(Star):
     def __init__(

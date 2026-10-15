@@ -1,7 +1,7 @@
 <h1 align="center">OpenAI 订阅登录</h1>
 
 <p align="center">
-  <a href="https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/releases/tag/v1.3.3"><img src="https://img.shields.io/badge/version-1.3.3-4b8bbe?style=flat-square" alt="Version 1.3.3"></a>
+  <a href="https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/releases/tag/v2.0.0"><img src="https://img.shields.io/badge/version-2.0.0-4b8bbe?style=flat-square" alt="Version 2.0.0"></a>
   <a href="https://github.com/AstrBotDevs/AstrBot"><img src="https://img.shields.io/badge/AstrBot-%E2%89%A54.27.1-4b8bbe?style=flat-square" alt="AstrBot ≥ 4.27.1"></a>
   <img src="https://img.shields.io/badge/Python-%E2%89%A53.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python ≥ 3.12">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="License: AGPL-3.0"></a>
@@ -153,3 +153,9 @@ Plugin Views 统一展示 Provider，本地 Codex 默认排在第一项，即使
 ## License / 许可证
 
 AGPL-3.0。
+
+## 发布流程
+
+推送 `main` 仅更新代码并运行测试，不发布 Release。准备发布时，将
+`metadata.yaml`、项目版本和更新日志保持一致，创建并推送对应的 `vX.Y.Z` 标签。
+发布流程会校验标签与插件版本一致后打包发布；仅创建本地标签不会触发发布。

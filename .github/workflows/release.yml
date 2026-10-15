@@ -1,12 +1,9 @@
 name: auto-release
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
-    paths:
-      - 'metadata.yaml'
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
 
 permissions:
   contents: write
@@ -15,64 +12,40 @@ jobs:
   check-version:
     runs-on: ubuntu-latest
     outputs:
-      version_changed: ${{ steps.check.outputs.changed }}
       new_tag: ${{ steps.check.outputs.tag }}
       old_tag: ${{ steps.check.outputs.old_tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
-      - name: Check version change
+      - name: Validate release tag
         id: check
+        shell: bash
         run: |
           VERSION="$(sed -n 's/^version:[[:space:]]*\([^ #]*\).*/\1/p' metadata.yaml)"
-          if [ -z "$VERSION" ]; then
-            echo "::error::could not parse version from metadata.yaml"
-            exit 1
-          fi
           VERSION="${VERSION#v}"
           if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
-            echo "::error::metadata.yaml version is not valid SemVer: $VERSION"
+            echo "::error::metadata.yaml version is not valid SemVer"
             exit 1
           fi
           TAG="v${VERSION}"
-          echo "Current version: $VERSION"
+          if [ "$GITHUB_REF_TYPE" != "tag" ] || [ "$GITHUB_REF_NAME" != "$TAG" ]; then
+            echo "::error::release tag must match metadata.yaml version ($TAG)"
+            exit 1
+          fi
+
+          # Find the preceding release in history, excluding this commit's tag.
+          OLD_TAG="$(git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD^ 2>/dev/null || true)"
+          OLD_TAG="${OLD_TAG:-none}"
           echo "Release tag: $TAG"
-
-          # Manual dispatch always releases the current version.
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-            echo "old_tag=none" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Compare against the version in the previous commit.
-          PREVIOUS_VERSION="$(git show HEAD~1:metadata.yaml 2>/dev/null | sed -n 's/^version:[[:space:]]*\([^ #]*\).*/\1/p')"
-          PREVIOUS_VERSION="${PREVIOUS_VERSION:-none}"
-          PREVIOUS_VERSION="${PREVIOUS_VERSION#v}"
-          PREVIOUS_TAG="none"
-          if [ "$PREVIOUS_VERSION" != "none" ]; then
-            PREVIOUS_TAG="v${PREVIOUS_VERSION}"
-          fi
-          echo "Previous version: $PREVIOUS_VERSION"
-          echo "Previous release tag: $PREVIOUS_TAG"
-
-          if [ "$VERSION" != "$PREVIOUS_VERSION" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-            echo "old_tag=$PREVIOUS_TAG" >> "$GITHUB_OUTPUT"
-            echo "Version changed from $PREVIOUS_VERSION to $VERSION"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No version change detected"
-          fi
+          echo "Previous release tag: $OLD_TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "old_tag=$OLD_TAG" >> "$GITHUB_OUTPUT"
 
   create-release:
     needs: check-version
-    if: needs.check-version.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
