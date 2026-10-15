@@ -948,14 +948,21 @@ dialog::backdrop {
   font-weight: var(--medium);
   box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgb(0 0 0 / 6%);
 }
-.editor-note {
-  padding-top: 6px;
-  font-size: 12.5px;
-  color: var(--secondary);
-}
-.segmented + .editor-note {
-  padding-top: 8px;
+
+/* The gear sits between the row's main button and its switch. It stays
+   quiet until the row is hovered or focused. */
+.row-settings {
+  width: 34px;
+  height: 34px;
   color: var(--muted);
+}
+.row-settings svg {
+  width: 16px;
+  height: 16px;
+}
+.provider-row:hover .row-settings,
+.row-settings:focus-visible {
+  color: var(--secondary);
 }
 
 .chevron {
@@ -987,9 +994,6 @@ dialog::backdrop {
   gap: 14px;
   padding: 12px 0;
 }
-.editor-row + .editor-row {
-  border-top: 1px solid var(--line);
-}
 .editor-label {
   font-size: 13px;
   line-height: 32px;
@@ -1001,41 +1005,6 @@ dialog::backdrop {
 /* The quota lines are 24px tall; keep their label on the same baseline. */
 .editor-label.compact {
   line-height: 24px;
-}
-.editor-inline {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 32px;
-}
-.editor-inline .text-input {
-  max-width: 320px;
-}
-.editor-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 0 12px;
-  border-top: 1px solid var(--line);
-}
-.editor-hint {
-  font-size: 12px;
-  color: var(--muted);
-}
-.link-button {
-  padding: 4px 0;
-  border: 0;
-  background: none;
-  font-size: 13px;
-  font-weight: var(--medium);
-}
-.link-button.danger {
-  color: var(--bad-text);
-}
-.link-button:hover:not(:disabled) {
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 .text-input {
   flex: 1;
@@ -1081,6 +1050,153 @@ dialog::backdrop {
 }
 .field .text-input {
   height: 36px;
+}
+
+/* ---------- Settings dialog ---------- */
+/* Header and actions stay put; only the body scrolls on short screens. */
+.settings-dialog {
+  max-height: min(680px, calc(100dvh - 32px));
+}
+.settings-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.settings-heading {
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 14px 12px 14px 20px;
+  box-shadow: inset 0 -1px var(--line);
+}
+.settings-heading .provider-icon,
+.settings-heading .provider-icon img {
+  width: 30px;
+  height: 30px;
+}
+.settings-heading .provider-icon .openai-icon {
+  width: 25px;
+  height: 25px;
+}
+.settings-heading-copy {
+  flex: 1;
+  min-width: 0;
+}
+.settings-heading h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  line-height: 1.35;
+}
+.settings-kicker {
+  font-size: 12px;
+  color: var(--muted);
+}
+.settings-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 20px 20px;
+}
+.settings-body > .field {
+  margin-top: 16px;
+}
+.settings-body .segmented {
+  justify-self: start;
+}
+.field-label {
+  font-size: 13px;
+  font-weight: var(--medium);
+}
+.field-hint {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+#settings-name-hint {
+  color: var(--bad-text);
+}
+.text-input[aria-invalid="true"] {
+  border-color: var(--bad);
+}
+.settings-dialog .actions {
+  flex-shrink: 0;
+}
+.settings-section {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.settings-section h3 {
+  line-height: 1.4;
+}
+.settings-account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.settings-account-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--secondary);
+}
+.settings-account-row .button {
+  flex-shrink: 0;
+}
+/* Destructive actions live in their own tinted box, apart from Save. */
+.danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--bad) 28%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bad) 4%, transparent);
+}
+.danger-zone.armed {
+  border-color: color-mix(in srgb, var(--bad) 55%, transparent);
+  background: var(--bad-soft);
+}
+.danger-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.danger-copy strong {
+  font-size: 13px;
+  font-weight: var(--medium);
+  color: var(--bad-text);
+}
+.danger-copy span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.danger-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+.button.danger {
+  background: var(--bad-soft);
+  color: var(--bad-text);
+}
+.button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bad) 18%, transparent);
+}
+/* Darkened so white text stays readable in both themes. */
+.button.danger.armed {
+  background: color-mix(in oklab, var(--bad) 80%, #000);
+  color: #ffffff;
+}
+.button.danger.armed:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--bad) 70%, #000);
 }
 
 /* ---------- Narrow containers ---------- */
@@ -1148,9 +1264,27 @@ dialog::backdrop {
   .chevron {
     grid-area: chevron;
   }
+  .row-settings {
+    width: 32px;
+  }
   .switch {
     width: 46px;
     margin-right: 4px;
+  }
+  .settings-heading {
+    padding-left: 16px;
+  }
+  .settings-body {
+    padding: 4px 16px 18px;
+  }
+  .settings-dialog .actions {
+    padding: 12px 16px;
+  }
+  .danger-zone {
+    flex-wrap: wrap;
+  }
+  .danger-actions {
+    margin-left: auto;
   }
   .editor {
     padding: 0 12px;
@@ -1169,9 +1303,6 @@ dialog::backdrop {
   .editor-label,
   .editor-label.compact {
     line-height: 1.6;
-  }
-  .editor-foot {
-    flex-wrap: wrap;
   }
   .copy-row .device-code {
     font-size: 20px;

@@ -28,8 +28,8 @@
       <p id="page-error" class="error" role="alert" hidden></p>
       <p id="save-error" class="error" role="alert" hidden></p>
 
-      <!-- Rows are rendered by app.js; the detail editor is moved under the
-           selected row for inline editing. -->
+      <!-- Rows are rendered by app.js; the allowance panel is moved under the
+           selected row. Rarely used settings live in the settings dialog. -->
       <div id="providers" class="provider-list" aria-label="Providers">
         <section id="provider-detail" class="editor" aria-labelledby="source-name" hidden>
           <div class="sr-only">
@@ -51,30 +51,6 @@
                 </svg>
                 <span id="notice-text"></span>
               </p>
-            </div>
-          </div>
-          <div class="editor-row">
-            <label id="rename-label" class="editor-label" for="provider-name">名称</label>
-            <div class="editor-body editor-inline">
-              <input id="provider-name" class="text-input" type="text" maxlength="80" autocomplete="off" />
-              <button id="rename-provider" class="button small" type="button">保存</button>
-            </div>
-          </div>
-          <div class="editor-row">
-            <span id="routing-label" class="editor-label">路由</span>
-            <div class="editor-body">
-              <div class="segmented" role="group" aria-labelledby="routing-label">
-                <button id="routing-fixed" type="button" aria-pressed="true">固定 Provider</button>
-                <button id="routing-auto" type="button" aria-pressed="false">自动回退</button>
-              </div>
-              <p id="routing-help" class="editor-note"></p>
-            </div>
-          </div>
-          <div id="delete-row" class="editor-foot">
-            <button id="open-login" class="button small" type="button">重新授权</button>
-            <div class="editor-inline">
-              <button id="delete-provider" class="link-button danger" type="button">移除此 Provider</button>
-              <span id="delete-hint" class="editor-hint"></span>
             </div>
           </div>
         </section>
@@ -142,6 +118,60 @@
         <button id="cancel" class="button quiet" type="button" hidden>取消登录</button>
         <button id="start" class="button primary" type="button" autofocus>获取设备码</button>
         <button id="done" class="button primary" type="button" hidden>完成</button>
+      </div>
+    </dialog>
+    <!-- One settings dialog serves every provider. app.js binds it to an
+         explicit source ID each time it opens and keeps a draft until saved. -->
+    <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title" aria-describedby="settings-kicker">
+      <div class="dialog-heading settings-heading">
+        <span id="settings-icon" class="provider-icon" aria-hidden="true"></span>
+        <div class="settings-heading-copy">
+          <h2 id="settings-title">—</h2>
+          <p id="settings-kicker" class="settings-kicker">Provider 设置</p>
+        </div>
+        <button id="close-settings" class="icon-button" type="button" aria-label="关闭">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
+          </svg>
+        </button>
+      </div>
+      <div class="dialog-body settings-body">
+        <div class="field">
+          <label id="settings-name-label" for="settings-name">名称</label>
+          <input id="settings-name" class="text-input" type="text" maxlength="80" autocomplete="off" aria-describedby="settings-name-hint" />
+          <p id="settings-name-hint" class="field-hint" hidden></p>
+        </div>
+        <div class="field">
+          <span id="settings-routing-label" class="field-label">路由</span>
+          <div class="segmented" role="group" aria-labelledby="settings-routing-label">
+            <button id="settings-routing-fixed" type="button" aria-pressed="true">固定 Provider</button>
+            <button id="settings-routing-auto" type="button" aria-pressed="false">自动回退</button>
+          </div>
+          <p id="settings-routing-help" class="field-hint"></p>
+        </div>
+        <!-- Account actions act immediately and never save the draft above. -->
+        <section id="settings-account" class="settings-section" aria-labelledby="settings-account-label">
+          <h3 id="settings-account-label" class="field-label">账号</h3>
+          <div class="settings-account-row">
+            <span id="settings-account-text" class="settings-account-text"></span>
+            <button id="settings-reauth" class="button small" type="button">重新授权</button>
+          </div>
+          <div id="settings-danger" class="danger-zone">
+            <div class="danger-copy">
+              <strong id="settings-remove-title">移除 Provider</strong>
+              <span id="settings-remove-hint"></span>
+            </div>
+            <div class="danger-actions">
+              <button id="settings-remove-keep" class="button small quiet" type="button" hidden>保留</button>
+              <button id="settings-remove" class="button small danger" type="button">移除</button>
+            </div>
+          </div>
+        </section>
+        <p id="settings-error" class="error" role="alert" hidden></p>
+      </div>
+      <div class="actions">
+        <button id="settings-cancel" class="button quiet" type="button">取消</button>
+        <button id="settings-save" class="button primary" type="button">保存</button>
       </div>
     </dialog>
     <script type="module" src="./app.js"></script>

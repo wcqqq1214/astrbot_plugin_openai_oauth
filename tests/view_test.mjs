@@ -265,13 +265,11 @@ resolveOld({status: "success", account, usage: {windows: [{label_seconds: 604800
 await oldQuery;
 assert.match(read("usage-result"), /40%/);
 assert.equal(read("source-name"), "Work");
-assert.equal(ids.get("open-login").hidden, false);
 slowUsage = null;
 account.status = "not_logged_in";
 await page.selectProvider("local");
 assert.match(read("providers"), /本地 Codex/);
 assert.match(read("usage-result"), /未检测到本地登录/);
-assert.equal(ids.get("open-login").hidden, true);
 page.openLogin();
 ids.get("login-name").value = "Personal";
 const pendingLogin = page.startLogin();
@@ -378,26 +376,7 @@ assert.match(read("status"), /Provider 已保存/);
 assert.equal(ids.get("error").hidden, true);
 cancelResponse = null;
 
-// Confirming an IME candidate must not save an unfinished provider name.
-await page.queryUsage();
-const nameInput = ids.get("provider-name");
-document.activeElement = nameInput;
-nameInput.value = "gongzuo";
-nameInput.handlers.input();
-nameInput.handlers.keydown({ key: "Enter", isComposing: true, keyCode: 13 });
-nameInput.handlers.keydown({ key: "Enter", isComposing: false, keyCode: 229 });
-assert.equal(providerUpdates.length, 0);
-nameInput.value = "工作";
-nameInput.handlers.input();
-nameInput.handlers.keydown({ key: "Enter", isComposing: false, keyCode: 13 });
-await new Promise((resolve) => setImmediate(resolve));
-assert.equal(providerUpdates.length, 1);
-assert.equal(providerUpdates[0].source_id, "device");
-assert.equal(providerUpdates[0].name, "工作");
-// Rename sends only the ID and the edited field.
-assert.deepEqual({...providerUpdates[0]}, {source_id: "device", name: "工作"});
-
-// ---------- Enable switch and routing mode ----------
+// ---------- Row controls and the settings dialog ----------
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const visibleText = (node) =>
   node.hidden ? "" : [node._text, ...node.children.map(visibleText)].join(" ");
@@ -406,7 +385,11 @@ const rowFor = (name) =>
     (child) => String(child.className).startsWith("provider-row") &&
       child.children[0].textContent.includes(name),
   );
-const switchFor = (name) => rowFor(name).children[1];
+const partOf = (name, className) =>
+  rowFor(name).children.find((child) => String(child.className).split(" ").includes(className));
+const switchFor = (name) => partOf(name, "switch");
+const gearFor = (name) => partOf(name, "row-settings");
+const mainFor = (name) => partOf(name, "provider-main");
 const checked = (name) => switchFor(name).attributes["aria-checked"];
 const click = async (node) => { node.handlers.click(); await tick(); };
 const deferred = () => {
@@ -414,6 +397,45 @@ const deferred = () => {
   const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; });
   return {promise, resolve, reject};
 };
+const settingsBox = ids.get("settings-dialog");
+const nameInput = ids.get("settings-name");
+const saveButton = ids.get("settings-save");
+const typeName = (value) => { nameInput.value = value; nameInput.handlers.input(); };
+const openSettings = async (name) => { await click(gearFor(name)); assert.equal(settingsBox.open, true); };
+const escape = () => settingsBox.handlers.cancel({ preventDefault() {} });
+
+await page.closeLogin();
+assert.equal(ids.get("login-dialog").open, false);
+await page.queryUsage();
+// The gear has its own accessible name and only opens the dialog.
+assert.equal(gearFor("本地 Codex").attributes["aria-label"], "设置 本地 Codex");
+assert.equal(gearFor("Work").attributes["aria-label"], "设置 Work");
+assert.equal(gearFor("Work").attributes["aria-haspopup"], "dialog");
+assert.ok(rowFor("Work").children.every((child) => child.tag === "button"), "row controls are sibling buttons");
+const expandedBefore = mainFor("Work").attributes["aria-expanded"];
+const updatesBeforeGear = providerUpdates.length;
+await openSettings("Work");
+assert.equal(read("settings-title"), "Work");
+assert.equal(nameInput.value, "Work");
+assert.equal(document.activeElement, nameInput, "the name field takes initial focus");
+assert.equal(mainFor("Work").attributes["aria-expanded"], expandedBefore, "the gear never expands the row");
+assert.equal(providerUpdates.length, updatesBeforeGear);
+assert.equal(saveButton.disabled, true, "an untouched draft cannot be saved");
+
+// Confirming an IME candidate must not save an unfinished provider name.
+typeName("gongzuo");
+nameInput.handlers.keydown({ key: "Enter", isComposing: true, keyCode: 13 });
+nameInput.handlers.keydown({ key: "Enter", isComposing: false, keyCode: 229 });
+assert.equal(providerUpdates.length, 0);
+typeName("工作");
+nameInput.handlers.keydown({ key: "Enter", isComposing: false, keyCode: 13 });
+await tick();
+assert.equal(providerUpdates.length, 1);
+// Rename sends only the ID and the edited field, then closes the dialog.
+assert.deepEqual({...providerUpdates[0]}, {source_id: "device", name: "工作"});
+assert.equal(settingsBox.open, false);
+assert.equal(document.activeElement, gearFor("工作"), "focus returns to the row's gear");
+assert.match(read("providers"), /工作/);
 document.activeElement = null;
 account.status = "ready";
 device.status = "ready";
@@ -423,8 +445,10 @@ await page.queryUsage();
 assert.equal(switchFor("本地 Codex").attributes.role, "switch");
 assert.equal(checked("本地 Codex"), "true");
 assert.equal(checked("工作"), "true");
-assert.equal(ids.get("routing-fixed").attributes["aria-pressed"], "true");
-assert.match(read("routing-help"), /仅使用此 Provider/);
+await openSettings("本地 Codex");
+assert.equal(ids.get("settings-routing-fixed").attributes["aria-pressed"], "true");
+assert.match(read("settings-routing-help"), /仅使用此 Provider/);
+await click(ids.get("settings-cancel"));
 
 // Local Codex can be disabled; only the changed field is sent and the
 // returned provider is applied. Health is still shown beside the switch.
@@ -442,9 +466,11 @@ assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "device", enabled: fal
 await page.queryUsage();
 assert.equal(checked("工作"), "false");
 assert.match(read("usage-result"), /40%/);
-assert.equal(ids.get("open-login").hidden, false);
-assert.equal(ids.get("delete-row").hidden, false);
-assert.equal(ids.get("routing-auto").disabled, false);
+await openSettings("工作");
+assert.equal(ids.get("settings-account").hidden, false);
+assert.equal(ids.get("settings-reauth").disabled, false);
+assert.equal(ids.get("settings-remove").disabled, false);
+await click(ids.get("settings-cancel"));
 assert.match(visibleText(rowFor("工作")), /已登录/);
 
 // Reauthorizing a disabled source never enables it.
@@ -457,24 +483,32 @@ await relogin;
 await tick();
 assert.equal(checked("工作"), "false");
 assert.ok(providerUpdates.every((body) => !("enabled" in body) || body.source_id !== "device" || body.enabled === false));
+await page.closeLogin();
 
-// Routing mode is a per-provider choice sent on its own.
-await click(ids.get("routing-auto"));
+// Routing mode is a per-provider choice; only the changed field is sent.
+await openSettings("工作");
+await click(ids.get("settings-routing-auto"));
+assert.equal(ids.get("settings-routing-auto").attributes["aria-pressed"], "true");
+assert.equal(ids.get("settings-routing-fixed").attributes["aria-pressed"], "false");
+assert.match(read("settings-routing-help"), /先用它.*列表顺序.*已启用且可用.*同一账号只尝试一次.*开始输出后不再切换/);
+// Switching back to the starting mode is not a change.
+await click(ids.get("settings-routing-fixed"));
+assert.equal(saveButton.disabled, true, "returning to the starting values is not a change");
+await click(ids.get("settings-routing-auto"));
+await click(saveButton);
 assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "device", routing_mode: "auto"});
-assert.equal(ids.get("routing-auto").attributes["aria-pressed"], "true");
-assert.equal(ids.get("routing-fixed").attributes["aria-pressed"], "false");
-assert.match(read("routing-help"), /先用它.*列表顺序.*已启用且可用.*同一账号只尝试一次.*开始输出后不再切换/);
+assert.equal(settingsBox.open, false);
 assert.match(visibleText(rowFor("工作")), /自动回退/);
 assert.doesNotMatch(visibleText(rowFor("本地 Codex")), /自动回退/);
-const sentBefore = providerUpdates.length;
-await click(ids.get("routing-auto"));
-assert.equal(providerUpdates.length, sentBefore, "choosing the current mode sends nothing");
 
 // The exhausted notice follows the selected provider's routing mode.
 deviceUsage = {limit_reached: true, windows: [{label_seconds: 604800, used_percent: 100}]};
 await page.queryUsage();
 assert.match(read("notice-text"), /已开启自动回退/);
-await click(ids.get("routing-fixed"));
+await openSettings("工作");
+await click(ids.get("settings-routing-fixed"));
+assert.match(read("notice-text"), /已开启自动回退/, "an unsaved draft changes nothing on the page");
+await click(saveButton);
 assert.match(read("notice-text"), /不会自动切换账号/);
 deviceUsage = {windows: [{label_seconds: 604800, used_percent: 60}]};
 await page.queryUsage();
@@ -486,14 +520,11 @@ updateHandler = () => held.promise;
 providerUpdates.length = 0;
 await click(switchFor("工作"));
 await click(switchFor("工作"));
-await click(ids.get("routing-auto"));
 assert.equal(providerUpdates.length, 1);
 assert.deepEqual({...providerUpdates[0]}, {source_id: "device", enabled: true});
 assert.equal(switchFor("工作").disabled, true);
 assert.equal(switchFor("工作").attributes["aria-busy"], "true");
 assert.equal(checked("工作"), "true", "the switch shows the requested value while saving");
-assert.equal(ids.get("routing-auto").disabled, true);
-assert.equal(ids.get("rename-provider").disabled, true);
 assert.equal(switchFor("本地 Codex").disabled, false);
 const otherHeld = deferred();
 updateHandler = (body) => body.source_id === "local" ? otherHeld.promise : held.promise;
@@ -507,17 +538,17 @@ await tick();
 assert.equal(checked("工作"), "true");
 assert.equal(checked("本地 Codex"), "true");
 assert.equal(switchFor("工作").disabled, false);
-assert.equal(ids.get("routing-auto").disabled, false);
 updateHandler = null;
 
-// The server's provider object wins over the requested value.
+// The server's provider object wins over the requested value, and names are
+// trimmed the way the server stores them.
 updateHandler = (body) => ({status: "success", provider: {...device, name: "Server Name"}});
-const nameField = ids.get("provider-name");
-nameField.value = " 新名称 ";
-nameField.handlers.input();
-await click(ids.get("rename-provider"));
+await openSettings("工作");
+typeName(" 新名称 ");
+await click(saveButton);
 assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "device", name: "新名称"});
 assert.equal(read("source-name"), "Server Name");
+assert.match(read("providers"), /Server Name/);
 device.name = "Server Name";
 updateHandler = null;
 
@@ -554,14 +585,24 @@ assert.equal(listCalls, listsBefore + 1);
 assert.equal(checked("Server Name"), "false");
 assert.match(read("save-error"), /Network Error/);
 
-// A success without a provider object is unclear and also reloads.
+// A success without a provider object is unclear: the dialog reloads, stays
+// open with its draft and never claims success. A field the reload shows
+// as stored is no longer pending, so it is not sent again.
 listsBefore = listCalls;
 updateHandler = (body) => { device.routing_mode = body.routing_mode; return {status: "success"}; };
-await click(ids.get("routing-auto"));
+await openSettings("Server Name");
+await click(ids.get("settings-routing-auto"));
+await click(saveButton);
 await tick();
 assert.equal(listCalls, listsBefore + 1);
-assert.match(read("save-error"), /保存结果未知/);
-assert.equal(ids.get("routing-auto").attributes["aria-pressed"], "true");
+assert.equal(settingsBox.open, true);
+assert.match(read("settings-error"), /保存结果未知/);
+assert.equal(ids.get("settings-routing-auto").attributes["aria-pressed"], "true");
+assert.equal(saveButton.disabled, true, "a change confirmed by the reload is not re-sent");
+assert.doesNotMatch(read("save-error"), /保存结果未知/, "dialog saves report inside the dialog");
+assert.match(visibleText(rowFor("Server Name")), /自动回退/);
+await click(ids.get("settings-cancel"));
+assert.equal(settingsBox.open, false);
 updateHandler = null;
 
 // A later successful save clears the earlier error.
@@ -570,16 +611,21 @@ assert.equal(ids.get("save-error").hidden, true);
 assert.equal(checked("Server Name"), "true");
 
 // Deleting sends only the ID.
-const deleteButton = ids.get("delete-provider");
+const removeButton = ids.get("settings-remove");
+const removeFromSettings = async (name) => {
+  await openSettings(name);
+  await click(removeButton);
+  await click(removeButton);
+};
 const bodies = [];
 const originalPost = bridge.apiPost;
 bridge.apiPost = async (endpoint, body) => {
   if (endpoint === "providers/delete") { bodies.push(body); return {status: "success"}; }
   return originalPost(endpoint, body);
 };
-await click(deleteButton);
-await click(deleteButton);
+await removeFromSettings("Server Name");
 assert.deepEqual({...bodies[0]}, {source_id: "device"});
+assert.equal(settingsBox.open, false);
 bridge.apiPost = originalPost;
 
 // A reconciliation started after a failed save must not replace a newer view.
@@ -634,8 +680,11 @@ device.routing_mode = "fixed";
 deviceUsage = {limit_reached: true, windows: [{label_seconds: 604800, used_percent: 100}]};
 await page.queryUsage();
 updateHandler = () => ({status: "success", provider: {...device}});
-await click(ids.get("routing-auto"));
-assert.equal(ids.get("routing-fixed").attributes["aria-pressed"], "true");
+await openSettings("Newer device");
+await click(ids.get("settings-routing-auto"));
+await click(saveButton);
+assert.equal(settingsBox.open, false);
+assert.doesNotMatch(visibleText(rowFor("Newer device")), /自动回退/);
 assert.match(read("notice-text"), /不会自动切换账号/, "the notice must use the confirmed mode after pending state is removed");
 updateHandler = null;
 
@@ -657,8 +706,7 @@ bridge.apiPost = async (endpoint, body) => {
 };
 updateHandler = () => { throw new Error("Network Error"); };
 await click(switchFor("Newer device"));
-await click(deleteButton);
-await click(deleteButton);
+await removeFromSettings("Newer device");
 assert.equal(rowFor("Newer device"), undefined);
 delayedRecovery.resolve();
 await tick();
@@ -959,4 +1007,334 @@ await dialog.handlers.close();
 assert.equal(dialog.open, false);
 assert.equal(shown("cancel"), false);
 cancelResponse = null;
-console.log("View regressions passed: device login dialog (copy instructions, copy, saving, success, done, failure recovery), quota windows, provider selection, stale-result isolation, login and cancellation races, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");
+
+// ---------- Settings dialog drafts ----------
+Object.assign(device, {name: "Work", routing_mode: "fixed", enabled: true, status: "ready"});
+Object.assign(account, {routing_mode: "fixed", enabled: true, status: "ready"});
+updateHandler = null;
+usage = {status: "success", account, usage: {windows: [{label_seconds: 604800, used_percent: 10}]}};
+await page.queryUsage();
+const settingsError = ids.get("settings-error");
+const pressed = (mode) => ids.get(`settings-routing-${mode}`).attributes["aria-pressed"];
+
+// Cancel, the close button and Escape all discard the draft without a request.
+for (const dismiss of [
+  () => click(ids.get("settings-cancel")),
+  () => click(ids.get("close-settings")),
+  async () => { escape(); await tick(); },
+]) {
+  const sent = providerUpdates.length;
+  await openSettings("Work");
+  typeName("Draft only");
+  await click(ids.get("settings-routing-auto"));
+  assert.equal(saveButton.disabled, false);
+  await dismiss();
+  assert.equal(settingsBox.open, false);
+  assert.equal(providerUpdates.length, sent, "dismissing never saves");
+  await openSettings("Work");
+  assert.equal(nameInput.value, "Work", "a reopened dialog starts from the saved state");
+  assert.equal(pressed("fixed"), "true");
+  assert.equal(saveButton.disabled, true);
+  await click(ids.get("settings-cancel"));
+}
+assert.doesNotMatch(read("providers"), /Draft only/);
+
+// A queued native close event belongs to the dismissed dialog, not a
+// settings session reopened before the browser dispatches that event.
+await openSettings("Work");
+await click(ids.get("settings-cancel"));
+await openSettings("本地 Codex");
+typeName("New session draft");
+await settingsBox.handlers.close();
+assert.equal(settingsBox.open, true, "an old close event must not dismiss a reopened settings dialog");
+assert.equal(nameInput.value, "New session draft");
+assert.equal(read("settings-title"), "本地 Codex");
+await click(ids.get("settings-cancel"));
+
+// Blank names cannot be saved, even with another change pending.
+await openSettings("Work");
+await click(ids.get("settings-routing-auto"));
+typeName("   ");
+assert.equal(saveButton.disabled, true);
+assert.equal(nameInput.attributes["aria-invalid"], "true");
+assert.equal(ids.get("settings-name-hint").hidden, false);
+assert.match(read("settings-name-hint"), /请输入名称/);
+const sentBeforeBlank = providerUpdates.length;
+nameInput.handlers.keydown({key: "Enter", isComposing: false, keyCode: 13});
+await click(saveButton);
+assert.equal(providerUpdates.length, sentBeforeBlank);
+
+// Name and routing changed together go out as one request for the bound ID.
+typeName("  Both  ");
+assert.equal(ids.get("settings-name-hint").hidden, true);
+assert.equal(nameInput.attributes["aria-invalid"], "false");
+await click(saveButton);
+assert.equal(providerUpdates.length, sentBeforeBlank + 1);
+assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "device", name: "Both", routing_mode: "auto"});
+assert.equal(settingsBox.open, false);
+assert.match(visibleText(rowFor("Both")), /自动回退/);
+
+// While saving, the dialog is busy: no duplicate submit, no dismissal.
+let heldSave = deferred();
+updateHandler = () => heldSave.promise;
+await openSettings("Both");
+typeName("Held");
+await click(saveButton);
+const sentWhileHeld = providerUpdates.length;
+assert.equal(saveButton.disabled, true);
+assert.equal(saveButton.attributes["aria-busy"], "true");
+assert.match(read("settings-save"), /正在保存/);
+assert.equal(nameInput.disabled, true);
+assert.equal(ids.get("settings-routing-fixed").disabled, true);
+assert.equal(ids.get("settings-cancel").disabled, true);
+assert.equal(ids.get("close-settings").disabled, true);
+await click(saveButton);
+nameInput.handlers.keydown({key: "Enter", isComposing: false, keyCode: 13});
+await click(ids.get("settings-cancel"));
+escape();
+await tick();
+assert.equal(settingsBox.open, true, "a save in flight keeps the dialog open");
+assert.equal(providerUpdates.length, sentWhileHeld);
+// The list shows the requested name while the write is in flight.
+assert.match(read("providers"), /Held/);
+device.name = "Held";
+heldSave.resolve({status: "success", provider: {...device}});
+await tick();
+assert.equal(settingsBox.open, false);
+assert.match(read("providers"), /Held/);
+updateHandler = null;
+
+// A rejected save keeps the draft and the dialog, reloads, and can be retried.
+listsBefore = listCalls;
+updateHandler = () => { throw new Error("Provider name must contain 1–80 characters."); };
+await openSettings("Held");
+typeName("Rejected");
+await click(ids.get("settings-routing-fixed"));
+await click(saveButton);
+await tick();
+assert.equal(settingsBox.open, true);
+assert.equal(listCalls, listsBefore + 1);
+assert.match(read("settings-error"), /保存「Held」失败.*1–80/);
+assert.equal(settingsError.hidden, false);
+assert.equal(nameInput.value, "Rejected", "the draft survives a failed save");
+assert.equal(pressed("fixed"), "true");
+assert.equal(saveButton.disabled, false, "a failed save can be retried");
+assert.match(read("providers"), /Held/);
+assert.doesNotMatch(read("providers"), /Rejected/);
+updateHandler = null;
+await click(saveButton);
+assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "device", name: "Rejected", routing_mode: "fixed"});
+assert.equal(settingsBox.open, false);
+assert.match(read("providers"), /Rejected/);
+
+// Background refreshes update the header but never the draft. Only fields
+// the user touched are sent, so a concurrent server change elsewhere stays.
+await openSettings("Rejected");
+typeName("Mine");
+Object.assign(device, {name: "Remote", routing_mode: "auto"});
+await page.queryUsage();
+assert.equal(read("settings-title"), "Remote");
+assert.equal(nameInput.value, "Mine");
+assert.equal(pressed("fixed"), "true");
+assert.equal(saveButton.disabled, false);
+await click(saveButton);
+assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "device", name: "Mine"});
+assert.match(visibleText(rowFor("Mine")), /自动回退/);
+
+// The gear, the row and the switch never trigger each other.
+const sentBeforeEntries = providerUpdates.length;
+const wasExpanded = mainFor("本地 Codex").attributes["aria-expanded"];
+await click(switchFor("本地 Codex"));
+assert.equal(settingsBox.open, false, "the switch never opens settings");
+assert.equal(mainFor("本地 Codex").attributes["aria-expanded"], wasExpanded, "the switch never expands the row");
+assert.deepEqual({...providerUpdates.at(-1)}, {source_id: "local", enabled: false});
+await click(mainFor("Mine"));
+await tick();
+assert.equal(settingsBox.open, false, "the row never opens settings");
+assert.equal(providerUpdates.length, sentBeforeEntries + 1, "expanding never saves");
+const deviceExpanded = mainFor("Mine").attributes["aria-expanded"];
+await click(mainFor("Mine"));
+assert.notEqual(mainFor("Mine").attributes["aria-expanded"], deviceExpanded, "the row still folds and unfolds");
+await openSettings("Mine");
+assert.equal(mainFor("Mine").attributes["aria-expanded"], deviceExpanded === "true" ? "false" : "true");
+await click(ids.get("settings-cancel"));
+await click(switchFor("本地 Codex"));
+
+// A provider that disappears while edited ends the session without a write.
+let hideDevice = true;
+bridge.apiPost = async (endpoint, body) => {
+  if (endpoint === "providers/list" && hideDevice) {
+    listCalls += 1;
+    return {providers: [{...account}]};
+  }
+  return originalPost(endpoint, body);
+};
+const sentBeforeGone = providerUpdates.length;
+await openSettings("Mine");
+typeName("Orphan");
+await page.queryUsage();
+assert.equal(settingsBox.open, false);
+assert.match(read("page-error"), /该 Provider 已不存在/);
+assert.equal(document.activeElement, ids.get("add-provider"));
+assert.equal(providerUpdates.length, sentBeforeGone);
+hideDevice = false;
+await page.queryUsage();
+
+// A late reply for an ended session cannot touch the next provider's dialog.
+heldSave = deferred();
+updateHandler = (body) => body.source_id === "device" ? heldSave.promise : {status: "success", provider: {...account}};
+await openSettings("Mine");
+typeName("Late");
+await click(saveButton);
+hideDevice = true;
+await page.queryUsage();
+assert.equal(settingsBox.open, false, "a vanished provider ends even a busy session");
+hideDevice = false;
+await openSettings("本地 Codex");
+typeName("Local draft");
+device.name = "Late";
+heldSave.resolve({status: "success", provider: {...device}});
+await tick();
+await tick();
+assert.equal(settingsBox.open, true, "the late reply must not close another provider's dialog");
+assert.equal(read("settings-title"), "本地 Codex");
+assert.equal(nameInput.value, "Local draft");
+assert.equal(settingsError.hidden, true);
+assert.ok(providerUpdates.filter((b) => b.name === "Late").every((b) => b.source_id === "device"));
+assert.ok(!providerUpdates.some((b) => b.source_id === "local" && "name" in b), "nothing was written to the other provider");
+await click(ids.get("settings-cancel"));
+bridge.apiPost = originalPost;
+updateHandler = null;
+await page.queryUsage();
+
+// ---------- Account actions in the settings dialog ----------
+// Local Codex follows the host login: no renew, no removal.
+device.name = "Mine";
+await page.queryUsage();
+await openSettings("本地 Codex");
+assert.equal(ids.get("settings-account").hidden, true);
+await click(ids.get("settings-cancel"));
+await openSettings("Mine");
+assert.equal(ids.get("settings-account").hidden, false);
+assert.match(read("settings-reauth"), /重新授权/);
+assert.match(read("settings-remove"), /^移除$/);
+await click(ids.get("settings-cancel"));
+
+// Renewing from settings saves nothing, targets the dialog's provider, keeps
+// a disabled provider disabled and brings the draft back afterwards.
+device.enabled = false;
+await page.queryUsage();
+await page.selectProvider("local");
+assert.equal(checked("Mine"), "false");
+const sentBeforeRenew = providerUpdates.length;
+await openSettings("Mine");
+typeName("Unsaved draft");
+await click(ids.get("settings-routing-auto"));
+await click(ids.get("settings-reauth"));
+assert.equal(settingsBox.open, false, "only one modal is open at a time");
+assert.equal(ids.get("login-dialog").open, true);
+assert.equal(read("instructions-title"), "重新授权");
+const renewal = page.startLogin();
+await tick();
+assert.deepEqual({...deviceBody}, {source_id: "device"}, "the renewal targets the dialog's provider, not the selected row");
+pollResult({status: "success", source_id: "device"});
+await renewal;
+await tick();
+await page.closeLogin();
+assert.equal(ids.get("login-dialog").open, false);
+assert.equal(settingsBox.open, true, "settings return after the login dialog closes");
+assert.equal(read("settings-title"), "Mine");
+assert.equal(nameInput.value, "Unsaved draft");
+assert.equal(pressed("auto"), "true");
+assert.equal(saveButton.disabled, false);
+assert.equal(document.activeElement, ids.get("settings-reauth"));
+assert.equal(providerUpdates.length, sentBeforeRenew, "renewing never saves the draft");
+assert.equal(checked("Mine"), "false", "renewing never enables a disabled provider");
+// Leaving the login dialog without starting also returns to settings,
+// including when the browser closes it without a cancel event.
+await click(ids.get("settings-reauth"));
+await page.closeLogin();
+assert.equal(settingsBox.open, true);
+assert.equal(nameInput.value, "Unsaved draft");
+await click(ids.get("settings-reauth"));
+const loginBox = ids.get("login-dialog");
+loginBox.open = false;
+await loginBox.handlers.close();
+assert.equal(settingsBox.open, true);
+assert.equal(nameInput.value, "Unsaved draft");
+await click(ids.get("settings-cancel"));
+assert.equal(providerUpdates.length, sentBeforeRenew);
+
+// Removal needs a second click; Keep and Escape back out without losing the draft.
+const deletes = [];
+let deleteHandler = () => ({status: "success"});
+bridge.apiPost = async (endpoint, body) => {
+  if (endpoint === "providers/delete") { deletes.push(body); return deleteHandler(body); }
+  return originalPost(endpoint, body);
+};
+await openSettings("Mine");
+typeName("Kept draft");
+await click(removeButton);
+assert.equal(deletes.length, 0);
+assert.match(read("settings-remove"), /确认移除/);
+assert.match(read("settings-remove-hint"), /再次点击即永久删除/);
+assert.equal(ids.get("settings-remove-keep").hidden, false);
+await click(ids.get("settings-remove-keep"));
+assert.match(read("settings-remove"), /^移除$/);
+assert.equal(ids.get("settings-remove-keep").hidden, true);
+assert.equal(nameInput.value, "Kept draft");
+await click(removeButton);
+escape();
+await tick();
+assert.equal(settingsBox.open, true, "Escape first backs out of an armed removal");
+assert.match(read("settings-remove"), /^移除$/);
+assert.equal(nameInput.value, "Kept draft");
+assert.equal(deletes.length, 0);
+
+// A failed removal keeps the dialog, the provider and the draft.
+deleteHandler = () => { throw new Error("Remove this provider's model bindings in AstrBot first."); };
+await click(removeButton);
+await click(removeButton);
+await tick();
+assert.equal(deletes.length, 1);
+assert.equal(settingsBox.open, true);
+assert.match(read("settings-error"), /移除「Mine」失败.*model bindings/);
+assert.equal(nameInput.value, "Kept draft");
+assert.ok(rowFor("Mine"));
+
+// A busy removal blocks the other dialog actions.
+let heldDelete = deferred();
+deleteHandler = () => heldDelete.promise;
+await click(removeButton);
+await click(removeButton);
+assert.match(read("settings-remove"), /正在移除/);
+assert.equal(saveButton.disabled, true);
+assert.equal(ids.get("settings-reauth").disabled, true);
+assert.equal(ids.get("settings-cancel").disabled, true);
+escape();
+await tick();
+assert.equal(settingsBox.open, true);
+// Success closes the dialog, removes the row and never saves the draft.
+let deviceRemoved = false;
+const removalPost = bridge.apiPost;
+bridge.apiPost = async (endpoint, body) => {
+  if (endpoint === "providers/list" && deviceRemoved) {
+    listCalls += 1;
+    return {providers: [{...account}]};
+  }
+  return removalPost(endpoint, body);
+};
+deviceRemoved = true;
+const sentBeforeRemove = providerUpdates.length;
+heldDelete.resolve({status: "success"});
+await tick();
+await tick();
+assert.deepEqual({...deletes.at(-1)}, {source_id: "device"});
+assert.equal(settingsBox.open, false);
+assert.equal(rowFor("Mine"), undefined);
+assert.equal(document.activeElement, ids.get("add-provider"));
+assert.doesNotMatch(visibleText(ids.get("page-error")), /已不存在/, "a removal from settings is not reported as a vanished provider");
+assert.equal(providerUpdates.length, sentBeforeRemove);
+bridge.apiPost = originalPost;
+
+console.log("View regressions passed: device login dialog (copy instructions, copy, saving, success, done, failure recovery), quota windows, provider selection, stale-result isolation, login and cancellation races, settings dialog drafts and entry points, renew and removal from settings, IME-safe rename, enable switch, routing mode, serialized saves, stale-list protection, failed and unclear saves, reconciliation after navigation/deletion, account identity changes, confirmed routing notices.");
