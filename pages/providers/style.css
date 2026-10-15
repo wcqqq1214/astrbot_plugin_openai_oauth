@@ -1248,6 +1248,8 @@ dialog::backdrop {
   }
   .provider-title {
     grid-area: title;
+    /* Wrap status tags before they overflow into the row controls. */
+    flex-wrap: wrap;
   }
   .provider-name {
     min-width: 4em;
