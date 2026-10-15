@@ -114,7 +114,9 @@ const page = await vm.runInNewContext(
 );
 const read = (id) => ids.get(id).textContent;
 assert.match(read("usage-result"), /每周额度.*96%/);
-assert.doesNotMatch(read("usage-result"), /5 小时/);
+// Relative reset text can legitimately read "5 小时后重置"; only the window
+// label must be absent.
+assert.doesNotMatch(read("usage-result"), /5 小时额度/);
 assert.equal(read("plan"), "Pro");
 assert.equal(read("backup-status"), "已保存");
 assert.match(read("quota-policy"), /没有独立的 5 小时窗口/);
@@ -134,6 +136,19 @@ assert.match(read("usage-result"), /5 小时额度.*—.*暂不可用.*每周额
 assert.doesNotMatch(read("usage-result"), /100%/);
 assert.equal(ids.get("plan").hidden, true);
 assert.equal(ids.get("quota-policy").hidden, true);
+
+// Both exhausted windows must reset before the included allowance recovers.
+const laterReset = new Date(Date.now() + 2 * 86400000);
+usage = {
+  status: "success", account,
+  usage: {limit_reached: true, windows: [
+    {label_seconds: 18000, used_percent: 100, reset_at: Date.now() / 1000 + 3600},
+    {label_seconds: 604800, used_percent: 100, reset_at: laterReset.getTime() / 1000},
+  ]},
+};
+await page.queryUsage();
+const expectedReset = laterReset.toLocaleDateString("zh-CN", {month: "short", day: "numeric"}) + " " + laterReset.toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", hour12: false});
+assert.ok(read("notice-text").includes(expectedReset));
 
 usage = new Error("Network unavailable");
 await page.queryUsage();
