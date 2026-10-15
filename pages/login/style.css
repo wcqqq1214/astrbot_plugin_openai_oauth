@@ -288,6 +288,10 @@ summary:focus-visible {
   display: grid;
   gap: 6px;
 }
+.quota-name,
+.quota-rows > .muted {
+  line-height: 24px;
+}
 .quota-rows > .muted {
   display: flex;
   align-items: center;
