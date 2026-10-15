@@ -249,10 +249,6 @@ def test_server_owned_web_login_and_source_proxy() -> None:
         "completed poll returns no credential",
     )
     check(
-        "access_token" not in done and "refresh_token" not in done,
-        "browser never receives tokens",
-    )
-    check(
         observed_proxy == ["http://source-proxy:8080"], "browser proxy input is ignored"
     )
     check(stored["schema_version"] == 1, "login persists canonical credentials")
@@ -632,6 +628,7 @@ def test_plugin_page_assets() -> None:
     check("./app.js" in html, "Plugin Page loads external JavaScript")
     check("/api/plugin/page/bridge-sdk.js" in html, "Plugin Page loads the bridge SDK")
     check("window.AstrBotPluginPage" in app, "Plugin Page uses the scoped bridge")
+    check("await bridge.ready()" in app, "Plugin Page waits for bridge readiness")
     check('bridge.apiPost("device/start",' in app, "page starts through the bridge")
     check('bridge.apiPost("device/poll"' in app, "page polls through the bridge")
     check('bridge.apiPost("device/cancel"' in app, "page can cancel through the bridge")

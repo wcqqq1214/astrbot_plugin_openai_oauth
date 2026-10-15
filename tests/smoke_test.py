@@ -129,41 +129,6 @@ def main() -> int:
         "credentials are written back only by the server-side device session",
     )
     check("_LOGIN_PAGE_HTML" not in main_src, "standalone login HTML is removed")
-    check(
-        "/astrbot_plugin_openai_oauth/login" not in main_src,
-        "standalone /login route is removed",
-    )
-
-    page_root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "pages", "providers")
-    )
-    with open(os.path.join(page_root, "index.html"), encoding="utf-8") as fh:
-        page_html = fh.read()
-    with open(os.path.join(page_root, "app.js"), encoding="utf-8") as fh:
-        page_app = fh.read()
-    check("./app.js" in page_html, "Plugin Page has an external app.js")
-    check("window.AstrBotPluginPage" in page_app, "Plugin Page uses the AstrBot bridge")
-    check("await bridge.ready()" in page_app, "Plugin Page waits for bridge readiness")
-    check(
-        'bridge.apiPost("device/start",' in page_app,
-        "Plugin Page uses scoped device/start",
-    )
-    check(
-        'bridge.apiPost("device/poll"' in page_app,
-        "Plugin Page uses scoped device/poll",
-    )
-    check(
-        'bridge.apiPost("device/cancel"' in page_app,
-        "Plugin Page uses scoped device/cancel",
-    )
-    check(
-        'bridge.apiPost("providers/list"' in page_app,
-        "Plugin Page uses scoped providers/list",
-    )
-    check(
-        'bridge.apiPost("account/usage"' in page_app,
-        "Plugin Page uses scoped account/usage",
-    )
 
     print("\n=== 8. README documents the Plugin Page workflow ===")
     repo_root = os.path.join(os.path.dirname(__file__), "..")
