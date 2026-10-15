@@ -235,6 +235,62 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
         self.write(auth())
         self.assertEqual(self.coordinator.status().state, "cooling")
 
+    async def test_quota_cooldown_uses_only_exhausted_windows(self):
+        self.write(auth())
+        now = 2000000000
+        short_reset, weekly_reset = now + 3600, now + 604800
+        for short_used, weekly_used, expected in (
+            (100, 40, short_reset),
+            (100, 100, weekly_reset),
+            (40, 100, weekly_reset),
+        ):
+            with self.subTest(short_used=short_used, weekly_used=weekly_used):
+                # A fresh lookup also corrects a previously excessive cooldown.
+                await self.coordinator.mark_cooling(None, weekly_reset)
+                usage = {
+                    "allowed": False,
+                    "limit_reached": True,
+                    "windows": [
+                        {"used_percent": short_used, "reset_at": short_reset},
+                        {"used_percent": weekly_used, "reset_at": weekly_reset},
+                    ],
+                }
+                with (
+                    patch.object(plugin.time, "time", return_value=now),
+                    patch.object(plugin, "_login_request_error", return_value=None),
+                    patch.object(
+                        plugin,
+                        "_get_credential_coordinator",
+                        return_value=self.coordinator,
+                    ),
+                    patch.object(
+                        plugin, "fetch_rate_limits", new=AsyncMock(return_value=usage)
+                    ),
+                ):
+                    data = json.loads((await plugin._handle_account_usage()).body)
+                    self.assertEqual(data["account"]["cooldown_until"], expected)
+                    with self.assertRaises(store.CredentialCooldownError):
+                        await self.coordinator.get_snapshot()
+                with patch.object(plugin.time, "time", return_value=expected + 1):
+                    self.assertFalse(
+                        (await self.coordinator.get_snapshot()).is_cooling_down()
+                    )
+
+    def test_cooldown_without_exhausted_window_has_no_invented_reset(self):
+        for used in (40, None, True, float("nan")):
+            self.assertIsNone(
+                plugin._cooldown_until_from_usage(
+                    {"windows": [{"used_percent": used, "reset_at": 9999999999}]}
+                )
+            )
+        with patch.object(plugin.time, "time", return_value=2000000000):
+            self.assertEqual(
+                plugin._cooldown_until_from_usage(
+                    {"windows": [{"used_percent": 100, "reset_after_seconds": 60}]}
+                ),
+                2000000060,
+            )
+
     async def test_in_flight_quota_is_not_cached_for_new_account(self):
         self.write(auth())
 

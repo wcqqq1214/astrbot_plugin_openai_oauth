@@ -587,6 +587,9 @@ function updateNotice() {
       .filter((item) => remainingOf(item) === 0)
       .map((item) => resetSeconds(item.reset_at, item.reset_after_seconds))
       .filter((value) => value !== null);
+    // The server may enforce a later cooldown than the reported quota windows.
+    const cooldown = resetSeconds(account.cooldown_until);
+    if (cooldown !== null) resets.push(cooldown);
     message = resets.length
       ? t.exhaustedUntil(formatAbsolute(Math.max(...resets)))
       : t.exhausted;

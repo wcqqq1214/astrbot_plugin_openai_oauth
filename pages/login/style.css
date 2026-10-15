@@ -1,48 +1,49 @@
-/* Visual roles follow claude-ui-skills (references/visual.md): warm neutral
-   page/panel surfaces, ring + small shadow panels, clay as a sparing brand
-   accent, blue reserved for focus. Status colors only appear when something
-   needs attention. Bundled brand fonts are not shipped; the system stack
-   keeps the same Sans/Mono roles and CJK fallback order. */
+/* Color roles mirror the AstrBot dashboard theme (dashboard/src/theme
+   LightTheme.ts / DarkTheme.ts): white / #1a1a1a backgrounds, outlined flat
+   cards with an 8px radius, the primary blue for actions and progress, and
+   Vuetify-style "tonal" fills (the role color at ~12%). Status text uses a
+   darkened tone of AstrBot's success/warning/error so it stays readable on
+   light surfaces; fills and dots use the original colors. */
 :root {
-  --bg: #f9f9f7;
-  --surface: #fff;
-  --surface-low: #fcfcfb;
-  --muted-surface: rgb(11 11 11 / 4.5%);
-  --hover-fill: rgb(11 11 11 / 5%);
-  --text: #0b0b0b;
-  --secondary: #52514e;
-  --muted: #898781;
-  --line: rgb(11 11 11 / 10%);
-  --line-strong: rgb(11 11 11 / 16%);
-  --track: rgb(11 11 11 / 8%);
-  --clay: #c6613f;
-  --clay-soft: color-mix(in oklab, var(--clay) 10%, transparent);
-  --ok: #2f7a4f;
-  --ok-soft: color-mix(in oklab, var(--ok) 10%, transparent);
-  --warn: #a8650f;
-  --warn-soft: color-mix(in oklab, #d9901f 13%, transparent);
-  --bad: #c0362c;
-  --bad-soft: color-mix(in oklab, var(--bad) 8%, transparent);
-  --focus: #2a78d6;
-  --ring-inner: 0px;
-  --ring-outer: 1px;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-low: #fafafa;
+  --muted-surface: #ecf2fa;
+  --hover-fill: rgb(0 0 0 / 4%);
+  --text: #1b1c1d;
+  --secondary: rgb(0 0 0 / 67%);
+  --muted: rgb(0 0 0 / 50%);
+  --line: rgb(208 208 208 / 60%);
+  --line-strong: #d0d0d0;
+  --primary: #3c96ca;
+  --primary-strong: #2f86bd;
+  --primary-soft: color-mix(in srgb, var(--primary) 12%, transparent);
+  --on-primary: #ffffff;
+  --track: color-mix(in srgb, var(--primary) 16%, transparent);
+  --ok: #00c853;
+  --ok-text: color-mix(in oklab, var(--ok) 64%, #000);
+  --warn: #ffc107;
+  --warn-text: color-mix(in oklab, var(--warn) 56%, #000);
+  --bad: #f44336;
+  --bad-text: color-mix(in oklab, var(--bad) 86%, #000);
+  --ok-soft: color-mix(in srgb, var(--ok) 12%, transparent);
+  --warn-soft: color-mix(in srgb, var(--warn) 16%, transparent);
+  --bad-soft: color-mix(in srgb, var(--bad) 10%, transparent);
+  --focus: var(--primary);
+  --radius: 8px;
   --hairline: 1px;
-  --shadow-depth: rgb(11 11 11 / 6%);
-  --surface-ring: inset 0 0 0 var(--ring-inner) var(--line),
-    0 0 0 var(--ring-outer) var(--line);
-  --panel-shadow: var(--surface-ring), 0 1px 2px rgb(11 11 11 / 4%),
-    0 2px 8px var(--shadow-depth);
-  --dialog-shadow: var(--surface-ring), 0 4px 8px rgb(11 11 11 / 8%),
-    0 12px 28px -2px rgb(11 11 11 / 10%);
-  --primary-bg: #0b0b0b;
-  --primary-text: #f9f9f7;
+  --surface-ring: 0 0 0 1px var(--line);
+  --panel-shadow: var(--surface-ring);
+  --dialog-shadow: 0 0 0 1px var(--line), 0 11px 15px -7px rgb(0 0 0 / 20%),
+    0 24px 38px 3px rgb(0 0 0 / 14%), 0 9px 46px 8px rgb(0 0 0 / 12%);
   --snap: cubic-bezier(0.32, 0.72, 0, 1);
   --out: cubic-bezier(0.165, 0.84, 0.44, 1);
   --medium: 500;
   --bold: 600;
-  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
-    "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: "Outfit", "Noto Sans", system-ui, -apple-system, "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei",
+    "Noto Sans SC", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "PingFang SC", monospace;
   color-scheme: light;
   font-family: var(--sans);
   font-synthesis: none;
@@ -51,40 +52,32 @@
   background: var(--bg);
 }
 :root[data-theme="dark"] {
-  --bg: #0b0b0b;
-  --surface: #1a1a19;
-  --surface-low: #151515;
-  --muted-surface: #20201f;
-  --hover-fill: rgb(255 255 255 / 7.5%);
-  --text: #f0efec;
-  --secondary: #c3c2b7;
-  --muted: #898781;
-  --line: rgb(255 255 255 / 10%);
-  --line-strong: rgb(255 255 255 / 16%);
-  --track: rgb(255 255 255 / 10%);
-  --clay: #d97757;
-  --ok: #6cc28f;
-  --ok-soft: color-mix(in oklab, var(--ok) 12%, transparent);
-  --warn: #e8b05a;
-  --warn-soft: color-mix(in oklab, var(--warn) 12%, transparent);
-  --bad: #f07a6e;
-  --bad-soft: color-mix(in oklab, var(--bad) 12%, transparent);
-  --ring-inner: 1px;
-  --ring-outer: 0px;
-  --shadow-depth: #0000003d;
-  --panel-shadow: var(--surface-ring);
-  --dialog-shadow: var(--surface-ring), 0 12px 32px #00000066;
-  --primary-bg: #f0efec;
-  --primary-text: #0b0b0b;
-  --medium: 460;
-  --bold: 560;
+  --bg: #1a1a1a;
+  --surface: #242424;
+  --surface-low: #1f1f1f;
+  --muted-surface: #2a2a2a;
+  --hover-fill: rgb(255 255 255 / 6%);
+  --text: #e8eaed;
+  --secondary: rgb(255 255 255 / 80%);
+  --muted: rgb(255 255 255 / 52%);
+  --line: #3a3a3a;
+  --line-strong: #4a4a4a;
+  --primary: #5ba4d4;
+  --primary-strong: #84c9ea;
+  --primary-soft: color-mix(in srgb, var(--primary) 16%, transparent);
+  --on-primary: #ffffff;
+  --track: color-mix(in srgb, var(--primary) 20%, transparent);
+  --ok: #52c41a;
+  --ok-text: var(--ok);
+  --warn: #faad14;
+  --warn-text: var(--warn);
+  --bad: #ff4d4f;
+  --bad-text: var(--bad);
+  --ok-soft: color-mix(in srgb, var(--ok) 14%, transparent);
+  --warn-soft: color-mix(in srgb, var(--warn) 14%, transparent);
+  --bad-soft: color-mix(in srgb, var(--bad) 14%, transparent);
+  --dialog-shadow: 0 0 0 1px var(--line), 0 24px 48px rgb(0 0 0 / 50%);
   color-scheme: dark;
-}
-/* Decorative separators thin out on dense displays. */
-@media (resolution >= 2x) {
-  :root {
-    --hairline: 0.5px;
-  }
 }
 * {
   box-sizing: border-box;
@@ -140,32 +133,39 @@ summary:focus-visible {
   outline-offset: 2px;
 }
 
-/* ---------- Buttons ---------- */
+/* ---------- Buttons (AstrBot / Vuetify tonal, flat and text variants) ---------- */
 .button {
-  border: 1px solid transparent;
-  box-shadow: var(--surface-ring);
-  background: var(--surface);
-  border-radius: 7px;
-  padding: 7px 13px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  padding: 8px 14px;
   font-size: 13px;
   font-weight: var(--medium);
+  line-height: 1.4;
   white-space: nowrap;
-  transition: background 60ms ease-out;
+  transition: background 120ms var(--snap);
 }
 .button:hover:not(:disabled) {
-  background: var(--hover-fill);
+  background: color-mix(in srgb, var(--primary) 20%, transparent);
 }
 .button.small {
   font-size: 12px;
-  padding: 4px 10px;
+  padding: 5px 10px;
 }
 .button.primary {
-  background: var(--primary-bg);
-  color: var(--primary-text);
-  box-shadow: none;
+  background: var(--primary);
+  color: var(--on-primary);
 }
 .button.primary:hover:not(:disabled) {
-  background: color-mix(in oklab, var(--primary-bg) 86%, var(--bg));
+  background: color-mix(in srgb, var(--primary) 88%, #000);
+}
+.button.quiet {
+  background: transparent;
+  color: var(--secondary);
+}
+.button.quiet:hover:not(:disabled) {
+  background: var(--hover-fill);
 }
 .icon-button {
   width: 30px;
@@ -230,7 +230,7 @@ summary:focus-visible {
 /* ---------- Panel ---------- */
 .panel {
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--panel-shadow);
 }
@@ -250,7 +250,7 @@ summary:focus-visible {
   padding: 0 8px;
   border-radius: 999px;
   background: var(--ok-soft);
-  color: var(--ok);
+  color: var(--ok-text);
   font-size: 12px;
   font-weight: var(--medium);
   white-space: nowrap;
@@ -269,11 +269,11 @@ summary:focus-visible {
 }
 .badge.warning {
   background: var(--warn-soft);
-  color: var(--warn);
+  color: var(--warn-text);
 }
 .badge.danger {
   background: var(--bad-soft);
-  color: var(--bad);
+  color: var(--bad-text);
 }
 .badge:empty {
   display: none;
@@ -290,9 +290,9 @@ summary:focus-visible {
   place-items: center;
   width: 40px;
   height: 40px;
-  border-radius: 10px;
-  background: var(--clay-soft);
-  color: var(--clay);
+  border-radius: var(--radius);
+  background: var(--primary-soft);
+  color: var(--primary);
   flex-shrink: 0;
 }
 .source-icon svg {
@@ -349,7 +349,7 @@ summary:focus-visible {
   align-items: center;
   gap: 8px;
   padding: 18px 16px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--surface-low);
   box-shadow: var(--surface-ring);
   font-size: 13px;
@@ -357,7 +357,7 @@ summary:focus-visible {
 }
 .quota {
   padding: 14px 16px 13px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--muted-surface);
   min-width: 0;
 }
@@ -396,7 +396,7 @@ summary:focus-visible {
 .fill {
   height: 100%;
   border-radius: inherit;
-  background: var(--secondary);
+  background: var(--primary);
   transition: width 500ms var(--out);
 }
 .reset {
@@ -411,7 +411,7 @@ summary:focus-visible {
   text-align: right;
 }
 .quota.low strong {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 .quota.low .fill {
   background: var(--warn);
@@ -420,7 +420,7 @@ summary:focus-visible {
   background: var(--bad-soft);
 }
 .quota.exhausted strong {
-  color: var(--bad);
+  color: var(--bad-text);
 }
 .quota.exhausted .track {
   background: color-mix(in oklab, var(--bad) 16%, transparent);
@@ -432,7 +432,7 @@ summary:focus-visible {
   display: flex;
   align-items: center;
   padding: 14px 16px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   border: 1px dashed var(--line-strong);
   min-width: 0;
   font-size: 12.5px;
@@ -444,9 +444,9 @@ summary:focus-visible {
   gap: 10px;
   margin-top: 14px;
   padding: 11px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--warn-soft);
-  color: var(--warn);
+  color: var(--warn-text);
   font-size: 13px;
 }
 .notice svg {
@@ -491,7 +491,7 @@ summary:focus-visible {
   width: 48px;
   height: 48px;
   margin: 0 auto 14px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--muted-surface);
   color: var(--muted);
 }
@@ -514,7 +514,7 @@ summary:focus-visible {
 .help {
   margin-top: 12px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--surface-ring);
 }
@@ -525,7 +525,7 @@ summary:focus-visible {
   padding: 12px 20px;
   list-style: none;
   cursor: pointer;
-  border-radius: 12px;
+  border-radius: var(--radius);
   font-size: 13px;
   color: var(--secondary);
   transition: background 120ms var(--snap);
@@ -579,7 +579,7 @@ summary:focus-visible {
   flex-shrink: 0;
 }
 
-/* ---------- Quiet dots (claude-ui-skills feedback) ---------- */
+/* ---------- Quiet dots ---------- */
 .quiet-dots {
   display: inline-flex;
   gap: 3.5px;
@@ -591,7 +591,7 @@ summary:focus-visible {
   height: 3px;
   flex-shrink: 0;
   border-radius: 50%;
-  background: var(--clay);
+  background: var(--primary);
   opacity: 0;
   animation: quiet-dot 1.9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
@@ -630,13 +630,13 @@ dialog {
   overflow: auto;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--dialog-shadow);
 }
 dialog::backdrop {
-  background: rgb(11 11 11 / 40%);
+  background: rgb(33 33 33 / 46%);
 }
 .dialog-heading {
   display: flex;
@@ -680,8 +680,8 @@ dialog::backdrop {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: var(--clay-soft);
-  color: var(--clay);
+  background: var(--primary-soft);
+  color: var(--primary);
   font-size: 12px;
   font-weight: var(--bold);
   font-variant-numeric: tabular-nums;
@@ -767,7 +767,7 @@ dialog::backdrop {
   padding: 10px 12px;
   border-radius: 8px;
   background: var(--bad-soft);
-  color: var(--bad);
+  color: var(--bad-text);
   font-size: 13px;
   overflow-wrap: anywhere;
 }

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import secrets
 import time
 from collections.abc import AsyncGenerator
@@ -1141,15 +1142,34 @@ def _cancel_all_command_login_tasks() -> list[asyncio.Task[Any]]:
 
 
 def _cooldown_until_from_usage(usage: dict[str, Any]) -> int | None:
+    """Wait for exhausted windows only; unrelated windows do not block requests."""
     reset_times: list[int] = []
     now = time.time()
     for window in usage.get("windows") or []:
+        used = window.get("used_percent")
+        if (
+            isinstance(used, bool)
+            or not isinstance(used, (int, float))
+            or not math.isfinite(used)
+            or used < 100
+        ):
+            continue
         reset_at = window.get("reset_at")
-        if isinstance(reset_at, (int, float)):
+        if (
+            not isinstance(reset_at, bool)
+            and isinstance(reset_at, (int, float))
+            and math.isfinite(reset_at)
+            and reset_at > now
+        ):
             reset_times.append(int(reset_at))
             continue
         reset_after = window.get("reset_after_seconds")
-        if isinstance(reset_after, (int, float)) and reset_after >= 0:
+        if (
+            not isinstance(reset_after, bool)
+            and isinstance(reset_after, (int, float))
+            and math.isfinite(reset_after)
+            and reset_after > 0
+        ):
             reset_times.append(int(now + reset_after))
     return max(reset_times, default=None)
 

@@ -150,6 +150,19 @@ await page.queryUsage();
 const expectedReset = laterReset.toLocaleDateString("zh-CN", {month: "short", day: "numeric"}) + " " + laterReset.toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", hour12: false});
 assert.ok(read("notice-text").includes(expectedReset));
 
+// A server-enforced cooldown must not be shortened by a quota-window hint.
+account.status = "cooling";
+account.cooldown_until = laterReset.getTime() / 1000;
+usage.usage.windows[1].used_percent = 40;
+await page.queryUsage();
+assert.ok(read("notice-text").includes(expectedReset));
+// A missing quota reset still uses the server's authoritative cutoff.
+usage.usage.windows[0].reset_at = null;
+await page.queryUsage();
+assert.ok(read("notice-text").includes(expectedReset));
+account.status = "ready";
+delete account.cooldown_until;
+
 usage = new Error("Network unavailable");
 await page.queryUsage();
 assert.match(read("usage-result"), /暂时无法获取/);
