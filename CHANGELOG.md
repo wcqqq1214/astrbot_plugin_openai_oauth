@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [v2.2.0] - 2026-10-18
+
+### Added
+
+- One OpenAI Subscribe source with default and per-model account selection in the plugin page.
+
+### Fixed
+
+- Reload existing model instances after plugin updates so saved models remain usable.
+- Preserve current accounts, rotated credentials, and routing when saving an older source editor snapshot.
+- Keep the source ID fixed and reject outdated per-account source saves.
+- Use the shared source proxy for token refresh when an account has no proxy override.
+- Preserve inherited timeout and request parameters during first-time migration, with explicit model settings taking precedence.
+- Skip parameter recovery for already consolidated models without reliable original-source evidence, protecting new models and changed account bindings.
+
 ## [v2.1.0] - 2026-10-16
 
 ### Added
