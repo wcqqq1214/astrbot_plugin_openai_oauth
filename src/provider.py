@@ -87,7 +87,13 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
     def __init__(self, provider_config: dict, provider_settings: dict) -> None:
         # The dashboard passes its shared source config when listing models.
         # Keep client placeholders and SDK mutations out of the credential store.
-        provider_config = deepcopy(provider_config)
+        provider_config = deepcopy(
+            {
+                key: value
+                for key, value in provider_config.items()
+                if key not in {"oauth_accounts", "oauth_routing", "oauth_gateway"}
+            }
+        )
         raw_key = provider_config.get("key")
         try:
             bootstrap_creds = parse_credentials(raw_key)
@@ -142,6 +148,21 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
     def get_current_key(self) -> str:
         return self._bootstrap_access_token
 
+    @property
+    def _source_id(self) -> str:
+        legacy = getattr(self, "_legacy_source_id", runtime._PROVIDER_TYPE)
+        try:
+            registry = runtime._get_credential_coordinator().providers
+        except CredentialError:
+            return legacy
+        return registry.resolve_model(
+            getattr(self, "provider_config", {}).get("id"), legacy
+        )
+
+    @_source_id.setter
+    def _source_id(self, value: str) -> None:
+        self._legacy_source_id = value
+
     def set_key(self, key: str) -> None:
         try:
             creds = parse_credentials(key)
@@ -177,11 +198,31 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         settings = coordinator.source_settings(snapshot.source_id)
         # Model headers remain useful on the preferred source. Never carry another
         # source's headers or proxy into a fallback account.
-        raw = (
-            self._static_headers
-            if snapshot.source_id == self._source_id
-            else source.get("custom_headers", {})
-        )
+        raw = source.get("custom_headers", {})
+        if coordinator.providers.gateway() is not None:
+            # Resolve saved model headers separately from source headers inherited
+            # when this instance was constructed, before an account switch.
+            model_id = self.provider_config.get("id")
+            model = next(
+                (
+                    m
+                    for m in coordinator._conf().get("provider", [])
+                    if m.get("id") == model_id
+                ),
+                {},
+            )
+            gateway_headers = coordinator.providers.gateway().get("custom_headers", {})
+            raw = {
+                **(raw if isinstance(raw, dict) else {}),
+                **(gateway_headers if isinstance(gateway_headers, dict) else {}),
+            }
+            model_headers = model.get("custom_headers")
+            if snapshot.source_id == self._source_id and isinstance(
+                model_headers, dict
+            ):
+                raw.update(model_headers)
+        elif snapshot.source_id == self._source_id:
+            raw = self._static_headers
         headers = (
             {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
         )
@@ -507,27 +548,29 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
     async def get_models(self) -> list[str]:
         try:
             coordinator = runtime._get_credential_coordinator()
-            snapshot = await coordinator.get_snapshot(self._source_id)
+            source_id = self._source_id
+            settings = coordinator.source_settings(source_id)
+            snapshot = await coordinator.get_snapshot(source_id)
             try:
                 models = await oauth.fetch_models(
                     snapshot.access_token,
                     snapshot.account_id,
-                    self._request_proxy(),
-                    self._originator,
-                    self._user_agent,
+                    settings["proxy"],
+                    settings["originator"] or DEFAULT_ORIGINATOR,
+                    settings["user_agent"] or DEFAULT_USER_AGENT,
                 )
             except CredentialExpiredError:
                 snapshot = await coordinator.get_snapshot(
-                    self._source_id,
+                    source_id,
                     force_refresh=True,
                     check_cooldown=False,
                 )
                 models = await oauth.fetch_models(
                     snapshot.access_token,
                     snapshot.account_id,
-                    self._request_proxy(),
-                    self._originator,
-                    self._user_agent,
+                    settings["proxy"],
+                    settings["originator"] or DEFAULT_ORIGINATOR,
+                    settings["user_agent"] or DEFAULT_USER_AGENT,
                 )
             if models:
                 return models

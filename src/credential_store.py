@@ -171,13 +171,41 @@ def dump_credentials(creds: dict[str, Any]) -> str:
     return json.dumps(normalize_credentials(creds), ensure_ascii=False)
 
 
+def subscription_gateway(
+    conf: dict[str, Any], provider_type: str
+) -> dict[str, Any] | None:
+    """Find the single framework source that owns the plugin account records."""
+    sources = conf.get("provider_sources", [])
+    if not isinstance(sources, list):
+        raise CredentialSourceError("The provider source configuration is invalid.")
+    return next(
+        (
+            s
+            for s in sources
+            if isinstance(s, dict)
+            and s.get("type") == provider_type
+            and s.get("oauth_gateway") is True
+        ),
+        None,
+    )
+
+
+def account_sources(conf: dict[str, Any], provider_type: str) -> Any:
+    gateway = subscription_gateway(conf, provider_type)
+    return (
+        gateway.get("oauth_accounts", [])
+        if gateway is not None
+        else conf.get("provider_sources", [])
+    )
+
+
 def find_source(
     conf: dict[str, Any],
     source_id: str,
     provider_type: str,
 ) -> dict[str, Any] | None:
     """Find one provider source by its exact ID and expected type."""
-    sources = conf.get("provider_sources", [])
+    sources = account_sources(conf, provider_type)
     if not isinstance(sources, list):
         raise CredentialSourceError("The provider source configuration is invalid.")
     matches: list[dict[str, Any]] = []
@@ -310,8 +338,9 @@ class CredentialCoordinator:
     def source_settings(self, source_id: str | None = None) -> dict[str, str]:
         """Return only non-secret source settings required by control-plane calls."""
         source = self._source(source_id or self._default_source_id)
+        gateway = subscription_gateway(self._conf(), self._provider_type) or {}
         return {
-            "proxy": _as_string(source.get("proxy")),
+            "proxy": _as_string(source.get("proxy") or gateway.get("proxy")),
             "originator": _as_string(source.get("originator")),
             "user_agent": _as_string(source.get("user_agent")),
         }

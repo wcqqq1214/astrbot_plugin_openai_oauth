@@ -3,13 +3,17 @@ const context = await bridge.ready();
 
 const strings = {
   en: {
+    defaultAccount: "Default account",
+    accountRoutingHelp: "New models follow this account. Existing models keep their account until you change it below. Changes save immediately.",
+    followDefault: "Follow default account",
+    accountRoutingTitle: "Account selection",
     title: "Providers",
     refresh: "Refresh status",
     enable: (name) => `Use ${name} for new requests`,
     disabledTag: "Disabled",
     autoTag: "Fallback",
     routingLabel: "Routing",
-    routingFixed: "Fixed provider",
+    routingFixed: "Fixed account",
     routingAuto: "Automatic fallback",
     routingFixedHelp:
       "Bound models use only this provider; requests fail if it is disabled or unavailable.",
@@ -18,11 +22,11 @@ const strings = {
     saving: "Saving…",
     saveFailed: (name, message) => `Could not save ${name}: ${message}`,
     saveUnknown: "The save result is unknown. Reloaded the latest state.",
-    name: "Provider name",
+    name: "Account name",
     nameShort: "Name",
     saveName: "Save",
     settingsFor: (name) => `Settings for ${name}`,
-    settingsTitle: "Provider settings",
+    settingsTitle: "Account settings",
     cancelEdit: "Cancel",
     nameRequired: "Enter a name.",
     settingsGone: "This provider no longer exists, so its settings were closed.",
@@ -30,7 +34,7 @@ const strings = {
     removeHint: "Its saved login is deleted too.",
     confirmHint: "Click again to delete permanently.",
     accountLabel: "Account",
-    removeTitle: "Remove provider",
+    removeTitle: "Remove account",
     keep: "Keep",
     removing: "Removing…",
     removeFailed: (name, message) => `Could not remove ${name}: ${message}`,
@@ -66,7 +70,7 @@ const strings = {
       unknown: "Account status is unavailable.",
     },
     local: "Local Codex",
-    add: "Add provider",
+    add: "Add account",
     renew: "Authorize again",
     noHelp: "Sign in to this provider to view its allowance.",
     privacy: "Credentials are stored only on the server.",
@@ -123,7 +127,7 @@ const strings = {
     retrying: "Connection interrupted. Retrying",
     retryStatus: "Retry status check",
     savingLogin: "Authorized. Saving the provider",
-    success: "Provider saved",
+    success: "Account saved",
     successDetail: "Select it in AstrBot model settings to use it.",
     renewedDetail: "Its sign-in has been updated.",
     cancelled: "Login cancelled",
@@ -134,34 +138,38 @@ const strings = {
       "If you already authorized, check the provider list. Otherwise, sign in again.",
   },
   zh: {
+    defaultAccount: "默认账号",
+    accountRoutingHelp: "新建模型使用默认账号；已有模型保留原账号，可在下方调整。选择后立即保存。",
+    followDefault: "跟随默认账号",
+    accountRoutingTitle: "模型账号",
     title: "Providers",
     refresh: "刷新状态",
     enable: (name) => `新请求使用 ${name}`,
     disabledTag: "已停用",
     autoTag: "自动回退",
     routingLabel: "路由",
-    routingFixed: "固定 Provider",
+    routingFixed: "固定账号",
     routingAuto: "自动回退",
     routingFixedHelp:
-      "绑定的模型仅使用此 Provider；停用或不可用时请求失败。",
+      "绑定的模型仅使用此账号；停用或不可用时请求失败。",
     routingAutoHelp:
-      "绑定的模型先用它，再按列表顺序尝试其他已启用且可用的 Provider。同一账号只尝试一次，开始输出后不再切换。",
+      "绑定的模型先用它，再按列表顺序尝试其他已启用且可用的账号。同一账号只尝试一次，开始输出后不再切换。",
     saving: "正在保存…",
     saveFailed: (name, message) => `保存「${name}」失败：${message}`,
     saveUnknown: "保存结果未知，已重新获取最新状态。",
-    name: "Provider 名称",
+    name: "账号名称",
     nameShort: "名称",
     saveName: "保存",
     settingsFor: (name) => `设置 ${name}`,
-    settingsTitle: "Provider 设置",
+    settingsTitle: "账号设置",
     cancelEdit: "取消",
     nameRequired: "请输入名称。",
-    settingsGone: "该 Provider 已不存在，设置已关闭。",
+    settingsGone: "该账号 已不存在，设置已关闭。",
     quotaLabel: "额度",
     removeHint: "会同时删除它保存的登录凭据。",
     confirmHint: "再次点击即永久删除。",
     accountLabel: "账号",
-    removeTitle: "移除 Provider",
+    removeTitle: "移除账号",
     keep: "保留",
     removing: "正在移除…",
     removeFailed: (name, message) => `移除「${name}」失败：${message}`,
@@ -169,7 +177,7 @@ const strings = {
     deviceShort: "设备码登录",
     remove: "移除",
     confirmRemove: "确认移除",
-    listFailed: "无法加载 Provider，请刷新重试。",
+    listFailed: "无法加载账号，请刷新重试。",
     localMissing: "未检测到本地登录，请在 AstrBot 所在机器登录 Codex。",
     refreshing: "正在刷新…",
     updated: "更新于",
@@ -195,9 +203,9 @@ const strings = {
       unknown: "账号状态暂不可用。",
     },
     local: "本地 Codex",
-    add: "新增 Provider",
+    add: "新增账号",
     renew: "重新授权",
-    noHelp: "登录此 Provider 后可查看额度。",
+    noHelp: "登录此账号 后可查看额度。",
     privacy: "登录凭据仅保存在服务端。",
     loading: "正在查询额度",
     noWindows: "账号尚未返回额度窗口，暂无数据不代表无限额度。",
@@ -245,8 +253,8 @@ const strings = {
     waiting: "等待授权",
     retrying: "连接暂时中断，正在重试",
     retryStatus: "重试查询",
-    savingLogin: "已授权，正在保存 Provider",
-    success: "Provider 已保存",
+    savingLogin: "已授权，正在保存账号",
+    success: "账号已保存",
     successDetail: "在 AstrBot 模型配置中选择它即可使用。",
     renewedDetail: "登录凭据已更新。",
     cancelled: "已取消登录",
@@ -256,6 +264,10 @@ const strings = {
     sessionExpiredDetail: "如已完成授权，请在列表中确认；否则请重新登录。",
   },
   ru: {
+    defaultAccount: "Аккаунт по умолчанию",
+    accountRoutingHelp: "Новые модели используют этот аккаунт. Аккаунты существующих моделей можно изменить ниже. Изменения сохраняются сразу.",
+    followDefault: "По умолчанию",
+    accountRoutingTitle: "Аккаунты моделей",
     title: "Провайдеры",
     refresh: "Обновить статус",
     enable: (name) => `Использовать ${name} для новых запросов`,
@@ -370,6 +382,10 @@ const strings = {
     sessionExpiredDetail: "Если вы уже подтвердили вход, проверьте список провайдеров. Иначе войдите снова.",
   },
   ja: {
+    defaultAccount: "既定のアカウント",
+    accountRoutingHelp: "新しいモデルは既定のアカウントを使用します。既存モデルのアカウントは下で変更できます。選択すると保存されます。",
+    followDefault: "既定のアカウントに従う",
+    accountRoutingTitle: "モデルのアカウント",
     title: "プロバイダー",
     refresh: "状態を更新",
     enable: (name) => `新しいリクエストに ${name} を使用`,
@@ -1037,6 +1053,69 @@ function providerRow(id) {
   return node;
 }
 
+let accountRouting = null;
+let routingBusy = false;
+let routingRenderKey = "";
+
+function renderAccountRouting() {
+  const section = byId("account-routing");
+  section.hidden = !accountRouting;
+  if (!accountRouting) return;
+  byId("account-routing-title").textContent = t.accountRoutingTitle;
+  byId("account-routing-help").textContent = t.accountRoutingHelp;
+  const signature = JSON.stringify([accountRouting, routingBusy, language, providers.map(p => [p.id, providerName(p)])]);
+  if (signature === routingRenderKey) return;
+  routingRenderKey = signature;
+  const fields = byId("account-routing-fields");
+  fields.replaceChildren();
+  const addSelect = (labelText, accountId, modelId = null) => {
+    const label = element("label", "account-route-field");
+    const caption = element("span");
+    caption.textContent = labelText;
+    const select = element("select", "text-input");
+    select.disabled = routingBusy;
+    select.setAttribute("aria-label", labelText);
+    const addOption = (value, text) => {
+      const option = element("option");
+      option.value = value;
+      option.textContent = text;
+      select.append(option);
+    };
+    if (modelId !== null) addOption("", t.followDefault);
+    for (const provider of providers) addOption(provider.id, providerName(provider));
+    select.value = accountId || "";
+    select.addEventListener("change", () => void saveAccountRouting(select.value || null, modelId));
+    label.append(caption, select);
+    fields.append(label);
+  };
+  addSelect(t.defaultAccount, accountRouting.default_account_id);
+  for (const model of accountRouting.models || []) addSelect(model.id, model.account_id, model.id);
+}
+
+async function saveAccountRouting(accountId, modelId) {
+  if (routingBusy) return;
+  routingBusy = true;
+  renderAccountRouting();
+  showSaveError("");
+  let error = null;
+  try {
+    const body = {account_id: accountId};
+    if (modelId !== null) body.model_id = modelId;
+    const result = await bridge.apiPost("routing/update", body);
+    if (result?.status !== "success" || !result.routing) throw new Error(t.saveUnknown);
+    accountRouting = result.routing;
+  } catch (reason) {
+    error = reason;
+  } finally {
+    // Ignore older list requests that started before this write completed.
+    listedSeq = ++listRequestSeq;
+    routingBusy = false;
+    renderAccountRouting();
+  }
+  try { await loadProviders(); } catch (reason) { error ||= reason; }
+  if (error) showSaveError(() => t.saveFailed(t.accountRoutingTitle, error.message || t.saveUnknown));
+}
+
 function renderProviders() {
   const order = [];
   for (const confirmed of providers) {
@@ -1097,6 +1176,7 @@ function renderProviders() {
   // The login result card reads the saved provider from this list.
   if (login.phase === "success") renderLogin();
   syncSettings();
+  renderAccountRouting();
 }
 
 async function selectProvider(id) {
@@ -1187,6 +1267,7 @@ async function loadProviders() {
   if (listed < listedSeq) return;
   if (!Array.isArray(list?.providers)) throw new Error();
   providers = list.providers.map((p) => keepNewerEdits(p, since));
+  if (!routingBusy && list.routing) accountRouting = list.routing;
   listedSeq = listed;
   showPageError("");
   renderProviders();

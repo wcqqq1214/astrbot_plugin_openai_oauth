@@ -307,7 +307,7 @@ pollResult({status: "success", source_id: "device"});
 await successfulLogin;
 rejectCancel(new Error("Already saved"));
 await refusedCancellation;
-assert.match(read("status"), /Provider 已保存/);
+assert.match(read("status"), /账号已保存/);
 assert.equal(ids.get("error").hidden, true);
 
 // A missing session is terminal: refresh potentially saved providers and allow retry.
@@ -385,7 +385,7 @@ pollResult({status: "success", source_id: "device"});
 await racingLogin;
 resolveExpiredCancel({status: "expired"});
 await racingCancel;
-assert.match(read("status"), /Provider 已保存/);
+assert.match(read("status"), /账号已保存/);
 assert.equal(ids.get("error").hidden, true);
 cancelResponse = null;
 
@@ -460,7 +460,7 @@ assert.equal(checked("本地 Codex"), "true");
 assert.equal(checked("工作"), "true");
 await openSettings("本地 Codex");
 assert.equal(ids.get("settings-routing-fixed").attributes["aria-pressed"], "true");
-assert.match(read("settings-routing-help"), /仅使用此 Provider/);
+assert.match(read("settings-routing-help"), /仅使用此账号/);
 await click(ids.get("settings-cancel"));
 
 // Local Codex can be disabled; only the changed field is sent and the
@@ -747,7 +747,7 @@ assert.ok(rowFor("Newer device"));
 // The add form keeps the optional name with its default; an empty name
 // lets the server apply its own default.
 page.openLogin();
-assert.equal(read("instructions-title"), "新增 Provider");
+assert.equal(read("instructions-title"), "新增账号");
 assert.equal(ids.get("login-name").value, "ChatGPT");
 assert.ok(shown("login-name-field") && shown("login-intro"));
 assert.equal(read("start"), "获取设备码");
@@ -832,7 +832,7 @@ assert.match(read("status"), /连接暂时中断，正在重试/);
 let savingPoll = page.poll("device-fresh", 5);
 pollResult({status: "saving"});
 await savingPoll;
-assert.match(read("status"), /已授权，正在保存 Provider/);
+assert.match(read("status"), /已授权，正在保存账号/);
 assert.equal(shown("device-panel"), false);
 assert.equal(shown("cancel") || shown("start") || shown("done"), false);
 assert.equal(ids.get("close-login").disabled, true);
@@ -887,7 +887,7 @@ listGate = deferred();
 savingPoll = page.poll("device-fresh", 5);
 pollResult({status: "success", source_id: "device"});
 await savingPoll;
-assert.equal(read("status"), "Provider 已保存");
+assert.equal(read("status"), "账号已保存");
 assert.match(read("status-detail"), /模型配置/);
 assert.equal(ids.get("error").hidden, true);
 assert.ok(shown("done") && !shown("start") && !shown("cancel"));
@@ -1189,7 +1189,7 @@ await openSettings("Mine");
 typeName("Orphan");
 await page.queryUsage();
 assert.equal(settingsBox.open, false);
-assert.match(read("page-error"), /该 Provider 已不存在/);
+assert.match(read("page-error"), /该账号 已不存在/);
 assert.equal(document.activeElement, ids.get("add-provider"));
 assert.equal(providerUpdates.length, sentBeforeGone);
 hideDevice = false;
@@ -1453,7 +1453,7 @@ bridge.apiPost = async (endpoint, body) => {
   } finally { --liveRequests; }
 };
 const freshPage = () => vm.runInNewContext(
-  `(async () => {${source}\n await queryUsage(); return {queryUsage, selectProvider, loadProviders, rowNodes, strings, resolveLanguage, formatAbsolute, formatRelative, windowLabel, openSettings, openLogin, failLogin};})()`,
+  `(async () => {${source}\n await queryUsage(); return {queryUsage, selectProvider, loadProviders, rowNodes, saveAccountRouting, strings, resolveLanguage, formatAbsolute, formatRelative, windowLabel, openSettings, openLogin, failLogin};})()`,
   {window, document, navigator, console, URL},
 );
 const multi = await freshPage();
@@ -1640,3 +1640,49 @@ assert.equal(reloaded.resolveLanguage("en-GB"), "en");
 assert.equal(reloaded.resolveLanguage("fr-FR"), "en");
 assert.equal(reloaded.resolveLanguage("__proto__"), "en");
 console.log("Four-language regressions passed: complete dictionaries, startup/context locales, dates/windows, default/custom names, dialogs/errors, ARIA labels and AstrBot plugin metadata.");
+
+// Default and per-model account selection use the authenticated routing API.
+const routeAccounts = [{...account, id: "local", name: "Local Codex"}, {...device, id: "work", name: "Work"}];
+let routeState = {default_account_id: "local", models: [{id: "model-one", account_id: "local"}]};
+const routeWrites = [];
+let routeFailure = false;
+let routeHold = null;
+bridge.apiPost = async (endpoint, body) => {
+  if (endpoint === "providers/list") return {providers: routeAccounts, routing: structuredClone(routeState)};
+  if (endpoint === "account/usage") return {status: "success", account: routeAccounts.find(p => p.id === body.source_id), usage: {windows: []}};
+  if (endpoint === "routing/update") {
+    routeWrites.push({...body});
+    if (routeHold) await routeHold.promise;
+    if (routeFailure) throw new Error("write rejected");
+    if (body.model_id) routeState.models.find(m => m.id === body.model_id).account_id = body.account_id;
+    else routeState.default_account_id = body.account_id;
+    return {status: "success", routing: structuredClone(routeState)};
+  }
+  throw new Error(`Unexpected endpoint ${endpoint}`);
+};
+initialLocale = "zh-CN";
+const routePage = await freshPage();
+assert.equal(shown("account-routing"), true);
+const selectors = () => ids.get("account-routing-fields").children.map(label => label.children[1]);
+assert.equal(selectors().length, 2);
+assert.equal(selectors()[0].value, "local");
+assert.equal(selectors()[1].children[0].textContent, "跟随默认账号");
+routeHold = deferred();
+const routeSave = routePage.saveAccountRouting("work", null);
+assert.ok(selectors().every(select => select.disabled));
+await routePage.saveAccountRouting("local", null);
+assert.equal(routeWrites.length, 1, "routing writes are serialized");
+routeHold.resolve();
+await routeSave;
+routeHold = null;
+assert.equal(selectors()[0].value, "work");
+assert.equal(selectors()[1].value, "local", "existing model keeps its preference");
+await routePage.saveAccountRouting(null, "model-one");
+assert.equal(selectors()[1].value, "");
+assert.deepEqual(routeWrites[1], {account_id: null, model_id: "model-one"});
+routeFailure = true;
+await routePage.saveAccountRouting("local", null);
+assert.equal(selectors()[0].value, "work", "failed writes reload authoritative selection");
+assert.match(read("save-error"), /write rejected/);
+assert.ok(selectors().every(select => !select.disabled));
+console.log("Single-source account selection passed: defaults, model preferences, serialization and failed-save reconciliation.");

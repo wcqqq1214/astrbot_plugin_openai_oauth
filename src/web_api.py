@@ -222,7 +222,12 @@ async def _requested_source_id() -> str:
     body = await request.json(default={}) or {}
     if not isinstance(body, dict):
         raise CredentialSourceError("Invalid request body.")
-    source_id = body.get("source_id", runtime._PROVIDER_TYPE)
+    source_id = body.get(
+        "source_id",
+        runtime._get_credential_coordinator().providers.routing_view()[
+            "default_account_id"
+        ],
+    )
     if not isinstance(source_id, str) or not source_id:
         raise CredentialSourceError("Invalid provider ID.")
     runtime._get_credential_coordinator()._source(source_id)
@@ -237,9 +242,41 @@ async def _handle_providers_list() -> Any:
         providers = [
             coordinator.account_view(s["id"]) for s in coordinator.providers.owned()
         ]
-        return json_response({"providers": providers}, headers=_NO_STORE_HEADERS)
+        return json_response(
+            {"providers": providers, "routing": coordinator.providers.routing_view()},
+            headers=_NO_STORE_HEADERS,
+        )
     except CredentialError:
         return _login_error_response("Provider configuration is unavailable.", 400)
+
+
+async def _handle_routing_update() -> Any:
+    if message := _login_request_error():
+        return _login_error_response(message, 403)
+    try:
+        body = await request.json(default={}) or {}
+        if (
+            not isinstance(body, dict)
+            or set(body) - {"account_id", "model_id"}
+            or "account_id" not in body
+        ):
+            raise CredentialSourceError("Invalid routing update.")
+        account_id = body["account_id"]
+        model_id = body.get("model_id")
+        if account_id is not None and (
+            not isinstance(account_id, str) or not account_id
+        ):
+            raise CredentialSourceError("Invalid account ID.")
+        if "model_id" in body and (not isinstance(model_id, str) or not model_id):
+            raise CredentialSourceError("Invalid model ID.")
+        registry = runtime._get_credential_coordinator().providers
+        await registry.update_routing(account_id, model_id=model_id)
+        return json_response(
+            {"status": "success", "routing": registry.routing_view()},
+            headers=_NO_STORE_HEADERS,
+        )
+    except CredentialError as exc:
+        return _login_error_response(str(exc), 400)
 
 
 async def _edit_provider(*, delete: bool) -> Any:
@@ -346,6 +383,7 @@ def register_routes(context: Context) -> None:
     """Register the plugin WebUI endpoints."""
     for route, handler in (
         ("providers/list", _handle_providers_list),
+        ("routing/update", _handle_routing_update),
         ("providers/update", _handle_provider_update),
         ("providers/delete", _handle_provider_delete),
     ):

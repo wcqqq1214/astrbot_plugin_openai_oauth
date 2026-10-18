@@ -206,6 +206,28 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
     def requested(self):
         return [sid for sid, _ in self.requests]
 
+    async def test_single_source_switch_updates_existing_instance_and_headers(self):
+        self.coordinator._default_source_factory = lambda: {
+            "id": "local",
+            "type": "OpenAI Subscribe",
+            "key": "",
+        }
+        await self.registry.migrate()
+        self.assertEqual(len(self.conf["provider_sources"]), 1)
+        await self.registry.update_routing("other")
+        await self.registry.update_routing(None, model_id="model")
+        await self.collect()
+        self.assertEqual(self.requested(), ["other"])
+        request = self.requests[-1][1]
+        self.assertEqual(request.headers["chatgpt-account-id"], "b")
+        self.assertEqual(request.headers["authorization"], "Bearer " + jwt("b"))
+        self.assertEqual(request.headers["x-source"], "other")
+        self.assertEqual(self.transports[-1][0], "http://other:8080")
+        await self.registry.update_routing("local", model_id="model")
+        self.outcomes["local"] = ["network", "network"]
+        await self.collect()
+        self.assertEqual(self.requested(), ["other", "local", "local", "other"])
+
     async def test_quota_fallback_deduplicates_and_uses_full_source_connection(self):
         self.outcomes["local"] = ["quota"]
         before = deepcopy(self.conf["provider"])

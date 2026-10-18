@@ -9,6 +9,62 @@ Registered paths are `/astrbot_plugin_openai_oauth/providers/list`,
 `/astrbot_plugin_openai_oauth/providers/update`, and the existing account routes.
 The dashboard's Plugin View client handles the surrounding extension proxy.
 
+## Single AstrBot source and account selection
+
+AstrBot contains one source with ID/type `OpenAI Subscribe` and `oauth_gateway: true`.
+Its `oauth_accounts` array holds the independent account records. `oauth_routing`
+holds `default_account_id` and a `models` map from model ID to preferred account ID.
+These fields stay inside the source in `data/cmd_config.json`: AstrBot removes
+unknown top-level config keys on startup. The gateway's `key` remains empty;
+credentials are resolved from the selected account immediately before dispatch.
+
+Migration preserves model IDs, rewrites their `provider_source_id` to the gateway,
+and stores their former account in the preference map. Existing profile selections
+therefore remain valid. Other providers are untouched. Repeating migration is a
+no-op; configuration-save failure rolls back the proposed migration.
+
+`providers/list` returns `{ "providers": [...], "routing": {...} }`. The historical
+`providers` and `source_id` API names now refer to accounts, not separate AstrBot
+sources. Neither list nor routing responses contain credentials. Routing shape:
+
+```json
+{
+  "default_account_id": "OpenAI Subscribe",
+  "models": [{"id": "my-model", "account_id": null}]
+}
+```
+
+`POST routing/update` changes the default with `{"account_id": "account-id"}`.
+To pin one model, send `{"model_id": "my-model", "account_id": "account-id"}`;
+`account_id: null` for a model means follow the default. A null default is rejected.
+Success returns `{ "status": "success", "routing": {...} }`. Invalid IDs, unknown
+fields and incorrect types return HTTP 400 without changing the configuration.
+The same authenticated, same-origin plugin bridge is required for this endpoint.
+
+Account selection is read on every request, including by already loaded provider
+instances. Selection changes do not enable accounts or alter their fixed/auto
+policy. The new selection takes effect only after persistence succeeds. Account
+removal is blocked while it is the default or explicitly selected by a current
+model; choose replacements in the plugin page first. Local Codex cannot be removed.
+New model IDs without a preference follow the default. Model IDs and account IDs
+remain stable internal identifiers and are not used as extra source labels.
+
+Plugin initialization also reloads existing subscription model instances through
+AstrBot's provider manager. Purging plugin modules alone does not replace model
+instances retained by AstrBot, so their old credential readers must not survive
+the storage migration. Initial startup leaves model loading to AstrBot as usual.
+
+The plugin guards AstrBot's `ProviderConfigService.upsert_provider_source` for its
+own gateway. The generic editor submits complete snapshots even for invisible
+fields; the guard preserves the current account records and routing while saving
+editable settings. It serializes with account edits and in-flight token refreshes.
+Other sources pass through unchanged. The guard is replaced without stacking on
+reload and removed when the plugin terminates.
+The gateway ID is fixed to `OpenAI Subscribe`; attempts to rename it or change
+its adapter type are rejected before saving. Stale editors for migrated account
+sources and attempts to add additional subscription sources are rejected too.
+Migration repairs model references to gateways renamed by earlier versions.
+
 ## Enable / disable
 
 `POST providers/list` keeps its `{ "providers": [...] }` envelope. Each provider
@@ -82,8 +138,7 @@ Use the same partial-update endpoint, either alone or with the enable/name field
 Only `fixed` and `auto` are accepted; null, booleans and all other values return
 HTTP 400 without changing any field. The success envelope is unchanged. Existing
 and newly created providers default to `fixed`; migration preserves explicit
-settings. Stored keys are `enable` and `oauth_routing_mode` in AstrBot's source
-configuration; the frontend should use the API names above.
+settings. Stored keys are `enable` and `oauth_routing_mode` in each account record; the frontend should use the API names above.
 
 | Mode | Dispatch |
 | --- | --- |
@@ -91,8 +146,8 @@ configuration; the frontend should use the API names above.
 | `auto` | Try the bound source first, then other sources in `providers/list` order (local first, remaining sources in saved order). |
 
 The candidate order is sampled at request start. Enable and health are checked
-again immediately before every HTTP inference attempt. There is no global active
-account, round-robin, sticky session or nested fallback. A successful fallback
+again immediately before every HTTP inference attempt. The default account applies only to models without an explicit preference. There
+is no round-robin, sticky session or nested fallback. A successful fallback
 does not change the preferred source: a later request retries that preference
 when it is eligible again. The next tool-loop invocation is a new request.
 
@@ -112,8 +167,10 @@ when it is eligible again. The next tool-loop invocation is a new request.
 
 The request body/model remains the same across accounts. Each chosen source uses
 its own credentials, account header, proxy, originator and user agent; fallback
-does not inherit the preferred source's custom headers. Existing model headers
-are retained on the preferred source except authentication/identity headers,
+does not inherit the preferred source's custom headers. Explicit model headers
+are retained on the preferred account; inherited headers are re-read from the
+chosen account so switching does not reuse the previous account’s headers. The
+shared source headers apply to all accounts, except authentication/identity headers,
 which are constructed from the current credential snapshot.
 
 Auto mode shares `request_max_retries` across **all inference HTTP attempts**
@@ -146,8 +203,8 @@ markers remain runtime state; device-source cooldown is persisted with credentia
 - Serialize writes for one provider, apply the returned provider object, and
   refetch after ambiguous network failures. Do not send an entire stale account
   object back; only send the fields the user changed.
-- Existing rename-only clients continue to work. No new dependencies, frontend
-  edits, live configuration changes or plugin reload are needed for this handoff.
+- Existing rename-only clients continue to work. No new dependencies are needed. Reload the updated plugin once to run migration;
+  subsequent account selection changes do not require a reload.
 
 Verification uses `tests/provider_routing_test.py` with real SDK parsing and fake
 HTTP transports, plus the existing integration regression suite. No real account

@@ -271,7 +271,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
             self._states[snapshot.source_id] = CredentialStatus("reauth_required")
 
     async def ensure_default_source(self) -> None:
-        """Migrate once and keep a local Codex provider available in the picker."""
+        """Migrate accounts behind the single subscription source."""
         await self.providers.migrate()
 
     def credential_origin(self, source_id: str | None = None) -> str:

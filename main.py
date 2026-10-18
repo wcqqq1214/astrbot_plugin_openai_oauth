@@ -31,7 +31,7 @@ class OpenAI_OAuth_Plugin(Star):
 
     async def initialize(self) -> None:
         """Expose the default model source without requiring a device login."""
-        await runtime._get_credential_coordinator().ensure_default_source()
+        await runtime.initialize(self.context)
 
     @filter.command("usage")
     async def usage(self, event: AstrMessageEvent) -> None:
@@ -57,3 +57,4 @@ class OpenAI_OAuth_Plugin(Star):
     async def terminate(self) -> None:
         """Cancel outstanding device-login work during plugin unload."""
         await login.terminate()
+        runtime.terminate()

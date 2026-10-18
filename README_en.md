@@ -41,16 +41,22 @@ In ChatGPT, open **Settings → Security and login** and turn on
 
 </details>
 
-1. Open **Plugin Views → providers** on the plugin’s detail page. Click **Add provider → Get device code**. The name is optional.
+1. Open **Plugin Views → providers** on the plugin’s detail page. Click **Add account → Get device code**. The name is optional.
 2. Copy the authorization link into your browser, sign in to ChatGPT, and enter the code.
-3. Once you see “Provider saved”, select the new source in AstrBot’s model settings and add a model.
+3. After **Account saved**, choose the default account under **Account selection** in the plugin page. Then add models under **OpenAI Subscribe** in AstrBot.
 
 Each addition keeps its own login without replacing another account. You can cancel
 or get a new code if it expires. **Never share the code; enter it only on OpenAI’s authorization page.**
 
 ## Check allowances and manage accounts
 
-Open **Plugin Views → providers**:
+AstrBot shows one **OpenAI Subscribe** source. Manage all accounts in
+**Plugin Views → providers**:
+
+The source ID is fixed to `OpenAI Subscribe` and cannot be renamed. Refresh any old account source editors left open before upgrading.
+
+- **Default account** is used by new models and models set to **Follow default account**.
+- **Account selection** can pin each model to an account or follow the default. Changes save immediately and apply to the next request. Migrated models retain their previous account.
 
 - **Click an account row** to see its allowance. You can expand several at once. The page refreshes every 30 seconds while open; missing data doesn’t mean unlimited usage.
 - **Click the gear** to edit the name or routing mode, then save. Device-code accounts can also be reauthorized or removed here.
@@ -60,7 +66,7 @@ Open **Plugin Views → providers**:
 
 *Accounts and allowances shown are examples. The page follows AstrBot’s language setting and supports Chinese, English, Russian, and Japanese.*
 
-Before removing an account, remove models bound to it in AstrBot. Local Codex is
+Before removing an account, select another default and change its pinned models to another account or **Follow default account**. Local Codex is
 managed on the host and can’t be deleted here. To change your chat model, use
 AstrBot’s model settings; opening an account row only shows its details.
 
@@ -122,13 +128,12 @@ to keep the login refreshed. Browser-only or keychain-only logins need a device 
 directly. In Docker, mount the entire Codex credentials directory and use the path
 inside the container, rather than mounting a single file. Device-code login also works.
 
-**Need a proxy?** Set `proxy` on the model source, or set `HTTP_PROXY` and
-`HTTPS_PROXY` for the AstrBot process or container. The source’s proxy takes priority.
+**Need a proxy?** Set `proxy` on the **OpenAI Subscribe** source, or set `HTTP_PROXY` and
+`HTTPS_PROXY` for the AstrBot process or container. An account’s previously configured proxy is preserved and takes priority; otherwise the shared source proxy is used.
 An `unsupported_country_region_territory` error means OpenAI doesn’t accept the
 network location or account conditions; the plugin can’t bypass this.
 
-**Upgrading from an older version?** The plugin migrates accounts automatically,
-keeps existing model bindings, and separates local and device logins where needed.
+**Upgrading from an older version?** The plugin consolidates old sources into one **OpenAI Subscribe** entry, preserving model IDs, account preferences, and logins. Local and device logins remain independent accounts.
 
 Keep login files and backups private: local login uses Codex’s `auth.json`, and
 device-code credentials are stored in plaintext in AstrBot’s `data/cmd_config.json`.

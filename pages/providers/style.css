@@ -1311,3 +1311,9 @@ dialog::backdrop {
     letter-spacing: 3px;
   }
 }
+
+.account-routing { margin: 0 0 24px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.account-routing h2 { margin: 0 0 8px; font-size: 15px; }
+.account-route-field { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 12px; }
+.account-route-field > span { overflow-wrap: anywhere; }
+.account-route-field select { width: min(50%, 280px); flex: 0 0 auto; }

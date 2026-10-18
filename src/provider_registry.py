@@ -1,4 +1,4 @@
-"""Manage independent OAuth provider sources and migrate legacy configurations."""
+"""Manage OAuth accounts behind one AstrBot source and migrate legacy configs."""
 
 from __future__ import annotations
 
@@ -11,12 +11,16 @@ from .credential_store import (
     CredentialPersistenceError,
     CredentialSourceError,
     ProviderDisabledError,
+    account_sources,
     dump_credentials,
     normalize_credentials,
+    subscription_gateway,
 )
 
 LOCAL = "local_codex"
 DEVICE = "device_oauth"
+ACCOUNTS_KEY = "oauth_accounts"
+ROUTING_KEY = "oauth_routing"
 UNSET = object()
 
 
@@ -28,6 +32,7 @@ class ProviderRegistry:
         self.lock = asyncio.Lock()
         self.on_change: Any = None
         self._pending_previous: dict[str, dict[str, Any]] = {}
+        self._pending_routing: dict[str, Any] | None = None
 
     def policy_source(self, source_id: str) -> dict[str, Any]:
         """Keep dispatch on the committed policy while persistence is pending."""
@@ -51,7 +56,8 @@ class ProviderRegistry:
         return [source_id, *(s["id"] for s in self.owned() if s["id"] != source_id)]
 
     def sources(self) -> list[dict[str, Any]]:
-        sources = self.coordinator._conf().get("provider_sources", [])
+        conf = self.coordinator._conf()
+        sources = account_sources(conf, self.coordinator._provider_type)
         if not isinstance(sources, list) or any(
             not isinstance(source, dict) or not isinstance(source.get("id"), str)
             for source in sources
@@ -86,7 +92,7 @@ class ProviderRegistry:
 
     async def _save(self, previous: list[dict[str, Any]]) -> None:
         conf = self.coordinator._conf()
-        proposed = deepcopy(conf["provider_sources"])
+        proposed = deepcopy(self.sources())
         self._pending_previous = {s["id"]: s for s in previous}
         try:
             # A newer AstrBot snapshot can supersede this one; retry once.
@@ -100,7 +106,7 @@ class ProviderRegistry:
         except BaseException as exc:
             before = {s["id"]: s for s in previous}
             after = {s["id"]: s for s in proposed}
-            current = conf["provider_sources"]
+            current = self.sources()
             for source_id in before.keys() | after.keys():
                 if before.get(source_id) == after.get(source_id):
                     continue
@@ -128,14 +134,161 @@ class ProviderRegistry:
             if self.on_change is not None:
                 self.on_change(conf["provider_sources"])
 
+    def gateway(self) -> dict[str, Any] | None:
+        return subscription_gateway(
+            self.coordinator._conf(), self.coordinator._provider_type
+        )
+
+    def routing(self) -> dict[str, Any]:
+        if self._pending_routing is not None:
+            return self._pending_routing
+        return (self.gateway() or {}).get(ROUTING_KEY, {})
+
+    def resolve_model(self, model_id: str | None, legacy_source: str) -> str:
+        routing = self.routing()
+        return (
+            routing.get("models", {}).get(model_id)
+            or routing.get("default_account_id")
+            or legacy_source
+        )
+
+    def routing_view(self) -> dict[str, Any]:
+        c = self.coordinator
+        bindings = self.routing().get("models", {})
+        account_ids = (
+            {c._default_source_id}
+            if self.gateway() is not None
+            else {s["id"] for s in self.owned()}
+        )
+        return {
+            "default_account_id": self.routing().get(
+                "default_account_id", c._default_source_id
+            ),
+            "models": [
+                {"id": m["id"], "account_id": bindings.get(m["id"])}
+                for m in c._conf().get("provider", [])
+                if m.get("provider_source_id") in account_ids | {c._default_source_id}
+                or (
+                    not m.get("provider_source_id")
+                    and m.get("type") == c._provider_type
+                )
+            ],
+        }
+
+    async def _commit_configuration(
+        self, updates: dict[str, Any], *, target: dict[str, Any] | None = None
+    ) -> None:
+        """Persist migration/routing in one AstrBot configuration snapshot."""
+        conf = self.coordinator._conf()
+        container = conf if target is None else target
+        changes = {k: v for k, v in updates.items() if container.get(k, UNSET) != v}
+        previous = {
+            k: deepcopy(container[k]) if k in container else UNSET for k in changes
+        }
+        proposed = deepcopy(changes)
+        container.update(changes)
+        try:
+            if (
+                changes
+                and await conf.save_config_async() is False
+                and await conf.save_config_async() is False
+            ):
+                raise CredentialPersistenceError(
+                    "Provider configuration was not saved."
+                )
+        except BaseException as exc:
+            for key, value in previous.items():
+                if container.get(key) != proposed[key]:
+                    continue
+                if value is UNSET:
+                    container.pop(key, None)
+                else:
+                    container[key] = value
+            if not isinstance(exc, Exception):
+                raise
+            raise CredentialPersistenceError(
+                "Could not save provider configuration."
+            ) from exc
+        finally:
+            if self.on_change is not None:
+                self.on_change(conf.get("provider_sources", []))
+
+    async def update_routing(
+        self, account_id: str | None, *, model_id: str | None = None
+    ) -> None:
+        async with self.lock:
+            gateway = self.gateway()
+            if gateway is None:
+                raise CredentialSourceError("Account migration has not completed.")
+            if account_id is not None:
+                self.coordinator._source(account_id)
+            routing = deepcopy(self.routing())
+            if model_id is None:
+                if account_id is None:
+                    raise CredentialSourceError("A default account is required.")
+                routing["default_account_id"] = account_id
+            else:
+                if model_id not in {m["id"] for m in self.routing_view()["models"]}:
+                    raise CredentialSourceError("The subscription model was not found.")
+                if account_id is None:
+                    routing["models"].pop(model_id, None)
+                else:
+                    routing["models"][model_id] = account_id
+            self._pending_routing = deepcopy(self.routing())
+            try:
+                await self._commit_configuration({ROUTING_KEY: routing}, target=gateway)
+            finally:
+                self._pending_routing = None
+
     async def migrate(self) -> None:
-        """Split legacy mixed sources once, keeping existing model references."""
+        """Consolidate accounts behind one source while preserving model preferences."""
         async with self.lock:
             conf = self.coordinator._conf()
             sources = conf.setdefault("provider_sources", [])
             self.sources()
-            previous = deepcopy(sources)
-            planned = deepcopy(sources)
+            if not isinstance(sources, list) or any(
+                not isinstance(s, dict) or not isinstance(s.get("id"), str)
+                for s in sources
+            ):
+                raise CredentialSourceError("Invalid provider source configuration.")
+            gateways = [
+                s
+                for s in sources
+                if s.get("type") == self.coordinator._provider_type
+                and s.get("oauth_gateway") is True
+            ]
+            if len(gateways) > 1:
+                raise CredentialSourceError(
+                    "Multiple subscription gateways are configured."
+                )
+            if gateways and (
+                not gateways[0].get(ACCOUNTS_KEY)
+                or not isinstance(gateways[0].get(ROUTING_KEY), dict)
+            ):
+                raise CredentialSourceError("Invalid subscription account storage.")
+            ids = [s["id"] for s in sources]
+            if len(ids) != len(set(ids)):
+                raise CredentialSourceError("Provider source IDs must be unique.")
+            if any(
+                s["id"] == self.coordinator._default_source_id
+                and s.get("type") != self.coordinator._provider_type
+                for s in sources
+            ):
+                raise CredentialSourceError(
+                    "The subscription source ID is already in use."
+                )
+            planned = deepcopy((self.gateway() or {}).get(ACCOUNTS_KEY, []))
+            for source in sources:
+                if (
+                    source.get("type") != self.coordinator._provider_type
+                    or source.get("oauth_gateway") is True
+                ):
+                    continue
+                if any(s["id"] == source["id"] for s in planned):
+                    raise CredentialSourceError(
+                        "Account ID conflicts with a provider source."
+                    )
+                planned.append(deepcopy(source))
             c = self.coordinator
             for source in list(planned):
                 if (
@@ -173,11 +326,74 @@ class ProviderRegistry:
                 if source.get("type") == c._provider_type:
                     source.setdefault("enable", True)
                     source.setdefault("oauth_routing_mode", "fixed")
-            if planned != sources:
-                sources[:] = planned
-                await self._save(previous)
-            elif self.on_change is not None:
-                self.on_change(sources)
+            routing = deepcopy(self.routing())
+            routing.setdefault(
+                "default_account_id",
+                next(
+                    (s["id"] for s in planned if s["id"] == c._default_source_id),
+                    planned[0]["id"],
+                ),
+            )
+            bindings = routing.setdefault("models", {})
+            if not isinstance(bindings, dict) or any(
+                not isinstance(k, str) or not isinstance(v, str)
+                for k, v in bindings.items()
+            ):
+                raise CredentialSourceError("Invalid model account bindings.")
+            models = deepcopy(conf.get("provider", []))
+            account_ids = {s["id"] for s in planned}
+            legacy_ids = {
+                s["id"]
+                for s in sources
+                if s.get("type") == c._provider_type and not s.get("oauth_gateway")
+            }
+            gateway_ids = {source["id"] for source in gateways}
+            for model in models:
+                sid = model.get("provider_source_id")
+                if sid in legacy_ids or (
+                    not sid and model.get("type") == c._provider_type
+                ):
+                    bindings.setdefault(model["id"], sid or c._default_source_id)
+                    model["provider_source_id"] = c._default_source_id
+                elif sid in gateway_ids:
+                    # Repair references saved before gateway renaming was blocked.
+                    model["provider_source_id"] = c._default_source_id
+            if routing["default_account_id"] not in account_ids:
+                raise CredentialSourceError("The default account was not found.")
+            gateway = next(
+                (
+                    deepcopy(s)
+                    for s in sources
+                    if s.get("oauth_gateway") is True
+                    and s.get("type") == c._provider_type
+                ),
+                c._default_source_factory(),
+            )
+            gateway.update(
+                id=c._default_source_id,
+                key="",
+                oauth_gateway=True,
+            )
+            gateway.pop("name", None)
+            gateway[ACCOUNTS_KEY] = planned
+            gateway[ROUTING_KEY] = routing
+            retained = []
+            inserted = False
+            for source in sources:
+                if source.get("type") == c._provider_type:
+                    if not inserted:
+                        retained.append(gateway)
+                        inserted = True
+                else:
+                    retained.append(deepcopy(source))
+            if not inserted:
+                retained.append(gateway)
+            await self._commit_configuration(
+                {
+                    "provider_sources": retained,
+                    "provider": models,
+                }
+            )
 
     async def save_login(
         self, source_id: str, name: str, creds: dict[str, Any], *, creating: bool
@@ -233,14 +449,29 @@ class ProviderRegistry:
             source = self.coordinator._source(source_id)
             sources = self.sources()
             previous = deepcopy(sources)
+            previous_routing = deepcopy(self.routing())
+            gateway = self.gateway()
             if delete:
                 if source.get("credential_mode") == LOCAL:
                     raise CredentialSourceError(
                         "The local Codex provider cannot be deleted."
                     )
+                routing = self.routing()
+                active_models = {m["id"] for m in self.routing_view()["models"]}
+                if routing.get("default_account_id") == source_id or any(
+                    account == source_id and model in active_models
+                    for model, account in routing.get("models", {}).items()
+                ):
+                    raise CredentialSourceError(
+                        "Select another default account and update model account bindings first."
+                    )
                 # Model definitions are global in AstrBot; profiles select their IDs.
                 if any(
                     p.get("provider_source_id") == source_id
+                    and (
+                        self.gateway() is None
+                        or source_id != self.coordinator._default_source_id
+                    )
                     or (
                         source_id == self.coordinator._default_source_id
                         and p.get("type") == self.coordinator._provider_type
@@ -252,6 +483,17 @@ class ProviderRegistry:
                         "Remove this provider's model bindings in AstrBot first."
                     )
                 sources.remove(source)
+                if gateway is not None:
+                    gateway[ROUTING_KEY] = {
+                        **previous_routing,
+                        "models": {
+                            model: account
+                            for model, account in previous_routing.get(
+                                "models", {}
+                            ).items()
+                            if account != source_id
+                        },
+                    }
             else:
                 if name is not UNSET:
                     source["name"] = name
@@ -259,7 +501,13 @@ class ProviderRegistry:
                     source["enable"] = enabled
                 if routing_mode is not UNSET:
                     source["oauth_routing_mode"] = routing_mode
-            await self._save(previous)
+            proposed_routing = deepcopy(self.routing())
+            try:
+                await self._save(previous)
+            except BaseException:
+                if gateway is not None and gateway.get(ROUTING_KEY) == proposed_routing:
+                    gateway[ROUTING_KEY] = previous_routing
+                raise
             if delete:
                 self.coordinator._states.pop(source_id, None)
                 self.coordinator._usage_cache.pop(source_id, None)
