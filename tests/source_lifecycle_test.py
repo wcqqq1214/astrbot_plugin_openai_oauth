@@ -116,6 +116,104 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await runtime.initialize(self.context)
         reload.assert_not_awaited()
 
+    async def test_migration_preserves_effective_model_timeout_and_request_body(self):
+        self.coordinator._default_source_factory = runtime._build_default_source_config
+        first = self.conf["provider_sources"][0]
+        first.update(
+            proxy="",
+            timeout=240,
+            custom_extra_body={"reasoning": {"effort": "high"}},
+        )
+        second = {
+            **deepcopy(first),
+            "id": "work",
+            "credential_mode": "device_oauth",
+            "timeout": 360,
+            "custom_extra_body": {"text": {"verbosity": "low"}},
+        }
+        self.conf["provider_sources"].append(second)
+        self.conf["provider"].extend(
+            [
+                {
+                    "id": "work-model",
+                    "provider_source_id": "work",
+                    "model": "test-model",
+                },
+                {
+                    "id": "explicit-model",
+                    "provider_source_id": "work",
+                    "model": "test-model",
+                    "timeout": 90,
+                    "custom_extra_body": {},
+                },
+                {"id": "other", "provider_source_id": "unrelated"},
+            ]
+        )
+        before = [
+            self.manager.get_merged_provider_config(model)
+            for model in self.conf["provider"]
+        ]
+        await self.registry.migrate()
+        for model, original in zip(self.conf["provider"][:-1], before[:-1]):
+            merged = self.manager.get_merged_provider_config(model)
+            current = provider_module.ProviderOpenAICodex(merged, {})
+            seen = []
+
+            async def respond(request, seen=seen):
+                seen.append(
+                    (json.loads(request.content), request.extensions["timeout"])
+                )
+                events = [
+                    {"type": "response.output_text.delta", "delta": "ok"},
+                    {
+                        "type": "response.completed",
+                        "response": {
+                            "id": "test",
+                            "status": "completed",
+                            "output": [],
+                        },
+                    },
+                ]
+                return httpx.Response(
+                    200,
+                    text="".join("data: " + json.dumps(e) + "\n\n" for e in events),
+                    headers={"content-type": "text/event-stream"},
+                )
+
+            current._create_http_client = lambda config: httpx.AsyncClient(
+                transport=httpx.MockTransport(respond)
+            )
+            try:
+                self.assertEqual(current.timeout, original["timeout"])
+                self.assertEqual(
+                    current.provider_config["custom_extra_body"],
+                    original["custom_extra_body"],
+                )
+                result = await current.text_chat(prompt="test")
+                self.assertEqual(result.completion_text, "ok")
+                self.assertEqual(len(seen), 1)
+                body, timeout = seen[0]
+                self.assertEqual(timeout["read"], original["timeout"])
+                for key in ("reasoning", "text"):
+                    self.assertEqual(
+                        body.get(key), original["custom_extra_body"].get(key)
+                    )
+                self.assertNotIn("key", model)
+                self.assertNotIn("proxy", model)
+            finally:
+                await current.terminate()
+        self.assertEqual(self.conf["provider"][-1], before[-1])
+        # Neither the account copy nor later gateway edits overwrite migrated model values.
+        self.registry.gateway()["timeout"] = 180
+        self.registry.gateway()["custom_extra_body"] = {"reasoning": {"effort": "low"}}
+        snapshot = deepcopy(self.conf)
+        await self.registry.migrate()
+        self.assertEqual(self.conf, snapshot)
+        first["custom_extra_body"]["reasoning"]["effort"] = "low"
+        self.assertEqual(
+            self.conf["provider"][0]["custom_extra_body"]["reasoning"]["effort"], "high"
+        )
+
     async def test_reload_failure_is_not_reported_as_success(self):
         self.manager.inst_map["existing-model"] = SimpleNamespace(terminate=AsyncMock())
         with (

@@ -235,6 +235,41 @@ class SingleSourceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(self.conf["provider_sources"]), 1)
 
+    async def test_device_refresh_uses_effective_proxy_and_persists_rotation(self):
+        self.coordinator._default_source_factory = (
+            fixtures.runtime._build_default_source_config
+        )
+        await self.registry.migrate()
+        await self.registry.save_login("device", "Device", self.creds, creating=True)
+        account = self.coordinator._source("device")
+        for account_proxy, gateway_proxy, expected in (
+            ("", "http://shared:8080", "http://shared:8080"),
+            ("http://account:8080", "http://shared:8080", "http://account:8080"),
+            ("", "", None),
+        ):
+            with self.subTest(account_proxy=account_proxy, gateway_proxy=gateway_proxy):
+                account["proxy"] = account_proxy
+                self.registry.gateway()["proxy"] = gateway_proxy
+                refreshed = {
+                    **self.creds,
+                    "access_token": fixtures.jwt(str(expected)),
+                    "refresh_token": f"rotated-{expected}",
+                }
+
+                refresh = AsyncMock(return_value=refreshed)
+                self.coordinator.update_refresh_credentials(refresh)
+                snapshot = await self.coordinator.get_snapshot(
+                    "device", force_refresh=True
+                )
+                refresh.assert_awaited_once()
+                self.assertEqual(refresh.await_args.args[1], expected)
+                self.assertEqual(snapshot.access_token, refreshed["access_token"])
+                self.assertEqual(snapshot.refresh_token, refreshed["refresh_token"])
+                persisted = json.loads(account["key"])
+                for key, value in refreshed.items():
+                    self.assertEqual(persisted[key], value)
+                self.assertEqual(len(self.conf["provider_sources"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

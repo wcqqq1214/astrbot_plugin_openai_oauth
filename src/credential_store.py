@@ -465,7 +465,7 @@ class CredentialCoordinator:
                         "expires": snapshot.expires,
                         "account_id": snapshot.account_id,
                     },
-                    _as_string(source.get("proxy")) or None,
+                    self.source_settings(resolved_source_id)["proxy"] or None,
                 )
             except Exception as exc:
                 if not snapshot.is_access_token_expired() and not force_refresh:

@@ -342,17 +342,23 @@ class ProviderRegistry:
                 raise CredentialSourceError("Invalid model account bindings.")
             models = deepcopy(conf.get("provider", []))
             account_ids = {s["id"] for s in planned}
-            legacy_ids = {
-                s["id"]
+            legacy_sources = {
+                s["id"]: s
                 for s in sources
                 if s.get("type") == c._provider_type and not s.get("oauth_gateway")
             }
             gateway_ids = {source["id"] for source in gateways}
             for model in models:
                 sid = model.get("provider_source_id")
-                if sid in legacy_ids or (
+                if sid in legacy_sources or (
                     not sid and model.get("type") == c._provider_type
                 ):
+                    # Preserve inherited inference settings before changing the source.
+                    # Model overrides win, matching AstrBot's shallow config merge.
+                    legacy = legacy_sources.get(sid, {})
+                    for key in ("timeout", "custom_extra_body"):
+                        if key not in model and key in legacy:
+                            model[key] = deepcopy(legacy[key])
                     bindings.setdefault(model["id"], sid or c._default_source_id)
                     model["provider_source_id"] = c._default_source_id
                 elif sid in gateway_ids:
