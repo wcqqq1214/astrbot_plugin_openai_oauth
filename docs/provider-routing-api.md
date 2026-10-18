@@ -23,16 +23,18 @@ and stores their former account in the preference map. Existing profile selectio
 therefore remain valid. Other providers are untouched. Repeating migration is a
 no-op; configuration-save failure rolls back the proposed migration.
 
-Upgrades from gateways created before inference settings were preserved perform a
-one-time recovery of `timeout` and `custom_extra_body` from each model's explicitly
-bound account. Recovery fills only keys absent from both the model and the gateway;
-explicit defaults and empty objects remain unchanged. Unbound models and missing
-accounts are skipped. The private `oauth_routing.inference_settings_migrated` marker
-is saved atomically with the repaired models and protected by the source editor.
-Later edits or removals are therefore not undone by another reload. Older versions
-did not record edit history: a setting removed before this repair cannot be
-distinguished from one lost during migration. Recovery uses the remaining binding
-and only fills missing fields; it never overwrites present settings.
+During first-time consolidation, a model's direct `provider_source_id` identifies
+its original source. Migration copies inherited `timeout` and `custom_extra_body`
+from that source, preserving explicit model overrides.
+
+Already consolidated gateways have no immutable record of each model's original
+source. Current account bindings can change and also include newly created models,
+so they are never used to recover inference settings. These upgrades preserve saved
+model and gateway settings, including absent keys, defaults and empty objects.
+Missing values require a verified original configuration before restoration.
+Any `oauth_routing.inference_settings_migrated` marker left by an earlier version
+is retained for compatibility but does not authorize recovery. Previously saved
+values are not automatically reverted because they may reflect later user edits.
 
 `providers/list` returns `{ "providers": [...], "routing": {...} }`. The historical
 `providers` and `source_id` API names now refer to accounts, not separate AstrBot

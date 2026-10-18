@@ -223,7 +223,7 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await runtime.initialize(self.context)
 
     def pre_repair_gateway(self):
-        """Build the persisted gateway shape produced before settings were preserved."""
+        """Build a legacy gateway with account settings but no origin history."""
         self.coordinator._default_source_factory = runtime._build_default_source_config
         account = {
             **deepcopy(self.original),
@@ -245,8 +245,9 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.sync(self.conf["provider_sources"])
         return gateway
 
-    async def test_upgrade_recovers_old_gateway_settings_and_reloads_model(self):
+    async def test_upgrade_skips_unproven_settings_and_reloads_model(self):
         self.pre_repair_gateway()
+        before = deepcopy(self.conf["provider"])
         old = provider_module.ProviderOpenAICodex(
             self.manager.get_merged_provider_config(self.conf["provider"][0]), {}
         )
@@ -256,11 +257,9 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
         await runtime.initialize(self.context)
         current = self.manager.inst_map["existing-model"]
         self.assertIsNot(current, old)
-        self.assertEqual(current.timeout, 240)
-        self.assertEqual(
-            current.provider_config["custom_extra_body"],
-            {"reasoning": {"effort": "high"}},
-        )
+        self.assertEqual(current.timeout, 120)
+        self.assertNotIn("custom_extra_body", current.provider_config)
+        self.assertEqual(self.conf["provider"], before)
         self.assertEqual(len(self.conf["provider_sources"]), 1)
 
     async def test_upgrade_preserves_explicit_model_and_gateway_settings(self):
@@ -282,8 +281,43 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(merged["timeout"], 120)
                 self.assertEqual(merged["custom_extra_body"], {})
 
-    async def test_upgrade_restores_fields_independently_and_only_once(self):
-        self.pre_repair_gateway()["timeout"] = 90
+    async def test_upgrade_keeps_new_model_settings_when_pinned_to_old_account(self):
+        self.pre_repair_gateway()
+        with patch.object(self.conf, "save_config", create=True):
+            await self.service.create_provider(
+                {"id": "new-after-migration", "model": "test-model", "enable": True},
+                source_id="OpenAI Subscribe",
+            )
+        await self.registry.update_routing(
+            "OpenAI Subscribe", model_id="new-after-migration"
+        )
+        before = deepcopy(self.conf["provider"][-1])
+        await runtime.initialize(self.context)
+        self.assertEqual(self.conf["provider"][-1], before)
+        current = self.manager.inst_map["new-after-migration"]
+        self.assertEqual(current.timeout, 120)
+        self.assertNotIn("custom_extra_body", current.provider_config)
+
+    async def test_upgrade_does_not_restore_from_a_changed_account_binding(self):
+        gateway = self.pre_repair_gateway()
+        account = deepcopy(gateway["oauth_accounts"][0])
+        account.update(
+            id="work", timeout=360, custom_extra_body={"reasoning": {"effort": "low"}}
+        )
+        gateway["oauth_accounts"].append(account)
+        await self.registry.update_routing("work", model_id="existing-model")
+        before = deepcopy(self.conf["provider"])
+        await self.registry.migrate()
+        self.assertEqual(self.conf["provider"], before)
+        self.assertEqual(self.registry.resolve_model("existing-model", ""), "work")
+
+    async def test_upgrade_preserves_saved_values_and_later_removals(self):
+        gateway = self.pre_repair_gateway()
+        gateway["timeout"] = 90
+        gateway["oauth_routing"]["inference_settings_migrated"] = True
+        self.conf["provider"][0]["custom_extra_body"] = {
+            "reasoning": {"effort": "high"}
+        }
         await self.registry.migrate()
         model = self.conf["provider"][0]
         self.assertNotIn("timeout", model)
@@ -305,7 +339,7 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
         await self.registry.migrate()
         self.assertEqual(self.conf, snapshot)
 
-    async def test_upgrade_recovers_each_bound_account_independently(self):
+    async def test_upgrade_never_uses_legacy_markers_as_origin_evidence(self):
         gateway = self.pre_repair_gateway()
         account = deepcopy(gateway["oauth_accounts"][0])
         account.update(
@@ -316,16 +350,17 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.conf["provider"].append(
             {"id": "work-model", "provider_source_id": "OpenAI Subscribe"}
         )
-        await self.registry.migrate()
-        first, second = self.conf["provider"]
-        self.assertEqual(first["timeout"], 240)
-        self.assertEqual(first["custom_extra_body"], {"reasoning": {"effort": "high"}})
-        self.assertEqual(second["timeout"], 360)
-        self.assertEqual(second["custom_extra_body"], {"text": {"verbosity": "low"}})
-        self.coordinator._source("work")["custom_extra_body"]["text"]["verbosity"] = (
-            "high"
-        )
-        self.assertEqual(second["custom_extra_body"], {"text": {"verbosity": "low"}})
+        before = deepcopy(self.conf["provider"])
+        for marker in (None, False, True):
+            with self.subTest(marker=marker):
+                self.registry.gateway()["oauth_routing"][
+                    "inference_settings_migrated"
+                ] = marker
+                await self.registry.migrate()
+                self.assertEqual(self.conf["provider"], before)
+                self.assertIs(
+                    self.registry.routing()["inference_settings_migrated"], marker
+                )
 
     async def test_upgrade_does_not_infer_settings_for_unbound_or_unrelated_models(
         self,
@@ -349,7 +384,7 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
         await self.registry.migrate()
         self.assertEqual(self.conf["provider"], before)
 
-    async def test_failed_upgrade_rolls_back_recovery_and_retries(self):
+    async def test_failed_gateway_upgrade_rolls_back_and_retries(self):
         self.pre_repair_gateway()
         before = deepcopy(self.conf)
         with (
@@ -361,7 +396,7 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await self.registry.migrate()
         self.assertEqual(self.conf, before)
         await self.registry.migrate()
-        self.assertEqual(self.conf["provider"][0]["timeout"], 240)
+        self.assertEqual(self.conf["provider"], before["provider"])
         snapshot = deepcopy(self.conf)
         saves = self.conf.saved
         await self.registry.migrate()

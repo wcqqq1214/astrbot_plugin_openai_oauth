@@ -348,9 +348,6 @@ class ProviderRegistry:
                 if s.get("type") == c._provider_type and not s.get("oauth_gateway")
             }
             gateway_ids = {source["id"] for source in gateways}
-            existing_gateway = gateways[0] if gateways else {}
-            recover_settings = routing.get("inference_settings_migrated") is not True
-            accounts_by_id = {account["id"]: account for account in planned}
             for model in models:
                 sid = model.get("provider_source_id")
                 if sid in legacy_sources or (
@@ -365,22 +362,10 @@ class ProviderRegistry:
                     bindings.setdefault(model["id"], sid or c._default_source_id)
                     model["provider_source_id"] = c._default_source_id
                 elif sid in gateway_ids:
-                    if recover_settings:
-                        # Older gateways retained source settings only in accounts.
-                        # Do not guess a former account for models following defaults.
-                        account = accounts_by_id.get(bindings.get(model["id"]), {})
-                        for key in ("timeout", "custom_extra_body"):
-                            # Even explicit defaults/empty values are user overrides.
-                            if (
-                                key not in model
-                                and key not in existing_gateway
-                                and key in account
-                            ):
-                                model[key] = deepcopy(account[key])
+                    # Current account bindings are mutable, not migration provenance.
+                    # Already consolidated models keep their saved inference settings.
                     # Repair references saved before gateway renaming was blocked.
                     model["provider_source_id"] = c._default_source_id
-            # Persist with the repaired models; later removals must not be undone.
-            routing["inference_settings_migrated"] = True
             if routing["default_account_id"] not in account_ids:
                 raise CredentialSourceError("The default account was not found.")
             gateway = next(
