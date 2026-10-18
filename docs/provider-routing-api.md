@@ -23,6 +23,17 @@ and stores their former account in the preference map. Existing profile selectio
 therefore remain valid. Other providers are untouched. Repeating migration is a
 no-op; configuration-save failure rolls back the proposed migration.
 
+Upgrades from gateways created before inference settings were preserved perform a
+one-time recovery of `timeout` and `custom_extra_body` from each model's explicitly
+bound account. Recovery fills only keys absent from both the model and the gateway;
+explicit defaults and empty objects remain unchanged. Unbound models and missing
+accounts are skipped. The private `oauth_routing.inference_settings_migrated` marker
+is saved atomically with the repaired models and protected by the source editor.
+Later edits or removals are therefore not undone by another reload. Older versions
+did not record edit history: a setting removed before this repair cannot be
+distinguished from one lost during migration. Recovery uses the remaining binding
+and only fills missing fields; it never overwrites present settings.
+
 `providers/list` returns `{ "providers": [...], "routing": {...} }`. The historical
 `providers` and `source_id` API names now refer to accounts, not separate AstrBot
 sources. Neither list nor routing responses contain credentials. Routing shape:

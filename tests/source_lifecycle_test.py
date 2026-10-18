@@ -222,6 +222,152 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
         ):
             await runtime.initialize(self.context)
 
+    def pre_repair_gateway(self):
+        """Build the persisted gateway shape produced before settings were preserved."""
+        self.coordinator._default_source_factory = runtime._build_default_source_config
+        account = {
+            **deepcopy(self.original),
+            "proxy": "",
+            "credential_mode": "device_oauth",
+            "timeout": 240,
+            "custom_extra_body": {"reasoning": {"effort": "high"}},
+        }
+        gateway = {
+            **runtime._build_default_source_config(),
+            "oauth_gateway": True,
+            "oauth_accounts": [account],
+            "oauth_routing": {
+                "default_account_id": account["id"],
+                "models": {"existing-model": account["id"]},
+            },
+        }
+        self.conf["provider_sources"] = [gateway]
+        self.sync(self.conf["provider_sources"])
+        return gateway
+
+    async def test_upgrade_recovers_old_gateway_settings_and_reloads_model(self):
+        self.pre_repair_gateway()
+        old = provider_module.ProviderOpenAICodex(
+            self.manager.get_merged_provider_config(self.conf["provider"][0]), {}
+        )
+        self.manager.inst_map["existing-model"] = old
+        self.manager.provider_insts.append(old)
+        self.assertEqual(old.timeout, 120)
+        await runtime.initialize(self.context)
+        current = self.manager.inst_map["existing-model"]
+        self.assertIsNot(current, old)
+        self.assertEqual(current.timeout, 240)
+        self.assertEqual(
+            current.provider_config["custom_extra_body"],
+            {"reasoning": {"effort": "high"}},
+        )
+        self.assertEqual(len(self.conf["provider_sources"]), 1)
+
+    async def test_upgrade_preserves_explicit_model_and_gateway_settings(self):
+        for location in ("model", "gateway"):
+            with self.subTest(location=location):
+                gateway = self.pre_repair_gateway()
+                model = self.conf["provider"][0]
+                model.pop("timeout", None)
+                model.pop("custom_extra_body", None)
+                target = model if location == "model" else gateway
+                # Explicit defaults and an empty body are intentional settings too.
+                target.update(timeout=120, custom_extra_body={})
+                before = deepcopy(model)
+                await self.registry.migrate()
+                self.assertEqual(self.conf["provider"][0], before)
+                merged = self.manager.get_merged_provider_config(
+                    self.conf["provider"][0]
+                )
+                self.assertEqual(merged["timeout"], 120)
+                self.assertEqual(merged["custom_extra_body"], {})
+
+    async def test_upgrade_restores_fields_independently_and_only_once(self):
+        self.pre_repair_gateway()["timeout"] = 90
+        await self.registry.migrate()
+        model = self.conf["provider"][0]
+        self.assertNotIn("timeout", model)
+        self.assertEqual(model["custom_extra_body"], {"reasoning": {"effort": "high"}})
+        # A later source save may come from an editor without the private marker.
+        stale = deepcopy(self.registry.gateway())
+        stale["oauth_routing"] = {
+            "default_account_id": "OpenAI Subscribe",
+            "models": {},
+        }
+        await self.service.upsert_provider_source("OpenAI Subscribe", stale)
+        model.pop("custom_extra_body")
+        self.registry.gateway().pop("timeout")
+        self.conf["provider"].append(
+            {"id": "later-model", "provider_source_id": "OpenAI Subscribe"}
+        )
+        await self.registry.update_routing("OpenAI Subscribe", model_id="later-model")
+        snapshot = deepcopy(self.conf)
+        await self.registry.migrate()
+        self.assertEqual(self.conf, snapshot)
+
+    async def test_upgrade_recovers_each_bound_account_independently(self):
+        gateway = self.pre_repair_gateway()
+        account = deepcopy(gateway["oauth_accounts"][0])
+        account.update(
+            id="work", timeout=360, custom_extra_body={"text": {"verbosity": "low"}}
+        )
+        gateway["oauth_accounts"].append(account)
+        gateway["oauth_routing"]["models"]["work-model"] = "work"
+        self.conf["provider"].append(
+            {"id": "work-model", "provider_source_id": "OpenAI Subscribe"}
+        )
+        await self.registry.migrate()
+        first, second = self.conf["provider"]
+        self.assertEqual(first["timeout"], 240)
+        self.assertEqual(first["custom_extra_body"], {"reasoning": {"effort": "high"}})
+        self.assertEqual(second["timeout"], 360)
+        self.assertEqual(second["custom_extra_body"], {"text": {"verbosity": "low"}})
+        self.coordinator._source("work")["custom_extra_body"]["text"]["verbosity"] = (
+            "high"
+        )
+        self.assertEqual(second["custom_extra_body"], {"text": {"verbosity": "low"}})
+
+    async def test_upgrade_does_not_infer_settings_for_unbound_or_unrelated_models(
+        self,
+    ):
+        gateway = self.pre_repair_gateway()
+        gateway["oauth_routing"]["models"] = {
+            "missing-account-model": "deleted-account",
+            "other": "OpenAI Subscribe",
+        }
+        self.conf["provider"].extend(
+            [
+                {"id": "new-model", "provider_source_id": "OpenAI Subscribe"},
+                {
+                    "id": "missing-account-model",
+                    "provider_source_id": "OpenAI Subscribe",
+                },
+                {"id": "other", "provider_source_id": "deepseek"},
+            ]
+        )
+        before = deepcopy(self.conf["provider"])
+        await self.registry.migrate()
+        self.assertEqual(self.conf["provider"], before)
+
+    async def test_failed_upgrade_rolls_back_recovery_and_retries(self):
+        self.pre_repair_gateway()
+        before = deepcopy(self.conf)
+        with (
+            patch.object(
+                self.conf, "save_config_async", new=AsyncMock(side_effect=OSError)
+            ),
+            self.assertRaises(fixtures.store.CredentialPersistenceError),
+        ):
+            await self.registry.migrate()
+        self.assertEqual(self.conf, before)
+        await self.registry.migrate()
+        self.assertEqual(self.conf["provider"][0]["timeout"], 240)
+        snapshot = deepcopy(self.conf)
+        saves = self.conf.saved
+        await self.registry.migrate()
+        self.assertEqual(self.conf, snapshot)
+        self.assertEqual(self.conf.saved, saves)
+
     async def test_stale_source_save_preserves_added_account_rotation_and_routing(self):
         await self.registry.migrate()
         stale = deepcopy(self.registry.gateway())
