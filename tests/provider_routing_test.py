@@ -16,13 +16,30 @@ sys.path.insert(0, str(Path(__file__).parent))
 import httpx
 from local_codex_test import Config, jwt, local, store
 from login_test import payload, plugin, request_context
-from openai import BadRequestError
+from openai import BadRequestError, PermissionDeniedError
 
 oauth = importlib.import_module(f"{plugin.__package__}.src.oauth")
 provider_module = importlib.import_module(f"{plugin.__package__}.src.provider")
 provider_routing = importlib.import_module(f"{plugin.__package__}.src.provider_routing")
 runtime = importlib.import_module(f"{plugin.__package__}.src.runtime")
 web_api = importlib.import_module(f"{plugin.__package__}.src.web_api")
+
+FORBIDDEN_BODIES = (
+    {"text": "<html><body>Forbidden</body></html>"},
+    {"json": {"error": {"code": "unsupported_country_region_territory"}}},
+    {"json": ["unsupported_country_region_territory"]},
+    {"json": "Forbidden"},
+    {"content": "null"},
+    {"json": {"error": ["Forbidden"]}},
+)
+AUTH_FAILURES = (
+    (401, {"text": "<html>Unauthorized</html>"}),
+    (401, {"json": ["Unauthorized"]}),
+    (403, {"json": {"error": {"code": "invalid_token"}}}),
+    (403, {"json": {"error": {"code": "invalid_grant"}}}),
+    (400, {"json": {"code": "invalid_token"}}),
+    (400, {"json": {"error": "invalid_grant"}}),
+)
 
 
 class RoutingTests(unittest.IsolatedAsyncioTestCase):
@@ -112,6 +129,8 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.on_request = None
         self.on_sleep = None
         self.output = []
+        self.catalog_outcomes = []
+        self.catalog_requests = []
 
         async def handle(request):
             sid = request.headers["originator"]
@@ -120,6 +139,8 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
                 await self.on_request(sid)
             queue = self.outcomes.get(sid, [])
             outcome = queue.pop(0) if queue else "ok"
+            if isinstance(outcome, httpx.Response):
+                return outcome
             if outcome == "network":
                 raise httpx.ConnectError("connection failed", request=request)
             if outcome == "wait":
@@ -163,6 +184,21 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
             return client
 
         self.provider._create_http_client = transport
+
+        def catalog_handle(request):
+            self.catalog_requests.append(request)
+            if self.catalog_outcomes:
+                return self.catalog_outcomes.pop(0)
+            return httpx.Response(200, json={"models": [{"slug": "live-model"}]})
+
+        def catalog_client(name, proxy):
+            client = httpx.AsyncClient(transport=httpx.MockTransport(catalog_handle))
+            self.transports.append((proxy, client))
+            return client
+
+        patcher = patch.object(oauth, "create_proxy_client", new=catalog_client)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         async def sleep(_):
             if self.on_sleep:
@@ -333,6 +369,134 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(BadRequestError):
             await self.collect()
         self.assertEqual(self.requested(), ["local"])
+
+    async def test_plain_403_preserves_credentials_and_next_inference(self):
+        for source_id in ("local", "same"):
+            self.provider._source_id = source_id
+            for body in FORBIDDEN_BODIES:
+                with self.subTest(source=source_id, body=body):
+                    before = deepcopy(self.conf)
+                    login_before = deepcopy(self.login)
+                    views = {
+                        sid: self.coordinator.account_view(sid)
+                        for sid in ("local", "same", "other")
+                    }
+                    self.requests.clear()
+                    self.outcomes[source_id] = [httpx.Response(403, **body)]
+                    with self.assertRaises(PermissionDeniedError):
+                        await self.collect()
+                    self.assertEqual(self.requested(), [source_id])
+                    self.refresh.assert_not_awaited()
+                    self.assertEqual(self.conf, before)
+                    self.assertEqual(getattr(self.conf, "saved", 0), 0)
+                    self.assertEqual(self.login, login_before)
+                    self.assertEqual(
+                        {sid: self.coordinator.account_view(sid) for sid in views},
+                        views,
+                    )
+                    self.assertTrue(
+                        all(client.is_closed for _, client in self.transports)
+                    )
+                    await self.collect()
+                    self.assertEqual(self.requested(), [source_id, source_id])
+                    self.assertEqual(self.output[-1].completion_text, source_id)
+                    self.refresh.assert_not_awaited()
+
+    async def test_catalog_403_falls_back_without_affecting_inference(self):
+        for source_id in ("local", "same"):
+            self.provider._source_id = source_id
+            for body in FORBIDDEN_BODIES:
+                with self.subTest(source=source_id, body=body):
+                    before = deepcopy(self.conf)
+                    login_before = deepcopy(self.login)
+                    view = self.coordinator.account_view(source_id)
+                    self.catalog_requests.clear()
+                    self.catalog_outcomes = [httpx.Response(403, **body)]
+                    self.assertEqual(
+                        await self.provider.get_models(), oauth.CODEX_FALLBACK_MODELS
+                    )
+                    self.assertEqual(len(self.catalog_requests), 1)
+                    self.refresh.assert_not_awaited()
+                    self.assertEqual(self.conf, before)
+                    self.assertEqual(getattr(self.conf, "saved", 0), 0)
+                    self.assertEqual(self.login, login_before)
+                    self.assertEqual(self.coordinator.account_view(source_id), view)
+                    self.assertTrue(
+                        all(client.is_closed for _, client in self.transports)
+                    )
+                    self.requests.clear()
+                    await self.collect()
+                    self.assertEqual(self.requested(), [source_id])
+                    self.assertEqual(self.output[-1].completion_text, source_id)
+                    self.refresh.assert_not_awaited()
+
+    async def test_explicit_auth_failures_refresh_and_retry(self):
+        self.provider._source_id = "same"
+        for catalog in (False, True):
+            for status, body in AUTH_FAILURES:
+                with self.subTest(catalog=catalog, status=status, body=body):
+                    token = self.coordinator._read_snapshot("same").access_token
+                    self.refresh.reset_mock()
+                    if catalog:
+                        self.catalog_requests.clear()
+                        self.catalog_outcomes = [httpx.Response(status, **body)]
+                        self.assertEqual(
+                            await self.provider.get_models(), ["live-model"]
+                        )
+                        requests = self.catalog_requests
+                    else:
+                        self.requests.clear()
+                        self.outcomes["same"] = [httpx.Response(status, **body)]
+                        await self.collect()
+                        self.assertEqual(self.output[-1].completion_text, "same")
+                        requests = [request for _, request in self.requests]
+                    self.refresh.assert_awaited_once()
+                    self.assertEqual(len(requests), 2)
+                    self.assertEqual(
+                        [request.headers["authorization"] for request in requests],
+                        ["Bearer " + token, "Bearer " + token + "-new"],
+                    )
+                    self.assertEqual(
+                        self.coordinator.account_view("same")["status"], "ready"
+                    )
+                    self.assertTrue(
+                        all(client.is_closed for _, client in self.transports)
+                    )
+
+    async def test_repeated_invalid_token_requires_reauthentication(self):
+        self.provider._source_id = "same"
+        self.outcomes["same"] = [
+            httpx.Response(403, json={"error": {"code": "invalid_token"}})
+            for _ in range(2)
+        ]
+        with self.assertRaises(store.ReauthenticationRequiredError):
+            await self.collect()
+        self.assertEqual(self.requested(), ["same", "same"])
+        self.refresh.assert_awaited_once()
+        with self.assertRaises(store.ReauthenticationRequiredError):
+            await self.collect()
+        self.assertEqual(self.requested(), ["same", "same"])
+        self.assertEqual(
+            self.coordinator.account_view("same")["status"], "reauth_required"
+        )
+        self.assertTrue(all(client.is_closed for _, client in self.transports))
+
+    async def test_catalog_invalid_grant_refresh_failure_requires_reauthentication(
+        self,
+    ):
+        self.provider._source_id = "same"
+        self.catalog_outcomes = [httpx.Response(400, json={"error": "invalid_grant"})]
+        self.refresh.side_effect = RuntimeError("refresh rejected")
+        self.assertEqual(await self.provider.get_models(), oauth.CODEX_FALLBACK_MODELS)
+        self.refresh.assert_awaited_once()
+        self.assertEqual(len(self.catalog_requests), 1)
+        self.assertEqual(
+            self.coordinator.account_view("same")["status"], "reauth_required"
+        )
+        with self.assertRaises(store.ReauthenticationRequiredError):
+            await self.collect()
+        self.assertEqual(self.requests, [])
+        self.assertTrue(all(client.is_closed for _, client in self.transports))
 
     async def test_output_then_failure_returns_terminal_error_without_replay(self):
         self.outcomes["local"] = ["partial"]

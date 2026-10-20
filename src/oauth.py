@@ -18,6 +18,7 @@ from typing import Any
 
 from astrbot import logger
 from astrbot.core.utils.network_utils import create_proxy_client, is_connection_error
+from httpx import HTTPStatusError
 from openai import APIConnectionError, APIError
 
 CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -171,9 +172,12 @@ async def fetch_models(
             headers=headers,
             timeout=10,
         )
-        if resp.status_code in (401, 403):
-            raise CredentialExpiredError()
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except HTTPStatusError as exc:
+            if classify_codex_error(exc) == "credential":
+                raise CredentialExpiredError() from exc
+            raise
         return extract_model_ids(resp.json())
     finally:
         await client.aclose()
@@ -188,7 +192,7 @@ class DeviceAuthTimeout(DeviceAuthError):
 
 
 class CredentialExpiredError(Exception):
-    """访问令牌已失效（HTTP 401/403），需要重新登录。"""
+    """The upstream rejected the access token; credential recovery is required."""
 
 
 def _status_code(error: BaseException) -> int | None:
@@ -205,11 +209,18 @@ def _error_details(error: BaseException) -> tuple[str, str]:
     code = getattr(error, "code", "")
     message = ""
     body = getattr(error, "body", None)
+    if body is None and isinstance(error, HTTPStatusError):
+        try:
+            body = error.response.json()
+        except ValueError:
+            pass
     if isinstance(body, dict):
         nested = body.get("error")
         payload = nested if isinstance(nested, dict) else body
-        code = payload.get("code", code)
+        code = payload.get("code", nested if isinstance(nested, str) else code)
         message = payload.get("message", "")
+    elif isinstance(body, str) and body.lower() in {"invalid_grant", "invalid_token"}:
+        code = body
     if not message:
         message = str(error)
     return str(code or "").lower(), str(message or "").lower()
@@ -221,7 +232,7 @@ def classify_codex_error(error: BaseException) -> str:
         return "temporary"
     status_code = _status_code(error)
     code, message = _error_details(error)
-    if status_code in {401, 403} or code in {"invalid_grant", "invalid_token"}:
+    if status_code == 401 or code in {"invalid_grant", "invalid_token"}:
         return "credential"
     if code == "usage_limit_reached" or (
         status_code == 429
