@@ -22,6 +22,8 @@ module = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.main"
 effort = importlib.import_module(f"{module.__package__}.src.effort")
 oauth = importlib.import_module(f"{module.__package__}.src.oauth")
 provider_module = importlib.import_module(f"{module.__package__}.src.provider")
+from astrbot.api.event import MessageChain
+
 runtime = importlib.import_module(f"{module.__package__}.src.runtime")
 store = importlib.import_module(
     "data.plugins.astrbot_plugin_openai_oauth.src.credential_store"
@@ -435,7 +437,7 @@ def test_session_effort_request_override() -> None:
         captured_efforts.append(session_effort)
         yield provider_module.LLMResponse(
             "assistant",
-            result_chain=provider_module.MessageChain().message("ok"),
+            result_chain=MessageChain().message("ok"),
         )
 
     provider._stream_with_current_credentials = stream_with_captured_effort
@@ -494,7 +496,7 @@ def test_pre_stream_credential_recovery() -> None:
         if calls == 1:
             raise _UnauthorizedError()
         yield provider_module.LLMResponse(
-            "assistant", result_chain=provider_module.MessageChain().message("ok")
+            "assistant", result_chain=MessageChain().message("ok")
         )
 
     async def refresh(creds: dict, proxy: str | None) -> dict:
@@ -550,7 +552,7 @@ def test_stream_is_not_replayed_after_output() -> None:
         calls += 1
         yield provider_module.LLMResponse(
             "assistant",
-            result_chain=provider_module.MessageChain().message("partial"),
+            result_chain=MessageChain().message("partial"),
             is_chunk=True,
         )
         raise _UnauthorizedError()

@@ -7,7 +7,9 @@ The implementation lives in the internal `src/` package, loaded by AstrBot throu
 relative imports:
 
 - `runtime.py`: shared configuration and credential coordination.
-- `provider.py`: model adaptation, streaming, retries, and source routing.
+- `provider.py`: the AstrBot provider: credentials, retries, and source routing.
+- `codex_request.py`, `codex_stream.py`, and `transport_pool.py`: Codex request
+  shaping, Responses stream parsing, and per-account HTTP transports.
 - `oauth.py` and `login.py`: OAuth protocol, login sessions, and task cleanup.
 - `web_api.py`: WebUI endpoints.
 - `usage.py` and `effort.py`: allowance queries and conversation reasoning settings.
@@ -15,7 +17,7 @@ relative imports:
   `provider_registry.py`, and `provider_routing.py`: credentials, encryption at
   rest, account sources, and routing rules.
 
-WebUI assets live in `pages/providers/`. Plugin metadata and configuration descriptions
+WebUI assets live in `pages/providers/`; translations are in `strings.js`. Plugin metadata and configuration descriptions
 stay at the repository root. See [routing API](provider-routing-api.md) for dispatch
 rules and [screenshot notes](../images/README.md) for image provenance.
 

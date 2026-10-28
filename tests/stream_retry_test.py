@@ -23,6 +23,7 @@ module = importlib.import_module(f"{PLUGIN_ROOT.name}.main")
 credential_store = importlib.import_module(f"{module.__package__}.src.credential_store")
 oauth = importlib.import_module(f"{module.__package__}.src.oauth")
 provider_module = importlib.import_module(f"{module.__package__}.src.provider")
+codex_request = importlib.import_module(f"{module.__package__}.src.codex_request")
 
 OVERLOAD = {
     "error": {
@@ -157,10 +158,9 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_reasoning_off_requests_no_reasoning_state(self):
-        provider = object.__new__(module.ProviderOpenAICodex)
         payloads = {"reasoning": {"effort": "none"}, "include": ["x"]}
         extra_body = {}
-        provider._request_reasoning_state(payloads, extra_body)
+        codex_request.request_reasoning_state(payloads, extra_body)
         self.assertEqual(extra_body, {"reasoning": {"effort": "none"}})
         self.assertEqual(payloads, {"include": ["x"]})
 
@@ -274,7 +274,7 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(requests[0]["service_tier"], "priority")
 
     def test_prompt_cache_key_is_stable_per_conversation(self):
-        key = module.ProviderOpenAICodex._prompt_cache_key
+        key = codex_request.prompt_cache_key
         payload = {"model": "m", "input": [{"role": "user", "content": "hi"}]}
         self.assertEqual(key("umo:1", payload), key("umo:1", {"model": "m"}))
         self.assertNotEqual(key("umo:1", payload), key("umo:2", payload))

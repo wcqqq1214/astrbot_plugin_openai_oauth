@@ -1,21 +1,17 @@
-"""Codex provider adapter, response streaming, retries, and source routing."""
+"""Codex provider adapter: credentials, retries and account routing."""
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import time
 from collections.abc import AsyncGenerator, Callable
 from contextlib import aclosing, asynccontextmanager
 from copy import deepcopy
 from typing import Any
 
-import astrbot.core.message.components as Comp
 from astrbot import logger
-from astrbot.api.event import MessageChain
-from astrbot.core.exceptions import EmptyModelOutputError
-from astrbot.core.provider.entities import LLMResponse, TokenUsage
+from astrbot.core.provider.entities import LLMResponse
 from astrbot.core.provider.register import (
     provider_cls_map,
     register_provider_adapter,
@@ -30,8 +26,9 @@ from astrbot.core.provider.sources.request_retry import (
 )
 from astrbot.core.utils.config_number import coerce_int_config
 
-from . import effort, oauth, runtime
+from . import codex_request, effort, oauth, runtime
 from . import usage as usage_service
+from .codex_stream import CodexStreamMixin
 from .credential_store import (
     CredentialCooldownError,
     CredentialError,
@@ -56,31 +53,7 @@ from .provider_routing import (
     RoutingBudgetError,
     RoutingExhaustedError,
 )
-
-# The ChatGPT backend rejects sampling knobs, output limits and explicit cache
-# options that the public Responses API accepts. Codex never sends them.
-_UNSUPPORTED_REQUEST_PARAMS = (
-    "max_output_tokens",
-    "max_tokens",
-    "max_completion_tokens",
-    "temperature",
-    "top_p",
-    "user",
-    "safety_identifier",
-    "prompt_cache_options",
-)
-# Codex's Fast mode sends "priority" and Ultrafast sends "ultrafast".
-_SUPPORTED_SERVICE_TIERS = frozenset({"priority", "ultrafast"})
-# Call IDs from other providers can exceed the backend's 64-character limit.
-_CALL_ID_LIMIT = 64
-_reported_unsupported_params: set[str] = set()
-
-
-def _bound_call_id(call_id: Any) -> Any:
-    """Shorten an oversized call ID the same way on every request."""
-    if not isinstance(call_id, str) or len(call_id) <= _CALL_ID_LIMIT:
-        return call_id
-    return hashlib.sha256(call_id.strip().encode()).hexdigest()
+from .transport_pool import TransportPool
 
 
 def _attempt_limit(request_max_retries: int | None) -> int:
@@ -93,86 +66,6 @@ def _attempt_limit(request_max_retries: int | None) -> int:
         source="OpenAI Codex",
         warn=request_max_retries is not None,
     )
-
-
-def _drop_unsupported_params(*bodies: dict[str, Any]) -> None:
-    dropped: set[str] = set()
-    for body in bodies:
-        for key in _UNSUPPORTED_REQUEST_PARAMS:
-            if key in body:
-                body.pop(key)
-                dropped.add(key)
-        tier = body.get("service_tier")
-        if tier is not None and tier not in _SUPPORTED_SERVICE_TIERS:
-            body.pop("service_tier")
-            dropped.add("service_tier")
-    new = dropped - _reported_unsupported_params
-    if new:
-        _reported_unsupported_params.update(new)
-        logger.warning(
-            "OpenAI Codex ignores request parameters it does not support: %s",
-            ", ".join(sorted(new)),
-        )
-
-
-class _PooledTransport:
-    __slots__ = ("client", "fingerprint", "retired", "users")
-
-    def __init__(self, fingerprint: tuple[str, str], client: Any) -> None:
-        self.fingerprint = fingerprint
-        self.client = client
-        self.users = 0
-        self.retired = False
-
-
-class _TransportPool:
-    """Reuse one HTTP transport per account source between requests.
-
-    Reusing a transport keeps its TCP and TLS connections alive. Each source
-    gets its own transport, so cookies set for one account never travel with
-    another. A transport is replaced when its account or proxy changes and is
-    closed once the requests still using it finish.
-    """
-
-    def __init__(self) -> None:
-        self._entries: dict[str, _PooledTransport] = {}
-
-    @property
-    def clients(self) -> list[Any]:
-        return [entry.client for entry in self._entries.values()]
-
-    @asynccontextmanager
-    async def lease(
-        self,
-        source_id: str,
-        fingerprint: tuple[str, str],
-        create: Callable[[], Any],
-    ):
-        entry = self._entries.get(source_id)
-        if entry is None or entry.fingerprint != fingerprint or entry.client.is_closed:
-            if entry is not None:
-                await self._retire(entry)
-            entry = _PooledTransport(fingerprint, create())
-            self._entries[source_id] = entry
-        entry.users += 1
-        try:
-            yield entry.client
-        finally:
-            entry.users -= 1
-            if entry.retired and entry.users == 0:
-                await entry.client.aclose()
-
-    async def _retire(self, entry: _PooledTransport) -> None:
-        entry.retired = True
-        if entry.users == 0:
-            await entry.client.aclose()
-
-    async def close(self) -> None:
-        entries = list(self._entries.values())
-        self._entries.clear()
-        for entry in entries:
-            entry.retired = True
-            await entry.client.aclose()
 
 
 def _register_provider_adapter_if_absent(cls: type) -> type:
@@ -194,7 +87,7 @@ def _register_provider_adapter_if_absent(cls: type) -> type:
 
 
 @_register_provider_adapter_if_absent
-class ProviderOpenAICodex(ProviderOpenAIResponses):
+class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
     """ChatGPT subscription provider backed by the Codex OAuth flow.
 
     The key field holds a credential JSON blob:
@@ -263,10 +156,10 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         return [self._bootstrap_access_token]
 
     @property
-    def _transport_pool(self) -> _TransportPool:
+    def _transport_pool(self) -> TransportPool:
         pool = self.__dict__.get("_transports")
         if pool is None:
-            pool = self.__dict__["_transports"] = _TransportPool()
+            pool = self.__dict__["_transports"] = TransportPool()
         return pool
 
     async def terminate(self) -> None:
@@ -390,36 +283,6 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                 http_client=transport,
             )
 
-    @staticmethod
-    def _prompt_cache_key(session_id: Any, payloads: dict[str, Any]) -> str | None:
-        """Name the conversation so the backend reuses its cached prompt prefix.
-
-        Codex sends its thread ID. An AstrBot session is the closest stable
-        equivalent and survives context truncation; without one, the start of
-        the conversation (instructions and input up to the first user message),
-        which every later turn repeats, identifies it. Only a hash is sent.
-        """
-        digest = hashlib.sha256()
-        if isinstance(session_id, str) and session_id:
-            digest.update(b"astrbot-session\0")
-            digest.update(session_id.encode())
-            digest.update(b"\0")
-            digest.update(str(payloads.get("model", "")).encode())
-        else:
-            digest.update(str(payloads.get("instructions", "")).encode())
-            found_user = False
-            for item in payloads.get("input") or []:
-                digest.update(
-                    json.dumps(item, sort_keys=True, ensure_ascii=False).encode()
-                )
-                if isinstance(item, dict) and item.get("role") == "user":
-                    found_user = True
-                    break
-            if not found_user:
-                return None
-        value = digest.hexdigest()
-        return f"{value[:8]}-{value[8:12]}-{value[12:16]}-{value[16:20]}-{value[20:32]}"
-
     def _convert_chat_messages_to_response_input(
         self, messages: list[dict]
     ) -> list[dict]:
@@ -430,20 +293,9 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         content. The backend also rejects role "system" in input; "developer"
         carries the same meaning.
         """
-        shaped: list[dict] = []
-        for item in super()._convert_chat_messages_to_response_input(messages):
-            item_type = item.get("type")
-            if item_type == "reasoning" and not item.get("encrypted_content"):
-                continue
-            item.pop("id", None)
-            if item_type in {None, "message", "reasoning"}:
-                item.pop("status", None)
-            if "call_id" in item:
-                item["call_id"] = _bound_call_id(item["call_id"])
-            if item_type in {None, "message"} and item.get("role") == "system":
-                item["role"] = "developer"
-            shaped.append(item)
-        return shaped
+        return codex_request.shape_replayed_input(
+            super()._convert_chat_messages_to_response_input(messages)
+        )
 
     async def _query_stream(
         self,
@@ -477,7 +329,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
             if key not in self.default_params:
                 extra_body[key] = payloads.pop(key)
 
-        _drop_unsupported_params(payloads, extra_body)
+        codex_request.drop_unsupported_params(payloads, extra_body)
         effective_session_effort = effort.normalize_effort(session_effort)
         supported = oauth.supported_efforts(payloads.get("model"))
         if (
@@ -504,7 +356,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
             reasoning_effort = extra_body.pop("reasoning_effort", None)
             if reasoning_effort is not None and "reasoning" not in extra_body:
                 extra_body["reasoning"] = {"effort": reasoning_effort}
-        self._request_reasoning_state(payloads, extra_body)
+        codex_request.request_reasoning_state(payloads, extra_body)
         extra_body.pop("previous_response_id", None)
         extra_body.pop("conversation", None)
         extra_body.pop("store", None)
@@ -517,11 +369,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         cache_key = extra_body.get("prompt_cache_key") or payloads.get(
             "prompt_cache_key"
         )
-        session_headers = (
-            {"session-id": cache_key, "thread-id": cache_key}
-            if isinstance(cache_key, str) and cache_key
-            else {}
-        )
+        session_headers = codex_request.session_headers(cache_key)
 
         max_attempts = _attempt_limit(request_max_retries)
         attempts = 0
@@ -572,270 +420,6 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                 delay,
             )
             await asyncio.sleep(delay)
-
-    @staticmethod
-    def _request_reasoning_state(
-        payloads: dict[str, Any], extra_body: dict[str, Any]
-    ) -> None:
-        """Ask for reasoning the way Codex does, unless reasoning is off.
-
-        With ``store`` disabled, the encrypted reasoning content is the only
-        way to carry reasoning into the next turn or tool call. A summary lets
-        the reasoning stream instead of arriving silently.
-        """
-        reasoning = extra_body.get("reasoning")
-        if not isinstance(reasoning, dict):
-            reasoning = payloads.pop("reasoning", None)
-            reasoning = dict(reasoning) if isinstance(reasoning, dict) else {}
-        if reasoning.get("effort") == "none":
-            if reasoning:
-                extra_body["reasoning"] = reasoning
-            return
-        reasoning.setdefault("summary", "auto")
-        extra_body["reasoning"] = reasoning
-        include = extra_body.get("include", payloads.pop("include", None))
-        include = list(include) if isinstance(include, (list, tuple)) else []
-        if "reasoning.encrypted_content" not in include:
-            include.append("reasoning.encrypted_content")
-        extra_body["include"] = include
-
-    @staticmethod
-    def _response_with_output(
-        response: Any, response_id: str | None, items: dict[int, Any]
-    ) -> dict[str, Any]:
-        """Give a terminal response the output items its stream delivered.
-
-        Codex completes with an empty ``output`` list; the items arrive in
-        ``response.output_item.done`` events instead.
-        """
-
-        def field(name: str) -> Any:
-            if isinstance(response, dict):
-                return response.get(name)
-            return getattr(response, name, None)
-
-        return {
-            "id": field("id") or response_id,
-            "status": field("status"),
-            "incomplete_details": field("incomplete_details"),
-            "usage": field("usage"),
-            "output": [items[index] for index in sorted(items)],
-        }
-
-    async def _consume_stream(
-        self, stream: Any, tools: Any
-    ) -> AsyncGenerator[LLMResponse, None]:
-        """Keep partial response state scoped to a single stream attempt."""
-        response_id: str | None = None
-        text_parts: list[str] = []
-        # Deltas are fragments of one text; a new item or summary part starts
-        # a new segment, matching how complete responses separate them.
-        reasoning_parts: list[str] = []
-        reasoning_segment: tuple[Any, Any, Any] | None = None
-        function_calls: list[dict] = []
-        output_items: dict[int, Any] = {}
-
-        async for event in stream:
-            event_type = self._field(event, "type", "")
-            event_response = self._field(event, "response")
-            if event_response is not None:
-                response_id = self._field(event_response, "id", response_id)
-
-            if event_type == "error":
-                code = self._field(event, "code", "stream_error")
-                raise RuntimeError(
-                    f"Responses API stream failed: {code}. response_id={response_id}"
-                )
-
-            if event_type in {"response.output_text.delta", "response.refusal.delta"}:
-                delta = self._field(event, "delta", "")
-                if delta:
-                    text_parts.append(str(delta))
-                    yield LLMResponse(
-                        "assistant",
-                        result_chain=MessageChain(chain=[Comp.Plain(str(delta))]),
-                        is_chunk=True,
-                        id=response_id,
-                    )
-                continue
-
-            if event_type in {
-                "response.reasoning_text.delta",
-                "response.reasoning_summary_text.delta",
-            }:
-                delta = self._field(event, "delta", "")
-                if delta:
-                    segment = (
-                        self._field(event, "item_id"),
-                        self._field(event, "summary_index"),
-                        self._field(event, "content_index"),
-                    )
-                    if not reasoning_parts or segment != reasoning_segment:
-                        reasoning_parts.append("")
-                        reasoning_segment = segment
-                    reasoning_parts[-1] += str(delta)
-                    yield LLMResponse(
-                        "assistant",
-                        reasoning_content=str(delta),
-                        is_chunk=True,
-                        id=response_id,
-                    )
-                continue
-
-            if event_type == "response.output_item.done":
-                item = self._field(event, "item")
-                if item is not None:
-                    index = self._field(event, "output_index")
-                    if isinstance(index, bool) or not isinstance(index, int):
-                        index = max(output_items, default=-1) + 1
-                    output_items[index] = item
-                continue
-
-            if event_type == "response.output_item.added":
-                item = self._field(event, "item")
-                if self._field(item, "type") == "function_call":
-                    arguments = self._field(item, "arguments", "")
-                    if isinstance(arguments, dict):
-                        arguments = json.dumps(arguments, ensure_ascii=False)
-                    function_calls.append(
-                        {
-                            "item_id": self._field(item, "id"),
-                            "call_id": str(self._field(item, "call_id", "") or ""),
-                            "name": str(self._field(item, "name", "") or ""),
-                            "arguments": str(arguments or ""),
-                        }
-                    )
-                continue
-
-            if event_type == "response.function_call_arguments.delta":
-                # Parallel calls stream their arguments by item ID.
-                item_id = self._field(event, "item_id")
-                call = next(
-                    (c for c in function_calls if item_id and c["item_id"] == item_id),
-                    function_calls[-1] if function_calls else None,
-                )
-                if call is not None:
-                    call["arguments"] += str(self._field(event, "delta", "") or "")
-                continue
-
-            if event_type in {
-                "response.completed",
-                "response.incomplete",
-                "response.failed",
-            }:
-                if event_response is not None:
-                    status = self._field(event_response, "status")
-                    if status == "failed":
-                        error = self._field(event_response, "error")
-                        code = self._field(error, "code", "unknown_error")
-                        raise RuntimeError(
-                            f"Responses API request failed: {code}. "
-                            f"response_id={response_id}"
-                        )
-                    if (
-                        self._field(
-                            self._field(event_response, "incomplete_details"),
-                            "reason",
-                        )
-                        == "content_filter"
-                    ):
-                        raise RuntimeError(
-                            "Responses API output was rejected by the provider "
-                            f"content filter. response_id={response_id}"
-                        )
-                    if self._field(event_response, "output"):
-                        yield await self._parse_response(event_response, tools)
-                        return
-                    if output_items:
-                        try:
-                            parsed = await self._parse_response(
-                                self._response_with_output(
-                                    event_response, response_id, output_items
-                                ),
-                                tools,
-                            )
-                        except EmptyModelOutputError:
-                            parsed = None
-                        if parsed is not None:
-                            yield parsed
-                            return
-                final = self._assemble_streamed_response(
-                    response_id,
-                    text_parts,
-                    reasoning_parts,
-                    function_calls,
-                    usage=self._extract_response_usage(event_response),
-                )
-                if final is not None:
-                    yield final
-                    return
-                raise EmptyModelOutputError(
-                    f"Responses stream returned no usable output. "
-                    f"response_id={response_id}"
-                )
-
-        raise EmptyModelOutputError(
-            f"Responses stream ended without a terminal event. response_id={response_id}"
-        )
-
-    def _assemble_streamed_response(
-        self,
-        response_id: str | None,
-        text_parts: list[str],
-        reasoning_parts: list[str],
-        function_calls: list[dict],
-        usage: TokenUsage | None = None,
-    ) -> LLMResponse | None:
-        """Build a final LLMResponse from streamed deltas like ``_parse_response``."""
-        llm_response = LLMResponse("assistant", id=response_id)
-        llm_response.usage = usage if usage is not None else TokenUsage()
-        completion_text = "".join(text_parts)
-        if completion_text:
-            llm_response.result_chain = MessageChain().message(completion_text)
-        if reasoning_parts:
-            llm_response.reasoning_content = "\n".join(reasoning_parts)
-        for call in function_calls:
-            arguments = call["arguments"]
-            if isinstance(arguments, str):
-                try:
-                    parsed = json.loads(arguments)
-                except json.JSONDecodeError:
-                    parsed = {}
-            elif arguments is None:
-                parsed = {}
-            else:
-                parsed = arguments
-            llm_response.tools_call_args.append(parsed)
-            llm_response.tools_call_name.append(call["name"])
-            llm_response.tools_call_ids.append(call["call_id"])
-        if llm_response.tools_call_args:
-            llm_response.role = "tool"
-        has_text = bool((llm_response.completion_text or "").strip())
-        has_reasoning = bool((llm_response.reasoning_content or "").strip())
-        if not has_text and not has_reasoning and not llm_response.tools_call_args:
-            return None
-        return llm_response
-
-    def _extract_response_usage(self, response: Any) -> TokenUsage | None:
-        """Extract usage from a terminal Responses event.
-
-        Codex may send the completed response with an empty ``output`` list while
-        the actual text arrived through delta events. In that case the base
-        Responses parser is intentionally skipped, so preserve the usage here.
-        """
-        usage = self._field(response, "usage")
-        if usage is None:
-            return None
-
-        input_details = self._field(usage, "input_tokens_details")
-        cached_tokens = self._field(input_details, "cached_tokens", 0) or 0
-        input_tokens = self._field(usage, "input_tokens", 0) or 0
-        output_tokens = self._field(usage, "output_tokens", 0) or 0
-        return TokenUsage(
-            input_other=max(input_tokens - cached_tokens, 0),
-            input_cached=cached_tokens,
-            output=output_tokens,
-        )
 
     async def get_models(self) -> list[str]:
         try:
@@ -1176,7 +760,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
             isinstance(custom_extra_body, dict)
             and custom_extra_body.get("prompt_cache_key")
         ):
-            cache_key = self._prompt_cache_key(session_id, payloads)
+            cache_key = codex_request.prompt_cache_key(session_id, payloads)
             if cache_key:
                 payloads.setdefault("prompt_cache_key", cache_key)
         session_effort = await effort.get_session_effort(session_id)

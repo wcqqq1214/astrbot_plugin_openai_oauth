@@ -23,6 +23,7 @@ provider_module = importlib.import_module(f"{plugin.__package__}.src.provider")
 provider_routing = importlib.import_module(f"{plugin.__package__}.src.provider_routing")
 runtime = importlib.import_module(f"{plugin.__package__}.src.runtime")
 usage_service = importlib.import_module(f"{plugin.__package__}.src.usage")
+codex_request = importlib.import_module(f"{plugin.__package__}.src.codex_request")
 web_api = importlib.import_module(f"{plugin.__package__}.src.web_api")
 
 FETCH_RATE_LIMITS = oauth.fetch_rate_limits
@@ -507,7 +508,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.output.append(item)
         request = self.requests[-1][1]
-        key = self.provider._prompt_cache_key(
+        key = codex_request.prompt_cache_key(
             "platform:FriendMessage:42", {"model": "test-model"}
         )
         self.assertEqual(json.loads(request.content)["prompt_cache_key"], key)
