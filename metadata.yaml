@@ -2,7 +2,7 @@ name: astrbot_plugin_openai_oauth # 插件唯一识别名，以 astrbot_plugin_ 
 display_name: OpenAI 订阅登录 # 用于展示的名字
 short_desc: 用 ChatGPT 订阅在 AstrBot 聊天，无需 API Key。 # 紧凑 UI 使用的短描述
 desc: 支持本地 Codex 登录和设备码登录，可管理多个账号、查看剩余额度。开启自动回退后，账号不可用时会尝试备用账号。
-version: 2.2.0
+version: 2.3.0
 author: wcqqq1214
 repo: https://github.com/wcqqq1214/astrbot_plugin_openai_oauth
 tags:

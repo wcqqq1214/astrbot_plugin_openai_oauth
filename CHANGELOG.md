@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v2.3.0] - 2026-10-28
+
 ### Added
 
 - Send a stable `prompt_cache_key` and Codex's session headers per AstrBot session so long conversations reuse the backend's cached prompt, saving allowance and first-token latency.
@@ -21,6 +23,8 @@
 
 ### Fixed
 
+- Migrate legacy credential lists and dictionaries to encrypted storage alongside string records.
+- Once a chat login starts saving an authorized account, cancellation reports that saving is in progress and plugin unload waits for it to finish, keeping in-memory and on-disk configuration consistent.
 - Join streamed reasoning fragments without inserting a line break between every fragment.
 - Treat only explicit authentication failures from the allowance endpoint as expired credentials; a plain HTTP 403 no longer asks you to sign in again.
 - Refresh the token once and retry when the allowance endpoint rejects a token before its own expiry.
