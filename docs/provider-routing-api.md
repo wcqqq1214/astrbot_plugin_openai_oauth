@@ -192,8 +192,10 @@ Auto mode shares `request_max_retries` across **all inference HTTP attempts**
 (AstrBot default: 5). Each temporary-retry batch uses at most 2 attempts; credential
 refresh does not reset the shared budget. Credential and quota control-plane
 calls are outside that attempt counter but inside a shared 120-second startup
-deadline. Once output starts the startup deadline is removed, and the normal
-transport timeout applies. Fixed mode retains its existing retry policy.
+deadline. Once a source opens its response stream the startup deadline is removed,
+so a model may reason for longer before its first delta, and the normal transport
+timeout applies. If that source still fails before output, the next source gets a
+fresh 120-second window. Fixed mode retains its existing retry policy.
 
 When auto mode exhausts candidates, `RoutingExhaustedError` reports source IDs and
 safe reason codes (`disabled`, `cooling`, `reauth_required`, `not_logged_in`,
