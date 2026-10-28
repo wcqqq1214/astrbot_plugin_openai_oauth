@@ -46,7 +46,6 @@ from .oauth import (
     CODEX_BASE,
     CODEX_FALLBACK_MODELS,
     DEFAULT_ORIGINATOR,
-    DEFAULT_USER_AGENT,
     CredentialExpiredError,
 )
 from .provider_routing import (
@@ -116,7 +115,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
             )
         self._source_id = str(source_id or runtime._PROVIDER_TYPE)
         self._originator = str(provider_config.get("originator", DEFAULT_ORIGINATOR))
-        self._user_agent = str(provider_config.get("user_agent", DEFAULT_USER_AGENT))
+        self._user_agent = oauth.resolve_user_agent(provider_config.get("user_agent"))
         raw_headers = provider_config.get("custom_headers")
         self._static_headers = (
             {
@@ -226,12 +225,20 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         headers = (
             {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
         )
-        reserved = {"authorization", "chatgpt-account-id", "originator", "user-agent"}
+        reserved = {
+            "authorization",
+            "chatgpt-account-id",
+            "originator",
+            "user-agent",
+            "version",
+        }
         headers = {k: v for k, v in headers.items() if k.lower() not in reserved}
+        user_agent = oauth.resolve_user_agent(settings["user_agent"])
         headers.update(
             {
                 "originator": settings["originator"] or DEFAULT_ORIGINATOR,
-                "User-Agent": settings["user_agent"] or DEFAULT_USER_AGENT,
+                "User-Agent": user_agent,
+                "version": oauth.client_version_header(user_agent),
                 "OpenAI-Beta": "responses=experimental",
             }
         )
@@ -571,7 +578,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                     snapshot.account_id,
                     settings["proxy"],
                     settings["originator"] or DEFAULT_ORIGINATOR,
-                    settings["user_agent"] or DEFAULT_USER_AGENT,
+                    oauth.resolve_user_agent(settings["user_agent"]),
                 )
             except CredentialExpiredError:
                 snapshot = await coordinator.get_snapshot(
@@ -584,7 +591,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                     snapshot.account_id,
                     settings["proxy"],
                     settings["originator"] or DEFAULT_ORIGINATOR,
-                    settings["user_agent"] or DEFAULT_USER_AGENT,
+                    oauth.resolve_user_agent(settings["user_agent"]),
                 )
             if models:
                 return models
@@ -616,7 +623,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                 snapshot.access_token,
                 snapshot.account_id,
                 settings["proxy"],
-                settings["user_agent"] or DEFAULT_USER_AGENT,
+                oauth.resolve_user_agent(settings["user_agent"]),
             ),
             retry_rate_limits=False,
             max_attempts=2,

@@ -15,7 +15,6 @@ from .local_codex import LocalCredentialCoordinator as CredentialCoordinator
 from .oauth import (
     CODEX_BASE,
     DEFAULT_ORIGINATOR,
-    DEFAULT_USER_AGENT,
 )
 
 _REFRESH_SKEW_SECONDS = 120
@@ -38,7 +37,8 @@ def _build_default_source_config() -> dict[str, Any]:
         "api_base": CODEX_BASE,
         "proxy": "",
         "originator": DEFAULT_ORIGINATOR,
-        "user_agent": DEFAULT_USER_AGENT,
+        # Empty follows the Codex version this plugin and local Codex name.
+        "user_agent": "",
         "id": _PROVIDER_TYPE,
         "enable": True,
     }
@@ -120,6 +120,7 @@ def configure(context: Context, config: AstrBotConfig) -> None:
         fields[key] = {"type": field_type, "invisible": True}
     _config_mgr = context.astrbot_config_mgr
     _local_codex_store = LocalCodexStore(str(config.get("codex_auth_path", "") or ""))
+    oauth.set_codex_home(_local_codex_store.path.parent)
     coordinator = _get_credential_coordinator()
     _remove_source_guard = source_editor.install(coordinator)
     coordinator.legacy_follow_local = config.get("follow_local_codex", True)

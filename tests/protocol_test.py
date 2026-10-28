@@ -93,7 +93,15 @@ def test_models() -> None:
         == ["gpt-main", "gpt-late", "named-only"],
         "each catalog entry contributes one visible ID in priority order",
     )
-    check(url.endswith("/models?client_version=1.0.0"), "models endpoint is stable")
+    check(url.endswith("/models"), "models endpoint is stable")
+    check(
+        kwargs["params"] == {"client_version": oauth.codex_client_version()},
+        "catalog query names the Codex client version",
+    )
+    check(
+        kwargs["headers"]["version"] == oauth.codex_client_version(),
+        "catalog request names the Codex version header",
+    )
     check(
         kwargs["headers"]["originator"] == "originator-test", "originator is forwarded"
     )
@@ -102,6 +110,55 @@ def test_models() -> None:
         "source user agent is forwarded",
     )
     check(client.closed, "models client closes")
+
+
+def test_client_identity() -> None:
+    print("\n=== Codex client identity ===")
+    import json
+    import tempfile
+    from pathlib import Path
+
+    legacy = "codex_cli_rs/0.0.0 (astrbot-plugin-openai-oauth)"
+    with tempfile.TemporaryDirectory() as home:
+        oauth.set_codex_home(home)
+        try:
+            default = oauth.default_user_agent()
+            check(
+                default.startswith(f"codex_cli_rs/{oauth.CODEX_CLIENT_VERSION} ("),
+                "default User-Agent names the built-in Codex version",
+            )
+            check(
+                oauth.resolve_user_agent(legacy) == default,
+                "the old placeholder User-Agent follows the current default",
+            )
+            check(oauth.resolve_user_agent("") == default, "empty uses the default")
+            check(
+                oauth.resolve_user_agent(" custom/1 ") == "custom/1",
+                "a custom User-Agent is kept",
+            )
+            Path(home, "models_cache.json").write_text(
+                json.dumps({"client_version": "99.1.0", "models": []})
+            )
+            oauth.set_codex_home(home)
+            check(
+                oauth.codex_client_version() == "99.1.0",
+                "a newer local Codex catalog version is used",
+            )
+            check(
+                oauth.client_version_header(oauth.resolve_user_agent(legacy))
+                == "99.1.0",
+                "the version header matches the User-Agent",
+            )
+            Path(home, "models_cache.json").write_text(
+                json.dumps({"client_version": "0.1.0"})
+            )
+            oauth.set_codex_home(home)
+            check(
+                oauth.codex_client_version() == oauth.CODEX_CLIENT_VERSION,
+                "an older local catalog version is ignored",
+            )
+        finally:
+            oauth.set_codex_home(None)
 
 
 def test_usage_schemas() -> None:
@@ -213,6 +270,7 @@ def test_error_classification() -> None:
 
 if __name__ == "__main__":
     test_models()
+    test_client_identity()
     test_usage_schemas()
     test_error_classification()
     print()

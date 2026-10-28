@@ -13,7 +13,11 @@ import asyncio
 import base64
 import json
 import math
+import os
+import platform
+import re
 import time
+from pathlib import Path
 from typing import Any
 
 from astrbot import logger
@@ -61,7 +65,100 @@ CODEX_FALLBACK_MODELS = [
 # Cloudflare whitelists first-party clients by the originator header; the real
 # Rust Codex CLI sends `codex_cli_rs`. Both are overridable per-provider.
 DEFAULT_ORIGINATOR = "codex_cli_rs"
-DEFAULT_USER_AGENT = "codex_cli_rs/0.0.0 (astrbot-plugin-openai-oauth)"
+
+# The backend gates its newest models on the Codex version a client names, in
+# both its User-Agent and the model catalog query: an older or placeholder
+# version can get 404 "Model not found" for a model the catalog lists.
+CODEX_CLIENT_VERSION = "0.162.0"
+_USER_AGENT_MARKER = "astrbot-plugin-openai-oauth"
+_VERSION_PATTERN = re.compile(r"\d+(?:\.\d+)+")
+_VERSION_CACHE_SECONDS = 600
+_codex_home: Path | None = None
+_version_cache: tuple[float, Path | None, str] | None = None
+
+
+def _platform_label() -> str:
+    """Describe the host like Codex CLI does, e.g. ``Linux 6.8.0; x86_64``."""
+    system = platform.system() or "Unknown"
+    if system == "Darwin":
+        system, release = "Mac OS", platform.mac_ver()[0]
+    else:
+        release = platform.release()
+    match = _VERSION_PATTERN.search(release or "")
+    label = f"{system} {match.group(0)}" if match else system
+    machine = {"amd64": "x86_64", "aarch64": "arm64"}.get(
+        platform.machine().lower(), platform.machine() or "unknown"
+    )
+    return f"{label}; {machine}"
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
+def set_codex_home(path: str | os.PathLike[str] | None) -> None:
+    """Remember where local Codex keeps its files for version discovery."""
+    global _codex_home, _version_cache
+    _codex_home = Path(path) if path else None
+    _version_cache = None
+
+
+def codex_client_version() -> str:
+    """Name the newest of the built-in Codex version and local Codex's catalog.
+
+    Codex CLI records the version it last fetched the catalog with in
+    ``models_cache.json``. After a Codex update brings new models, that version
+    is newer than the built-in one and unlocks them.
+    """
+    global _version_cache
+    now = time.monotonic()
+    if (
+        _version_cache is not None
+        and _version_cache[1] == _codex_home
+        and now - _version_cache[0] < _VERSION_CACHE_SECONDS
+    ):
+        return _version_cache[2]
+    version = CODEX_CLIENT_VERSION
+    home = (
+        _codex_home
+        or Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
+    )
+    try:
+        cached = json.loads((home / "models_cache.json").read_text("utf-8"))
+        match = _VERSION_PATTERN.fullmatch(str(cached.get("client_version", "")))
+        if match and _version_key(match.group(0)) > _version_key(version):
+            version = match.group(0)
+    except (OSError, ValueError, AttributeError):
+        pass
+    _version_cache = (now, _codex_home, version)
+    return version
+
+
+def default_user_agent() -> str:
+    """Return a Codex CLI style User-Agent naming the current client version."""
+    return (
+        f"codex_cli_rs/{codex_client_version()} ({_platform_label()}) "
+        f"{_USER_AGENT_MARKER}"
+    )
+
+
+DEFAULT_USER_AGENT = (
+    f"codex_cli_rs/{CODEX_CLIENT_VERSION} ({_platform_label()}) {_USER_AGENT_MARKER}"
+)
+
+
+def resolve_user_agent(configured: Any) -> str:
+    """Use a custom User-Agent as is; plugin defaults track the Codex version."""
+    value = configured.strip() if isinstance(configured, str) else ""
+    if not value or (value.startswith("codex_cli_rs/") and _USER_AGENT_MARKER in value):
+        return default_user_agent()
+    return value
+
+
+def client_version_header(user_agent: str) -> str:
+    """Name the same Codex version in the ``version`` header as the User-Agent."""
+    match = re.match(r"codex_cli_rs/(\d+(?:\.\d+)+)", user_agent)
+    return match.group(1) if match else codex_client_version()
 
 
 def load_credentials(raw: Any) -> dict:
@@ -184,6 +281,7 @@ async def fetch_models(
         "Authorization": f"Bearer {access_token}",
         "originator": originator,
         "User-Agent": user_agent,
+        "version": client_version_header(user_agent),
         "Accept": "application/json",
     }
     if account_id:
@@ -191,7 +289,8 @@ async def fetch_models(
     client = create_proxy_client("OpenAI Codex", proxy)
     try:
         resp = await client.get(
-            f"{CODEX_MODELS_URL}?client_version=1.0.0",
+            CODEX_MODELS_URL,
+            params={"client_version": client_version_header(user_agent)},
             headers=headers,
             timeout=10,
         )
@@ -392,6 +491,7 @@ async def fetch_rate_limits(
     headers = {
         "Authorization": f"Bearer {access_token}",
         "User-Agent": user_agent,
+        "version": client_version_header(user_agent),
         "Accept": "application/json",
     }
     if account_id:

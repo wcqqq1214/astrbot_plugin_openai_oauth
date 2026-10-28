@@ -23,10 +23,7 @@ from .credential_store import (
     CredentialsNotConfiguredError,
     ReauthenticationRequiredError,
 )
-from .oauth import (
-    DEFAULT_USER_AGENT,
-    CredentialExpiredError,
-)
+from .oauth import CredentialExpiredError
 
 _WINDOW_LABELS = {18000: "5小时窗口", 604800: "7天窗口", 2592000: "30天窗口"}
 
@@ -144,7 +141,7 @@ async def _fetch_source_usage(
                 snapshot.access_token,
                 snapshot.account_id,
                 settings["proxy"],
-                settings["user_agent"] or DEFAULT_USER_AGENT,
+                oauth.resolve_user_agent(settings["user_agent"]),
             ),
             retry_rate_limits=False,
             max_attempts=3,
