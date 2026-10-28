@@ -178,6 +178,21 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
                     },
                 ]
             body = "".join("data: " + json.dumps(event) + "\n\n" for event in events)
+            if outcome == "slow":
+                # Emulate a model that thinks before its first delta.
+                class SlowBody(httpx.AsyncByteStream):
+                    async def __aiter__(self):
+                        loop = asyncio.get_running_loop()
+                        ready = loop.create_future()
+                        loop.call_later(0.06, ready.set_result, None)
+                        await ready
+                        yield body.encode()
+
+                return httpx.Response(
+                    200,
+                    stream=SlowBody(),
+                    headers={"content-type": "text/event-stream"},
+                )
             return httpx.Response(
                 200, text=body, headers={"content-type": "text/event-stream"}
             )
@@ -367,6 +382,38 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
             await self.collect()
         self.assertEqual(self.coordinator.account_view("local")["status"], "cooling")
         self.assertEqual(self.coordinator.account_view("same")["status"], "cooling")
+
+    async def test_open_stream_may_think_past_startup_deadline(self):
+        self.outcomes["local"] = ["slow"]
+        with patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", 0.02):
+            await self.collect()
+        self.assertEqual(self.requested(), ["local"])
+        self.assertEqual(self.output[-1].completion_text, "local")
+
+    async def test_next_source_keeps_original_startup_deadline(self):
+        self.outcomes["local"] = ["slow"]
+        self.outcomes["other"] = ["wait"]
+
+        async def rate_limited_after_open(provider, stream, tools):
+            async for _ in stream:
+                response = httpx.Response(429, request=httpx.Request("POST", "/"))
+                raise httpx.HTTPStatusError(
+                    "rate limited", request=response.request, response=response
+                )
+            yield  # pragma: no cover
+
+        with (
+            patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", 0.02),
+            patch.object(
+                provider_module.ProviderOpenAICodex,
+                "_consume_stream",
+                new=rate_limited_after_open,
+            ),
+            self.assertRaises(provider_routing.RoutingExhaustedError) as caught,
+        ):
+            await self.collect()
+        self.assertEqual(caught.exception.reason, "startup_timeout")
+        self.assertEqual(self.requested(), ["local", "other"])
 
     async def test_bad_request_does_not_rotate(self):
         self.outcomes["local"] = [400]

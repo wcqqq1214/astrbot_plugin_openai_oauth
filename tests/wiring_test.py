@@ -486,6 +486,7 @@ def test_pre_stream_credential_recovery() -> None:
         request_max_retries,
         session_effort=None,
         before_attempt=None,
+        on_stream_open=None,
     ):
         nonlocal calls
         calls += 1
@@ -542,6 +543,7 @@ def test_stream_is_not_replayed_after_output() -> None:
         request_max_retries,
         session_effort=None,
         before_attempt=None,
+        on_stream_open=None,
     ):
         nonlocal calls
         calls += 1
@@ -590,6 +592,7 @@ def test_usage_limit_enters_cooldown() -> None:
         request_max_retries,
         session_effort=None,
         before_attempt=None,
+        on_stream_open=None,
     ):
         raise _UsageLimitError()
         yield

@@ -8,6 +8,7 @@
 - Treat only explicit authentication failures from the allowance endpoint as expired credentials; a plain HTTP 403 no longer asks you to sign in again.
 - Refresh the token once and retry when the allowance endpoint rejects a token before its own expiry.
 - List one ID per model from the live catalog, skip hidden models and follow Codex's picker order.
+- Automatic fallback no longer cancels a request whose model is still thinking after 120 seconds; the startup deadline now ends once a stream opens, and a later fallback source gets a fresh window.
 
 ## [v2.2.0] - 2026-10-18
 

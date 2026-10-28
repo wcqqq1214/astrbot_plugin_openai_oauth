@@ -270,6 +270,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         request_max_retries: int | None = None,
         session_effort: str | None = None,
         before_attempt: Callable[[], None] | None = None,
+        on_stream_open: Callable[[], None] | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
         """Stream from the Codex backend, which completes with an empty response
         object: the content only arrives as deltas. Assemble the final response
@@ -345,6 +346,8 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                 retry_rate_limits=False,
                 max_attempts=max_attempts - attempts,
             )
+            if on_stream_open is not None:
+                on_stream_open()
             try:
                 async for response in self._consume_stream(stream, tools):
                     emitted_response = True
@@ -695,7 +698,22 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         emitted = False
         try:
             async with asyncio.timeout(ROUTING_TIMEOUT_SECONDS) as deadline:
+                # The deadline bounds finding a source that accepts the request.
+                # Once a stream is open, the model may think for longer than the
+                # deadline before its first delta. A source that fails after that
+                # gives the next one a fresh window rather than an expired one.
+                loop = asyncio.get_running_loop()
+                startup_deadline = deadline.when()
+
+                def stream_opened() -> None:
+                    nonlocal startup_deadline
+                    startup_deadline = None
+                    deadline.reschedule(None)
+
                 for source_id in candidates:
+                    if startup_deadline is None:
+                        startup_deadline = loop.time() + ROUTING_TIMEOUT_SECONDS
+                    deadline.reschedule(startup_deadline)
                     try:
                         coordinator.ensure_inference_available(source_id)
                         initial = coordinator._read_snapshot(source_id)
@@ -716,6 +734,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                                 session_effort=session_effort,
                                 budget=budget,
                                 seen=seen,
+                                on_stream_open=stream_opened,
                             )
                         ) as stream:
                             async for response in stream:
@@ -765,6 +784,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         session_effort: str | None = None,
         budget: RequestBudget | None = None,
         seen: set[str] | None = None,
+        on_stream_open: Callable[[], None] | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
         coordinator = runtime._get_credential_coordinator()
         retry_after_credential_error = True
@@ -807,6 +827,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                             request_max_retries=request_max_retries,
                             session_effort=session_effort,
                             before_attempt=guard,
+                            on_stream_open=on_stream_open,
                         )
                     ) as stream,
                 ):
