@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import secrets
 from typing import Any
 
@@ -20,7 +19,6 @@ from .credential_store import (
     ReauthenticationRequiredError,
 )
 from .oauth import (
-    CODEX_DEVICE_LOGIN_TIMEOUT,
     CODEX_DEVICE_VERIFY_URL,
     DeviceAuthError,
 )
@@ -73,38 +71,34 @@ async def _handle_device_start() -> Any:
     except CredentialError as exc:
         return _login_error_response(str(exc), 400)
     owner = str(request.username)
-    login._prune_expired_login_sessions()
-    for existing_id, existing in login._login_sessions.items():
-        if existing.get("status") not in {"starting", "pending", "saving"}:
+    live = login.sessions()
+    for existing_id, existing in live.items():
+        if existing.status not in login.ACTIVE_STATUSES:
             continue
-        same_owner = secrets.compare_digest(str(existing.get("owner", "")), owner)
+        same_owner = secrets.compare_digest(existing.owner, owner)
         same_target = (
-            creating
-            and existing.get("creating")
-            and same_owner
-            and existing.get("name") == name
-        ) or (not creating and existing.get("source_id") == source_id)
+            creating and existing.creating and same_owner and existing.name == name
+        ) or (not creating and existing.source_id == source_id)
         if not same_target:
             continue
         if same_owner:
-            if existing.get("status") != "pending":
+            if existing.status != login.LoginStatus.PENDING:
                 return _login_error_response("设备登录正在启动，请稍后重试", 409)
             return json_response(
                 {
                     "status": "pending",
                     "session_id": existing_id,
                     "verify_url": CODEX_DEVICE_VERIFY_URL,
-                    "user_code": existing["user_code"],
-                    "interval": existing["interval"],
+                    "user_code": existing.user_code,
+                    "interval": existing.interval,
                 },
                 headers=_NO_STORE_HEADERS,
             )
         return _login_error_response("另一位用户正在登录该 Provider", 409)
-    if len(login._login_sessions) >= _MAX_LOGIN_SESSIONS:
+    if len(live) >= _MAX_LOGIN_SESSIONS:
         return _login_error_response("设备登录会话已达上限，请稍后重试", 429)
     owner_sessions = sum(
-        secrets.compare_digest(str(session.get("owner", "")), owner)
-        for session in login._login_sessions.values()
+        secrets.compare_digest(session.owner, owner) for session in live.values()
     )
     if owner_sessions >= _MAX_LOGIN_SESSIONS_PER_USER:
         return _login_error_response("你的设备登录会话已达上限，请稍后重试", 429)
@@ -112,48 +106,40 @@ async def _handle_device_start() -> Any:
     # Reserve the bounded slot before the first await so concurrent starts cannot
     # race past the quota check.
     session_id = secrets.token_urlsafe(32)
-    session = {
-        "owner": owner,
-        "source_id": coordinator.providers.new_id() if creating else source_id,
-        "name": name,
-        "creating": creating,
-        "status": "starting",
-        "device_auth_id": None,
-        "user_code": None,
-        "interval": None,
-        "error": None,
-        "task": None,
-    }
-    login._login_sessions[session_id] = session
-    login._schedule_login_session_expiry(
-        session_id, CODEX_DEVICE_LOGIN_TIMEOUT + login._LOGIN_RESULT_TTL_SECONDS
+    login.reserve_session(
+        session_id,
+        login.DeviceLoginSession(
+            owner=owner,
+            source_id=coordinator.providers.new_id() if creating else source_id,
+            name=name,
+            creating=creating,
+        ),
     )
     try:
         device_auth_id, user_code, interval = await oauth.request_device_user_code(
             proxy
         )
     except DeviceAuthError as exc:
-        login._discard_login_session(session_id)
+        login.discard_session(session_id)
         return _login_error_response(str(exc), 400)
     except Exception as exc:  # noqa: BLE001 - keep network details out of the response
-        login._discard_login_session(session_id)
+        login.discard_session(session_id)
         logger.error(
             "OpenAI Codex device-code request failed: %s",
             type(exc).__name__,
         )
         return _login_error_response("无法启动设备登录，请稍后重试", 502)
-    session = login._login_sessions.get(session_id)
-    if session is None:
+    if (
+        login.begin_session(
+            session_id,
+            device_auth_id=device_auth_id,
+            user_code=user_code,
+            interval=interval,
+            proxy=proxy,
+        )
+        is None
+    ):
         return _login_error_response("登录会话已过期", 410)
-    session.update(
-        {
-            "status": "pending",
-            "device_auth_id": device_auth_id,
-            "user_code": user_code,
-            "interval": interval,
-        }
-    )
-    session["task"] = asyncio.create_task(login._run_device_login(session_id, proxy))
     return json_response(
         {
             "status": "pending",
@@ -173,23 +159,16 @@ async def _handle_device_poll() -> Any:
     if not isinstance(body, dict):
         return _login_error_response("请求格式无效", 400)
     session_id = str(body.get("session_id", "") or "")
-    login._prune_expired_login_sessions()
-    session = login._login_sessions.get(session_id)
-    owner = str(request.username)
-    if session is None or not secrets.compare_digest(
-        str(session.get("owner", "")), owner
-    ):
+    session = login.owned_session(session_id, str(request.username))
+    if session is None:
         # The WebUI bridge exposes non-2xx errors as text, not structured data.
         # Do not reveal whether an inaccessible session belongs to another user.
         return json_response({"status": "expired"}, headers=_NO_STORE_HEADERS)
-    payload = {
-        "status": session["status"],
-        "error": session.get("error"),
-    }
-    if session["status"] == "success":
-        payload["source_id"] = session["source_id"]
-    if session["status"] in {"success", "error", "timeout"}:
-        login._discard_login_session(session_id, cancel_task=False)
+    payload = {"status": str(session.status), "error": session.error}
+    if session.status == login.LoginStatus.SUCCESS:
+        payload["source_id"] = session.source_id
+    if session.status in login.FINISHED_STATUSES:
+        login.discard_session(session_id, cancel_task=False)
     return json_response(payload, headers=_NO_STORE_HEADERS)
 
 
@@ -200,18 +179,14 @@ async def _handle_device_cancel() -> Any:
     if not isinstance(body, dict):
         return _login_error_response("请求格式无效", 400)
     session_id = str(body.get("session_id", "") or "")
-    login._prune_expired_login_sessions()
-    session = login._login_sessions.get(session_id)
-    owner = str(request.username)
-    if session is None or not secrets.compare_digest(
-        str(session.get("owner", "")), owner
-    ):
+    session = login.owned_session(session_id, str(request.username))
+    if session is None:
         return json_response({"status": "expired"}, headers=_NO_STORE_HEADERS)
-    if session["status"] in {"saving", "success"}:
+    if session.status in {login.LoginStatus.SAVING, login.LoginStatus.SUCCESS}:
         return _login_error_response(
             "授权已完成，正在保存或已保存 Provider，请等待登录结果。", 409
         )
-    login._discard_login_session(session_id)
+    login.discard_session(session_id)
     return json_response({"status": "cancelled"}, headers=_NO_STORE_HEADERS)
 
 
@@ -295,9 +270,7 @@ async def _edit_provider(*, delete: bool) -> Any:
             },
         )
         if delete:
-            for session_id, session in list(login._login_sessions.items()):
-                if session.get("source_id") == source_id:
-                    login._discard_login_session(session_id)
+            login.discard_sessions_for_source(source_id)
         result = {"status": "success"}
         if not delete:
             result["provider"] = coordinator.account_view(source_id)

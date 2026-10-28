@@ -15,8 +15,7 @@ from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
 from . import oauth, source_editor
 from .credential_seal import FernetCredentialSealer
 from .credential_store import CredentialError
-from .local_codex import LocalCodexStore
-from .local_codex import LocalCredentialCoordinator as CredentialCoordinator
+from .local_codex import LocalCodexStore, LocalCredentialCoordinator
 from .oauth import (
     CODEX_BASE,
     DEFAULT_ORIGINATOR,
@@ -31,7 +30,7 @@ _COORDINATOR_ATTR = "_astrbot_openai_oauth_credential_coordinator"
 
 # Bound by the entry point; all consumers resolve credentials through this module.
 _config_mgr: Any = None
-_credential_coordinator: CredentialCoordinator | None = None
+_credential_coordinator: LocalCredentialCoordinator | None = None
 _local_codex_store: LocalCodexStore | None = None
 _remove_source_guard: Any = None
 _credential_sealer: FernetCredentialSealer | None = None
@@ -77,14 +76,14 @@ def _default_provider_template() -> dict[str, Any]:
     } | {"model": "gpt-5.4-mini"}
 
 
-def get_coordinator() -> CredentialCoordinator:
+def get_coordinator() -> LocalCredentialCoordinator:
     global _credential_coordinator
     cfg_mgr = _config_mgr
     if cfg_mgr is None:
         raise CredentialError("The AstrBot configuration manager is unavailable.")
 
     existing = getattr(cfg_mgr, _COORDINATOR_ATTR, None)
-    if isinstance(existing, CredentialCoordinator):
+    if isinstance(existing, LocalCredentialCoordinator):
         existing.update_refresh_credentials(oauth.refresh_access_token)
         existing.local_store = _local_codex_store
         existing.sealer = _credential_sealer
@@ -99,7 +98,7 @@ def get_coordinator() -> CredentialCoordinator:
         _credential_coordinator.sealer = _credential_sealer
         return _credential_coordinator
 
-    coordinator = CredentialCoordinator(
+    coordinator = LocalCredentialCoordinator(
         cfg_mgr,
         provider_type=PROVIDER_TYPE,
         default_source_id=PROVIDER_TYPE,

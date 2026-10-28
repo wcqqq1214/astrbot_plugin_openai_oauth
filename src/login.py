@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 import time
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 from astrbot import logger
@@ -12,6 +15,7 @@ from astrbot.api.event import AstrMessageEvent, MessageChain
 from . import oauth, runtime
 from .credential_store import CredentialSourceError
 from .oauth import (
+    CODEX_DEVICE_LOGIN_TIMEOUT,
     CODEX_DEVICE_VERIFY_URL,
     DeviceAuthError,
     DeviceAuthTimeout,
@@ -19,9 +23,45 @@ from .oauth import (
 
 _LOGIN_RESULT_TTL_SECONDS = 120
 
+
+class LoginStatus(StrEnum):
+    STARTING = "starting"
+    PENDING = "pending"
+    SAVING = "saving"
+    SUCCESS = "success"
+    ERROR = "error"
+    TIMEOUT = "timeout"
+
+
+ACTIVE_STATUSES = frozenset(
+    {LoginStatus.STARTING, LoginStatus.PENDING, LoginStatus.SAVING}
+)
+FINISHED_STATUSES = frozenset(
+    {LoginStatus.SUCCESS, LoginStatus.ERROR, LoginStatus.TIMEOUT}
+)
+
+
+@dataclass(eq=False)
+class DeviceLoginSession:
+    """One WebUI device login, owned by the dashboard user who started it."""
+
+    owner: str
+    source_id: str = ""
+    name: str = ""
+    creating: bool = True
+    status: LoginStatus = LoginStatus.STARTING
+    device_auth_id: str | None = None
+    user_code: str | None = None
+    interval: int | None = None
+    error: str | None = None
+    task: asyncio.Task[Any] | None = None
+    expiry_handle: asyncio.TimerHandle | None = None
+    expires_at: float = 0.0
+
+
 # Both command and WebUI login tasks are owned and cleaned up here.
 _command_login_tasks: dict[str, asyncio.Task[Any]] = {}
-_login_sessions: dict[str, dict] = {}
+_login_sessions: dict[str, DeviceLoginSession] = {}
 
 
 def _is_private_login_event(event: AstrMessageEvent) -> bool:
@@ -53,45 +93,92 @@ def _cancel_all_command_login_tasks() -> list[asyncio.Task[Any]]:
     return tasks
 
 
-def _discard_login_session(session_id: str, *, cancel_task: bool = True) -> None:
+def discard_session(session_id: str, *, cancel_task: bool = True) -> None:
     session = _login_sessions.pop(session_id, None)
     if session is None:
         return
-    expiry_handle = session.get("expiry_handle")
-    if expiry_handle is not None:
-        expiry_handle.cancel()
-    task = session.get("task")
+    if session.expiry_handle is not None:
+        session.expiry_handle.cancel()
+    task = session.task
     if cancel_task and task is not None and not task.done():
         task.cancel()
 
 
-def _discard_all_login_sessions() -> None:
+def discard_all_sessions() -> None:
     for session_id in list(_login_sessions):
-        _discard_login_session(session_id)
+        discard_session(session_id)
 
 
-def _schedule_login_session_expiry(session_id: str, delay: float) -> None:
+def discard_sessions_for_source(source_id: str) -> None:
+    for session_id, session in list(_login_sessions.items()):
+        if session.source_id == source_id:
+            discard_session(session_id)
+
+
+def schedule_session_expiry(session_id: str, delay: float) -> None:
     session = _login_sessions.get(session_id)
     if session is None:
         return
-    old_handle = session.get("expiry_handle")
-    if old_handle is not None:
-        old_handle.cancel()
-    session["expires_at"] = time.monotonic() + delay
-    session["expiry_handle"] = asyncio.get_running_loop().call_later(
-        delay, _discard_login_session, session_id
+    if session.expiry_handle is not None:
+        session.expiry_handle.cancel()
+    session.expires_at = time.monotonic() + delay
+    session.expiry_handle = asyncio.get_running_loop().call_later(
+        delay, discard_session, session_id
     )
 
 
-def _prune_expired_login_sessions() -> None:
+def prune_sessions() -> None:
     now = time.monotonic()
     expired = [
         session_id
         for session_id, session in _login_sessions.items()
-        if float(session.get("expires_at", 0)) <= now
+        if session.expires_at <= now
     ]
     for session_id in expired:
-        _discard_login_session(session_id)
+        discard_session(session_id)
+
+
+def sessions() -> dict[str, DeviceLoginSession]:
+    """Return live sessions after dropping expired ones."""
+    prune_sessions()
+    return dict(_login_sessions)
+
+
+def owned_session(session_id: str, owner: str) -> DeviceLoginSession | None:
+    """Return a live session only to the dashboard user who started it."""
+    prune_sessions()
+    session = _login_sessions.get(session_id)
+    if session is None or not secrets.compare_digest(session.owner, owner):
+        return None
+    return session
+
+
+def reserve_session(session_id: str, session: DeviceLoginSession) -> None:
+    """Hold a bounded slot before the first await of a new login."""
+    _login_sessions[session_id] = session
+    schedule_session_expiry(
+        session_id, CODEX_DEVICE_LOGIN_TIMEOUT + _LOGIN_RESULT_TTL_SECONDS
+    )
+
+
+def begin_session(
+    session_id: str,
+    *,
+    device_auth_id: str,
+    user_code: str,
+    interval: int,
+    proxy: str,
+) -> DeviceLoginSession | None:
+    """Record the device challenge and poll for its authorization."""
+    session = _login_sessions.get(session_id)
+    if session is None:
+        return None
+    session.status = LoginStatus.PENDING
+    session.device_auth_id = device_auth_id
+    session.user_code = user_code
+    session.interval = interval
+    session.task = asyncio.create_task(_run_device_login(session_id, proxy))
+    return session
 
 
 async def _persist_login_credentials(
@@ -140,35 +227,35 @@ async def _run_device_login(session_id: str, proxy: str) -> None:
         return
     try:
         creds = await _complete_device_login(
-            device_auth_id=session["device_auth_id"],
-            user_code=session["user_code"],
-            interval=session["interval"],
+            device_auth_id=session.device_auth_id or "",
+            user_code=session.user_code or "",
+            interval=session.interval or 5,
             proxy=proxy,
         )
-        session["status"] = "saving"
+        session.status = LoginStatus.SAVING
         await _persist_login_credentials(
             creds,
-            source_id=session["source_id"],
-            name=session["name"],
-            creating=session["creating"],
+            source_id=session.source_id,
+            name=session.name,
+            creating=session.creating,
         )
-        session["status"] = "success"
+        session.status = LoginStatus.SUCCESS
         logger.info("OpenAI Codex device login succeeded.")
     except asyncio.CancelledError:
         raise
     except DeviceAuthTimeout as exc:
-        session["status"] = "timeout"
-        session["error"] = str(exc)
+        session.status = LoginStatus.TIMEOUT
+        session.error = str(exc)
     except DeviceAuthError as exc:
-        session["status"] = "error"
-        session["error"] = str(exc)
+        session.status = LoginStatus.ERROR
+        session.error = str(exc)
     except Exception as exc:  # noqa: BLE001 - report a generic error without credential data
-        session["status"] = "error"
-        session["error"] = "登录或保存失败，请重试"
+        session.status = LoginStatus.ERROR
+        session.error = "登录或保存失败，请重试"
         logger.error("OpenAI Codex device login failed: %s", type(exc).__name__)
     finally:
         if _login_sessions.get(session_id) is session:
-            _schedule_login_session_expiry(session_id, _LOGIN_RESULT_TTL_SECONDS)
+            schedule_session_expiry(session_id, _LOGIN_RESULT_TTL_SECONDS)
 
 
 async def _run_command_device_login(
@@ -276,7 +363,7 @@ async def handle_login(event: AstrMessageEvent) -> None:
 
 async def terminate() -> None:
     """Cancel all outstanding device-login work during plugin unload."""
-    _discard_all_login_sessions()
+    discard_all_sessions()
     tasks = _cancel_all_command_login_tasks()
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)

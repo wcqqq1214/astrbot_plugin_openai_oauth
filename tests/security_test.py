@@ -111,11 +111,7 @@ class LoginBoundaryTests(unittest.TestCase):
         runtime._config_mgr = _FakeConfigManager()
 
     def tearDown(self) -> None:
-        discard = getattr(login, "_discard_all_login_sessions", None)
-        if discard is not None:
-            discard()
-        else:
-            login._login_sessions.clear()
+        login.discard_all_sessions()
         runtime._config_mgr = None
 
     def test_authenticated_public_http_start_is_allowed(self) -> None:
@@ -238,11 +234,11 @@ class LoginBoundaryTests(unittest.TestCase):
             for handler in (web_api._handle_device_poll, web_api._handle_device_cancel):
                 for session_id in ("missing", "expired"):
                     if session_id == "expired":
-                        login._login_sessions[session_id] = {
-                            "owner": "owner-a",
-                            "status": "pending",
-                            "expires_at": 0,
-                        }
+                        login._login_sessions[session_id] = login.DeviceLoginSession(
+                            owner="owner-a",
+                            status=login.LoginStatus.PENDING,
+                            expires_at=0,
+                        )
                     with bind_request_context(
                         _plugin_request({"session_id": session_id}, username="owner-a")
                     ):
@@ -301,12 +297,12 @@ class LoginBoundaryTests(unittest.TestCase):
 
             task = asyncio.create_task(pending())
             await started.wait()
-            login._login_sessions["expiring"] = {
-                "owner": "owner-a",
-                "status": "pending",
-                "task": task,
-            }
-            login._schedule_login_session_expiry("expiring", 0)
+            login._login_sessions["expiring"] = login.DeviceLoginSession(
+                owner="owner-a",
+                status=login.LoginStatus.PENDING,
+                task=task,
+            )
+            login.schedule_session_expiry("expiring", 0)
             await asyncio.sleep(0)
             await asyncio.sleep(0)
             return task
@@ -351,7 +347,7 @@ class LoginBoundaryTests(unittest.TestCase):
                 session_id = _payload(start)["session_id"]
                 for _ in range(20):
                     session = login._login_sessions.get(session_id)
-                    if session and session.get("status") not in {"pending", "saving"}:
+                    if session and session.status not in {"pending", "saving"}:
                         break
                     await asyncio.sleep(0)
                 with bind_request_context(
@@ -412,7 +408,7 @@ class LoginBoundaryTests(unittest.TestCase):
                 session_id = _payload(start)["session_id"]
                 for _ in range(20):
                     session = login._login_sessions.get(session_id)
-                    if session and session.get("status") not in {"pending", "saving"}:
+                    if session and session.status not in {"pending", "saving"}:
                         break
                     await asyncio.sleep(0)
                 with bind_request_context(

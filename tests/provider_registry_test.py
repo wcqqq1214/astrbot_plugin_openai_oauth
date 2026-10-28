@@ -69,7 +69,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.addCleanup(login._discard_all_login_sessions)
+        self.addCleanup(login.discard_all_sessions)
 
     async def test_plaintext_credentials_are_sealed_once(self):
         await self.registry.migrate()
@@ -338,7 +338,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
             with request_context(body):
                 started = payload(await web_api._handle_device_start())
             session = login._login_sessions[started["session_id"]]
-            await session["task"]
+            await session.task
             with request_context({"session_id": started["session_id"]}):
                 return payload(await web_api._handle_device_poll())
 
@@ -505,7 +505,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         ):
             with request_context({"name": "Saving"}):
                 started = payload(await web_api._handle_device_start())
-            task = login._login_sessions[started["session_id"]]["task"]
+            task = login._login_sessions[started["session_id"]].task
             await entered.wait()
             with request_context({"session_id": started["session_id"]}):
                 self.assertEqual(
@@ -556,7 +556,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
             # Reserve and cancel before the worker gets its first event-loop turn.
             with request_context({"name": "Cancelled"}):
                 started = payload(await web_api._handle_device_start())
-            task = login._login_sessions[started["session_id"]]["task"]
+            task = login._login_sessions[started["session_id"]].task
             with request_context({"session_id": started["session_id"]}):
                 self.assertEqual(
                     payload(await web_api._handle_device_cancel())["status"],

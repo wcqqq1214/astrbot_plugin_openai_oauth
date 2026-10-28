@@ -197,7 +197,7 @@ def test_oauth_protocol_helpers() -> None:
 
 def test_server_owned_web_login_and_source_proxy() -> None:
     print("\n=== Server-owned web login and source proxy ===")
-    login._discard_all_login_sessions()
+    login.discard_all_sessions()
     conf = set_config([source(key="old", proxy="http://source-proxy:8080")])
     observed_proxy: list[str | None] = []
 
@@ -236,7 +236,7 @@ def test_server_owned_web_login_and_source_proxy() -> None:
             for _ in range(20):
                 await asyncio.sleep(0)
                 session = login._login_sessions.get(start["session_id"])
-                if session and session["status"] not in {"pending", "saving"}:
+                if session and session.status not in {"pending", "saving"}:
                     break
             with request_context({"session_id": start["session_id"]}):
                 completed = await web_api._handle_device_poll()
@@ -266,7 +266,7 @@ def test_server_owned_web_login_and_source_proxy() -> None:
 
 def test_login_error_and_cancel() -> None:
     print("\n=== Login errors and cancellation ===")
-    login._discard_all_login_sessions()
+    login.discard_all_sessions()
     set_config([source()])
 
     async def failed_start():
@@ -301,7 +301,7 @@ def test_login_error_and_cancel() -> None:
             with request_context({"session_id": session_id}, username="owner-b"):
                 stolen = await web_api._handle_device_cancel()
             check(
-                login._login_sessions[session_id]["status"] == "pending",
+                login._login_sessions[session_id].status == "pending",
                 "another WebUI user leaves the owner's session unchanged",
             )
             with request_context({"session_id": session_id}, username="owner-a"):
@@ -723,8 +723,8 @@ def test_entry_point_terminates_login_tasks() -> None:
             with request_context():
                 response = await web_api._handle_device_start()
             session = login._login_sessions[payload(response)["session_id"]]
-            web_task = session["task"]
-            expiry = session["expiry_handle"]
+            web_task = session.task
+            expiry = session.expiry_handle
             await plugin.OpenAI_OAuth_Plugin.openai_login(None, event)
             command_task = login._command_login_tasks[event.unified_msg_origin]
             await asyncio.sleep(0)
@@ -753,7 +753,7 @@ def main() -> int:
         test_plugin_page_assets()
         test_entry_point_terminates_login_tasks()
     finally:
-        login._discard_all_login_sessions()
+        login.discard_all_sessions()
         login._cancel_all_command_login_tasks()
         runtime._config_mgr = old_manager
     print()
