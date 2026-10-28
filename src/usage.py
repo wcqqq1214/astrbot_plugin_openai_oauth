@@ -87,7 +87,7 @@ def format_usage(usage: dict) -> str:
     return "\n".join(lines)
 
 
-def _cooldown_until_from_usage(usage: dict[str, Any]) -> int | None:
+def cooldown_until_from_usage(usage: dict[str, Any]) -> int | None:
     """Wait for exhausted windows only; unrelated windows do not block requests."""
     reset_times: list[int] = []
     now = time.time()
@@ -124,12 +124,12 @@ def _format_cooldown(cooldown_until: int | None) -> str:
     return f"OpenAI 订阅额度当前处于冷却状态{_format_reset_at(cooldown_until, None)}。"
 
 
-async def _fetch_source_usage(
-    source_id: str = runtime._PROVIDER_TYPE,
+async def fetch_source_usage(
+    source_id: str = runtime.PROVIDER_TYPE,
 ) -> dict[str, Any]:
-    coordinator = runtime._get_credential_coordinator()
+    coordinator = runtime.get_coordinator()
     # Cache hits belong to the current login; fresh lookups may refresh its token.
-    expected_access_token = coordinator._read_snapshot(source_id).access_token
+    expected_access_token = coordinator.read_snapshot(source_id).access_token
 
     async def fetch_usage(snapshot: CredentialSnapshot) -> dict:
         nonlocal expected_access_token
@@ -157,7 +157,7 @@ async def _fetch_source_usage(
         )
         usage = await coordinator.get_usage(source_id, fetch_usage)
     if usage.get("limit_reached") or not usage.get("allowed", True):
-        cooldown_until = _cooldown_until_from_usage(usage)
+        cooldown_until = cooldown_until_from_usage(usage)
         if cooldown_until is not None:
             await coordinator.mark_cooling(
                 source_id,
@@ -167,10 +167,10 @@ async def _fetch_source_usage(
     return usage
 
 
-async def build_usage_message(source_id: str = runtime._PROVIDER_TYPE) -> str:
+async def build_usage_message(source_id: str = runtime.PROVIDER_TYPE) -> str:
     """Fetch the selected source's quota through the credential coordinator."""
     try:
-        usage = await _fetch_source_usage(source_id)
+        usage = await fetch_source_usage(source_id)
     except CredentialCooldownError as exc:
         return _format_cooldown(exc.cooldown_until)
     except (CredentialsNotConfiguredError, ReauthenticationRequiredError):
@@ -197,7 +197,7 @@ async def handle_usage(context: Context, event: AstrMessageEvent) -> None:
         if selected
         else await context.get_using_provider_async(umo=event.unified_msg_origin)
     )
-    if provider is None or provider.meta().type != runtime._PROVIDER_TYPE:
+    if provider is None or provider.meta().type != runtime.PROVIDER_TYPE:
         await event.send(MessageChain().message("请先选择 OpenAI Subscribe 模型。"))
         return
     await event.send(

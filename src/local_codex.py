@@ -171,8 +171,8 @@ class LocalCredentialCoordinator(CredentialCoordinator):
 
     def account_view(self, source_id: str | None = None) -> dict[str, Any]:
         """Return provider metadata and a revision without exposing credentials."""
-        source_id = source_id or self._default_source_id
-        source = self._source(source_id)
+        source_id = source_id or self.default_source_id
+        source = self.source(source_id)
         mode = source.get("credential_mode", DEVICE)
         result = self.status(source_id).as_dict()
         result.update(
@@ -184,7 +184,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
             credential_source="local_codex" if mode == LOCAL else "plugin",
         )
         try:
-            snapshot = self._read_snapshot(source_id)
+            snapshot = self.read_snapshot(source_id)
         except CredentialError:
             return result
         if snapshot.access_token:
@@ -219,7 +219,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
             )
         for source in self.providers.owned():
             try:
-                other = self._read_snapshot(source["id"])
+                other = self.read_snapshot(source["id"])
             except CredentialError:
                 continue
             if (
@@ -238,7 +238,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
         status = super().status(source_id)
         try:
             snapshot = self.account_cooldown(
-                self._read_snapshot(source_id or self._default_source_id)
+                self.read_snapshot(source_id or self.default_source_id)
             )
         except CredentialError:
             return status
@@ -250,7 +250,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
 
     def ensure_inference_available(self, source_id: str) -> CredentialSnapshot:
         self.providers.ensure_enabled(source_id)
-        snapshot = self.account_cooldown(self._read_snapshot(source_id))
+        snapshot = self.account_cooldown(self.read_snapshot(source_id))
         if snapshot.is_access_token_expired() and not snapshot.refresh_token:
             self._states[source_id] = CredentialStatus("reauth_required")
         if snapshot.is_cooling_down():
@@ -266,7 +266,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
 
     def mark_reauthentication(self, snapshot: CredentialSnapshot) -> None:
         """Do not mark a replacement login as broken after an old request fails."""
-        current = self._read_snapshot(snapshot.source_id)
+        current = self.read_snapshot(snapshot.source_id)
         if current.access_token == snapshot.access_token:
             self._states[snapshot.source_id] = CredentialStatus("reauth_required")
 
@@ -277,26 +277,26 @@ class LocalCredentialCoordinator(CredentialCoordinator):
     def _login(self, source_id: str) -> LocalLogin | None:
         if (
             self.local_store is not None
-            and self._source(source_id).get("credential_mode") == LOCAL
+            and self.source(source_id).get("credential_mode") == LOCAL
         ):
             return self.local_store.read()
         return None
 
-    def _read_snapshot(self, source_id: str) -> CredentialSnapshot:
-        if self._source(source_id).get("credential_mode", DEVICE) not in {
+    def read_snapshot(self, source_id: str) -> CredentialSnapshot:
+        if self.source(source_id).get("credential_mode", DEVICE) not in {
             LOCAL,
             DEVICE,
         }:
             raise CredentialSourceError("Unsupported provider credential mode.")
         login = self._login(source_id)
         if login is None:
-            if self._source(source_id).get("credential_mode") == LOCAL:
+            if self.source(source_id).get("credential_mode") == LOCAL:
                 snapshot = replace(
                     self._snapshot_from_source(source_id, {"key": ""}),
                     credential_origin=LOCAL,
                 )
             else:
-                snapshot = super()._read_snapshot(source_id)
+                snapshot = super().read_snapshot(source_id)
         else:
             snapshot = self._snapshot_from_source(source_id, {"key": login.credentials})
             cooldown = self._local_cooldowns.get(snapshot.account_id, (None, None))
@@ -325,8 +325,8 @@ class LocalCredentialCoordinator(CredentialCoordinator):
         check_cooldown: bool = True,
         _switch_attempt: int = 0,
     ) -> CredentialSnapshot:
-        source_id = source_id or self._default_source_id
-        initial = self._read_snapshot(source_id)
+        source_id = source_id or self.default_source_id
+        initial = self.read_snapshot(source_id)
         if initial.credential_origin == LOCAL and not initial.access_token:
             raise ReauthenticationRequiredError(
                 "Sign in to local Codex on the AstrBot host."
@@ -335,8 +335,8 @@ class LocalCredentialCoordinator(CredentialCoordinator):
             return await super().get_snapshot(
                 source_id, force_refresh=force_refresh, check_cooldown=check_cooldown
             )
-        async with self._source_lock(source_id):
-            snapshot = self._read_snapshot(source_id)
+        async with self.source_lock(source_id):
+            snapshot = self.read_snapshot(source_id)
             if snapshot.credential_origin == "local_codex":
                 if not snapshot.access_token:
                     raise ReauthenticationRequiredError(
@@ -368,7 +368,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
                             self.source_settings(source_id)["proxy"] or None,
                         )
                     except Exception:  # noqa: BLE001 - never expose token endpoint errors
-                        latest = self._read_snapshot(source_id)
+                        latest = self.read_snapshot(source_id)
                         if latest != snapshot:
                             pass
                         elif (
@@ -388,7 +388,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
                             self.local_store is not None
                             and self.local_store.write_refresh(login, refreshed)
                         ):
-                            current = self._read_snapshot(source_id)
+                            current = self.read_snapshot(source_id)
                             if (
                                 current.credential_origin == "local_codex"
                                 and current.access_token == refreshed["access_token"]
@@ -414,8 +414,8 @@ class LocalCredentialCoordinator(CredentialCoordinator):
         reason: str = "usage_limit_reached",
         expected_access_token: str | None = None,
     ) -> CredentialSnapshot:
-        source_id = source_id or self._default_source_id
-        snapshot = self._read_snapshot(source_id)
+        source_id = source_id or self.default_source_id
+        snapshot = self.read_snapshot(source_id)
         if snapshot.credential_origin != "local_codex":
             return await super().mark_cooling(
                 source_id,
@@ -427,17 +427,17 @@ class LocalCredentialCoordinator(CredentialCoordinator):
             return snapshot
         self._local_cooldowns[snapshot.account_id] = (cooldown_until, reason)
         self._usage_cache.pop(source_id, None)
-        return self._read_snapshot(source_id)
+        return self.read_snapshot(source_id)
 
     async def get_usage(
         self, source_id: str | None, fetch_usage: Any
     ) -> dict[str, Any]:
-        source_id = source_id or self._default_source_id
-        self._read_snapshot(source_id)
+        source_id = source_id or self.default_source_id
+        self.read_snapshot(source_id)
 
         async def fetch(snapshot: CredentialSnapshot) -> dict[str, Any]:
             result = await fetch_usage(snapshot)
-            if self._read_snapshot(source_id) != snapshot:
+            if self.read_snapshot(source_id) != snapshot:
                 raise ReauthenticationRequiredError(
                     "The account changed. Retry the quota lookup."
                 )

@@ -270,9 +270,9 @@ class CredentialCoordinator:
         usage_cache_ttl_seconds: int = 30,
     ) -> None:
         self._config_manager = config_manager
-        self._provider_type = provider_type
-        self._default_source_id = default_source_id
-        self._default_source_factory = default_source_factory
+        self.provider_type = provider_type
+        self.default_source_id = default_source_id
+        self.default_source_factory = default_source_factory
         self._refresh_credentials = refresh_credentials
         self._refresh_skew_seconds = refresh_skew_seconds
         self._usage_cache_ttl_seconds = usage_cache_ttl_seconds
@@ -293,7 +293,12 @@ class CredentialCoordinator:
         """Refresh the callback after a plugin module hot reload."""
         self._refresh_credentials = refresh_credentials
 
-    def _conf(self) -> Any:
+    def forget(self, source_id: str) -> None:
+        """Drop cached health and quota for a replaced or removed login."""
+        self._states.pop(source_id, None)
+        self._usage_cache.pop(source_id, None)
+
+    def config(self) -> Any:
         if self._config_manager is None:
             raise CredentialSourceError(
                 "The AstrBot configuration manager is unavailable."
@@ -305,23 +310,23 @@ class CredentialCoordinator:
             )
         return conf
 
-    def _source_lock(self, source_id: str) -> asyncio.Lock:
+    def source_lock(self, source_id: str) -> asyncio.Lock:
         return self._source_locks.setdefault(source_id, asyncio.Lock())
 
     def _usage_lock(self, source_id: str) -> asyncio.Lock:
         return self._usage_locks.setdefault(source_id, asyncio.Lock())
 
-    def _source(self, source_id: str, *, create: bool = False) -> dict[str, Any]:
-        conf = self._conf()
-        source = find_source(conf, source_id, self._provider_type)
+    def source(self, source_id: str, *, create: bool = False) -> dict[str, Any]:
+        conf = self.config()
+        source = find_source(conf, source_id, self.provider_type)
         if source is not None:
             return source
-        if not create or source_id != self._default_source_id:
+        if not create or source_id != self.default_source_id:
             raise CredentialSourceError(
                 "The configured OpenAI provider source was not found."
             )
-        source = self._default_source_factory()
-        if source.get("id") != source_id or source.get("type") != self._provider_type:
+        source = self.default_source_factory()
+        if source.get("id") != source_id or source.get("type") != self.provider_type:
             raise CredentialSourceError(
                 "The default OpenAI provider source is invalid."
             )
@@ -347,13 +352,13 @@ class CredentialCoordinator:
             cooldown_reason=_as_string(creds.get("cooldown_reason")) or None,
         )
 
-    def _read_snapshot(self, source_id: str) -> CredentialSnapshot:
-        return self._snapshot_from_source(source_id, self._source(source_id))
+    def read_snapshot(self, source_id: str) -> CredentialSnapshot:
+        return self._snapshot_from_source(source_id, self.source(source_id))
 
     def source_settings(self, source_id: str | None = None) -> dict[str, str]:
         """Return only non-secret source settings required by control-plane calls."""
-        source = self._source(source_id or self._default_source_id)
-        gateway = subscription_gateway(self._conf(), self._provider_type) or {}
+        source = self.source(source_id or self.default_source_id)
+        gateway = subscription_gateway(self.config(), self.provider_type) or {}
         return {
             "proxy": _as_string(source.get("proxy") or gateway.get("proxy")),
             "originator": _as_string(source.get("originator")),
@@ -381,8 +386,8 @@ class CredentialCoordinator:
         creds: dict[str, Any],
     ) -> CredentialSnapshot:
         source["key"] = dump_credentials(creds, self.sealer)
-        committed = await self._conf().save_config_async()
-        persisted = self._snapshot_from_source(source_id, self._source(source_id))
+        committed = await self.config().save_config_async()
+        persisted = self._snapshot_from_source(source_id, self.source(source_id))
         expected = self._snapshot_from_source(
             source_id, {"key": normalize_credentials(creds)}
         )
@@ -404,8 +409,8 @@ class CredentialCoordinator:
         check_cooldown: bool = True,
     ) -> CredentialSnapshot:
         """Return a current source snapshot, refreshing it once when needed."""
-        resolved_source_id = source_id or self._default_source_id
-        snapshot = self._read_snapshot(resolved_source_id)
+        resolved_source_id = source_id or self.default_source_id
+        snapshot = self.read_snapshot(resolved_source_id)
         if not snapshot.access_token:
             self._states[resolved_source_id] = CredentialStatus("not_logged_in")
             raise CredentialsNotConfiguredError(
@@ -426,8 +431,8 @@ class CredentialCoordinator:
             self._states[resolved_source_id] = CredentialStatus("ready")
             return snapshot
 
-        async with self._source_lock(resolved_source_id):
-            snapshot = self._read_snapshot(resolved_source_id)
+        async with self.source_lock(resolved_source_id):
+            snapshot = self.read_snapshot(resolved_source_id)
             if check_cooldown and snapshot.is_cooling_down():
                 status = CredentialStatus(
                     "cooling",
@@ -453,7 +458,7 @@ class CredentialCoordinator:
                 self._states[resolved_source_id] = CredentialStatus("ready")
                 return snapshot
 
-            source = self._source(resolved_source_id)
+            source = self.source(resolved_source_id)
             self._states[resolved_source_id] = CredentialStatus("refreshing")
             try:
                 refreshed = await self._refresh_credentials(
@@ -474,7 +479,7 @@ class CredentialCoordinator:
                     "OpenAI credentials require reauthorization."
                 ) from exc
 
-            latest = self._read_snapshot(resolved_source_id)
+            latest = self.read_snapshot(resolved_source_id)
             if (
                 latest.access_token != snapshot.access_token
                 or latest.refresh_token != snapshot.refresh_token
@@ -496,9 +501,9 @@ class CredentialCoordinator:
         expected_access_token: str | None = None,
     ) -> CredentialSnapshot:
         """Persist a subscription cooldown without overwriting a newer login."""
-        resolved_source_id = source_id or self._default_source_id
-        async with self._source_lock(resolved_source_id):
-            source = self._source(resolved_source_id)
+        resolved_source_id = source_id or self.default_source_id
+        async with self.source_lock(resolved_source_id):
+            source = self.source(resolved_source_id)
             current = self._snapshot_from_source(resolved_source_id, source)
             if expected_access_token and current.access_token != expected_access_token:
                 return current
@@ -522,7 +527,7 @@ class CredentialCoordinator:
         fetch_usage: UsageFetcher,
     ) -> dict[str, Any]:
         """Fetch usage with source-scoped single-flight and a short cache."""
-        resolved_source_id = source_id or self._default_source_id
+        resolved_source_id = source_id or self.default_source_id
         now = time.monotonic()
         cached = self._usage_cache.get(resolved_source_id)
         if cached is not None and cached[0] > now:
@@ -546,9 +551,9 @@ class CredentialCoordinator:
 
     def status(self, source_id: str | None = None) -> CredentialStatus:
         """Return a safe state without requesting or exposing credentials."""
-        resolved_source_id = source_id or self._default_source_id
+        resolved_source_id = source_id or self.default_source_id
         try:
-            snapshot = self._read_snapshot(resolved_source_id)
+            snapshot = self.read_snapshot(resolved_source_id)
         except CredentialSchemaError:
             return CredentialStatus("invalid")
         except CredentialSourceError:

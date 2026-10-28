@@ -109,8 +109,8 @@ class _FakeConfigManager:
 
 def source(*, key: str = "", proxy: str = "") -> dict:
     return {
-        "id": runtime._PROVIDER_TYPE,
-        "type": runtime._PROVIDER_TYPE,
+        "id": runtime.PROVIDER_TYPE,
+        "type": runtime.PROVIDER_TYPE,
         "provider": "openai",
         "provider_type": "chat_completion",
         "key": key,
@@ -227,7 +227,7 @@ def test_server_owned_web_login_and_source_proxy() -> None:
         ):
             with request_context(
                 {
-                    "source_id": runtime._PROVIDER_TYPE,
+                    "source_id": runtime.PROVIDER_TYPE,
                     "proxy": "http://browser-controlled:8080",
                 }
             ):
@@ -250,7 +250,7 @@ def test_server_owned_web_login_and_source_proxy() -> None:
     check(start["user_code"] == "CODE-1234", "device code is returned to its owner")
     check(
         done
-        == {"status": "success", "error": None, "source_id": runtime._PROVIDER_TYPE},
+        == {"status": "success", "error": None, "source_id": runtime.PROVIDER_TYPE},
         "completed poll returns no credential",
     )
     check(
@@ -514,7 +514,7 @@ def test_effort_command() -> None:
         async def send(self, message) -> None:
             self.sent.append(message)
 
-    provider = _Provider(runtime._PROVIDER_TYPE)
+    provider = _Provider(runtime.PROVIDER_TYPE)
     context = _Context(provider)
     plugin_instance = SimpleNamespace(context=context)
     event = _Event()
@@ -560,7 +560,7 @@ def test_effort_command() -> None:
     check("high" in text, "/effort shows the current session override")
     check("不支持" in text, "/effort rejects unsupported values")
 
-    limited_provider = _Provider(runtime._PROVIDER_TYPE)
+    limited_provider = _Provider(runtime.PROVIDER_TYPE)
     limited_provider.provider_config["model"] = "gpt-limited"
     limited_event = _Event()
     limited_sp = SimpleNamespace(
@@ -607,7 +607,7 @@ def test_effort_command() -> None:
     selected_event.extras["selected_provider"] = "OpenAI Subscribe/gpt-5.6-luna"
     selected_context = _Context(
         _Provider("openai"),
-        _Provider(runtime._PROVIDER_TYPE),
+        _Provider(runtime.PROVIDER_TYPE),
     )
     selected_instance = SimpleNamespace(context=selected_context)
     selected_sp = SimpleNamespace(

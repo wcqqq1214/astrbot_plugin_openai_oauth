@@ -66,8 +66,8 @@ def credentials(*, expires: int = 9999999999) -> dict:
 
 def make_source(creds: dict) -> dict:
     return {
-        "id": runtime._PROVIDER_TYPE,
-        "type": runtime._PROVIDER_TYPE,
+        "id": runtime.PROVIDER_TYPE,
+        "type": runtime.PROVIDER_TYPE,
         "provider": "openai",
         "provider_type": "chat_completion",
         "key": json.dumps(creds),
@@ -80,8 +80,8 @@ def make_source(creds: dict) -> dict:
 
 def make_config(creds: dict, **overrides) -> dict:
     config = {
-        "type": runtime._PROVIDER_TYPE,
-        "provider_source_id": runtime._PROVIDER_TYPE,
+        "type": runtime.PROVIDER_TYPE,
+        "provider_source_id": runtime.PROVIDER_TYPE,
         "key": json.dumps(creds),
         "model": "gpt-5.4-mini",
         "proxy": "",
@@ -120,7 +120,7 @@ def test_provider_initialization_and_request_client() -> None:
     check("OpenAI-Beta" in root_headers, "static Responses beta header is set")
 
     snapshot = store.CredentialSnapshot(
-        source_id=runtime._PROVIDER_TYPE,
+        source_id=runtime.PROVIDER_TYPE,
         access_token="test-jwt-new.new.new",
         refresh_token="rt-new",
         expires=9999999999,
@@ -160,7 +160,7 @@ def test_provider_initialization_and_request_client() -> None:
 
 def test_hot_reload_and_offline_models() -> None:
     print("\n=== Hot reload and offline models ===")
-    metadata = provider_module.provider_cls_map[runtime._PROVIDER_TYPE]
+    metadata = provider_module.provider_cls_map[runtime.PROVIDER_TYPE]
     original = metadata.cls_type
 
     class _StaleProvider:
@@ -410,9 +410,9 @@ def test_session_effort_request_override() -> None:
     async def read_session_overrides() -> tuple[str | None, str | None, str | None]:
         with mock.patch.object(effort, "sp", fake_sp):
             return (
-                await effort._get_session_effort("umo-a"),
-                await effort._get_session_effort("umo-b"),
-                await effort._get_session_effort("umo-c"),
+                await effort.get_session_effort("umo-a"),
+                await effort.get_session_effort("umo-b"),
+                await effort.get_session_effort("umo-c"),
             )
 
     session_values = asyncio.run(read_session_overrides())

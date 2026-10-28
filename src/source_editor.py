@@ -26,12 +26,12 @@ def install(coordinator):
     @wraps(original)
     async def guarded(service, source_id, config):
         registry = coordinator.providers
-        if service.config is not coordinator._conf():
+        if service.config is not coordinator.config():
             return await original(service, source_id, config)
         async with registry.lock, AsyncExitStack() as locks:
             gateway = registry.gateway()
-            fixed_id = coordinator._default_source_id
-            provider_type = coordinator._provider_type
+            fixed_id = coordinator.default_source_id
+            provider_type = coordinator.provider_type
             current = next(
                 (
                     s
@@ -65,7 +65,7 @@ def install(coordinator):
             if config.get("type", provider_type) != provider_type:
                 raise ValueError("The OpenAI Subscribe source type cannot be changed.")
             for account in registry.sources():
-                await locks.enter_async_context(coordinator._source_lock(account["id"]))
+                await locks.enter_async_context(coordinator.source_lock(account["id"]))
             gateway = registry.gateway()
             updated = deepcopy(config)
             updated.update(id=fixed_id, type=provider_type)

@@ -15,7 +15,7 @@ _EFFORT_LEVELS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 _SESSION_EFFORT_KEY = "openai_oauth_reasoning_effort"
 
 
-def _normalize_effort(value: Any) -> str | None:
+def normalize_effort(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     normalized = value.strip().lower()
@@ -37,11 +37,11 @@ def _model_efforts(provider: Any) -> tuple[str, ...] | None:
     return oauth.supported_efforts(_provider_model(provider))
 
 
-async def _get_session_effort(session_id: Any) -> str | None:
+async def get_session_effort(session_id: Any) -> str | None:
     if not isinstance(session_id, str) or not session_id:
         return None
     try:
-        return _normalize_effort(
+        return normalize_effort(
             await sp.get_async(
                 scope="umo",
                 scope_id=session_id,
@@ -61,11 +61,11 @@ def _provider_default_effort(provider: Any) -> str | None:
     extra_body = provider.provider_config.get("custom_extra_body")
     if not isinstance(extra_body, dict):
         return None
-    configured = _normalize_effort(extra_body.get("reasoning_effort"))
+    configured = normalize_effort(extra_body.get("reasoning_effort"))
     if configured:
         return configured
     reasoning = extra_body.get("reasoning")
-    return _normalize_effort(
+    return normalize_effort(
         reasoning.get("effort") if isinstance(reasoning, dict) else None
     )
 
@@ -94,7 +94,7 @@ async def handle_effort(
         )
         await event.send(MessageChain().message("无法识别当前会话的模型。"))
         return
-    if provider is None or provider.meta().type != runtime._PROVIDER_TYPE:
+    if provider is None or provider.meta().type != runtime.PROVIDER_TYPE:
         await event.send(
             MessageChain().message(
                 "当前会话未使用 OpenAI Subscribe 模型，无法设置推理强度。"
@@ -104,7 +104,7 @@ async def handle_effort(
 
     requested = str(value or "").strip().lower()
     if not requested:
-        override = await _get_session_effort(session_id)
+        override = await get_session_effort(session_id)
         default = _provider_default_effort(provider)
         if override:
             message = f"当前会话推理强度：{override}（会话覆盖）。"
@@ -137,7 +137,7 @@ async def handle_effort(
         )
         return
 
-    effort = _normalize_effort(requested)
+    effort = normalize_effort(requested)
     supported = _model_efforts(provider)
     if effort is None or (supported is not None and effort not in supported):
         await event.send(

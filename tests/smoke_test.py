@@ -88,8 +88,8 @@ def main() -> int:
     runtime = importlib.import_module(f"{module.__package__}.src.runtime")
     check(module is not None, "data.plugins.astrbot_plugin_openai_oauth.main 导入成功")
     check(
-        PROVIDER_TYPE == runtime._PROVIDER_TYPE,
-        f"test constant matches the runtime provider type ({runtime._PROVIDER_TYPE})",
+        PROVIDER_TYPE == runtime.PROVIDER_TYPE,
+        f"test constant matches the runtime provider type ({runtime.PROVIDER_TYPE})",
     )
 
     print("\n=== 3. provider 已进入注册表 ===")

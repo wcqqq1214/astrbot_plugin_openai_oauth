@@ -170,14 +170,14 @@ def _register_provider_adapter_if_absent(cls: type) -> type:
     duplicate registration is necessary, but the metadata must still point to the
     newly imported class or provider instances will continue using stale code.
     """
-    if runtime._PROVIDER_TYPE not in provider_cls_map:
+    if runtime.PROVIDER_TYPE not in provider_cls_map:
         return register_provider_adapter(
-            runtime._PROVIDER_TYPE,
+            runtime.PROVIDER_TYPE,
             "OpenAI 订阅登录 (Codex OAuth) Provider",
             provider_display_name="OpenAI Subscribe",
             default_config_tmpl=runtime._default_provider_template(),
         )(cls)
-    provider_cls_map[runtime._PROVIDER_TYPE].cls_type = cls
+    provider_cls_map[runtime.PROVIDER_TYPE].cls_type = cls
     return cls
 
 
@@ -215,11 +215,11 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                     s["id"]
                     for s in sources
                     if s.get("id") == provider_config.get("id")
-                    and s.get("type") == runtime._PROVIDER_TYPE
+                    and s.get("type") == runtime.PROVIDER_TYPE
                 ),
                 None,
             )
-        self._source_id = str(source_id or runtime._PROVIDER_TYPE)
+        self._source_id = str(source_id or runtime.PROVIDER_TYPE)
         self._originator = str(provider_config.get("originator", DEFAULT_ORIGINATOR))
         self._user_agent = oauth.resolve_user_agent(provider_config.get("user_agent"))
         raw_headers = provider_config.get("custom_headers")
@@ -266,9 +266,9 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
 
     @property
     def _source_id(self) -> str:
-        legacy = getattr(self, "_legacy_source_id", runtime._PROVIDER_TYPE)
+        legacy = getattr(self, "_legacy_source_id", runtime.PROVIDER_TYPE)
         try:
-            registry = runtime._get_credential_coordinator().providers
+            registry = runtime.get_coordinator().providers
         except CredentialError:
             return legacy
         return registry.resolve_model(
@@ -309,8 +309,8 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
     @asynccontextmanager
     async def _source_client(self, snapshot: CredentialSnapshot):
         """Build a request client on the selected source's own transport."""
-        coordinator = runtime._get_credential_coordinator()
-        source = coordinator._source(snapshot.source_id)
+        coordinator = runtime.get_coordinator()
+        source = coordinator.source(snapshot.source_id)
         settings = coordinator.source_settings(snapshot.source_id)
         # Model headers remain useful on the preferred source. Never carry another
         # source's headers or proxy into a fallback account.
@@ -322,7 +322,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
             model = next(
                 (
                     m
-                    for m in coordinator._conf().get("provider", [])
+                    for m in coordinator.config().get("provider", [])
                     if m.get("id") == model_id
                 ),
                 {},
@@ -466,7 +466,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                 extra_body[key] = payloads.pop(key)
 
         _drop_unsupported_params(payloads, extra_body)
-        effective_session_effort = effort._normalize_effort(session_effort)
+        effective_session_effort = effort.normalize_effort(session_effort)
         supported = oauth.supported_efforts(payloads.get("model"))
         if (
             effective_session_effort
@@ -834,7 +834,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
 
     async def get_models(self) -> list[str]:
         try:
-            coordinator = runtime._get_credential_coordinator()
+            coordinator = runtime.get_coordinator()
             source_id = self._source_id
             settings = coordinator.source_settings(source_id)
             snapshot = await coordinator.get_snapshot(source_id)
@@ -872,9 +872,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         self,
         snapshot: CredentialSnapshot,
     ) -> dict[str, Any]:
-        settings = runtime._get_credential_coordinator().source_settings(
-            snapshot.source_id
-        )
+        settings = runtime.get_coordinator().source_settings(snapshot.source_id)
         return await retry_provider_request(
             "OpenAI Codex",
             lambda: oauth.fetch_rate_limits(
@@ -891,7 +889,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         self,
         snapshot: CredentialSnapshot,
     ) -> CredentialCooldownError:
-        coordinator = runtime._get_credential_coordinator()
+        coordinator = runtime.get_coordinator()
         # Retain a conservative cooldown even if the quota lookup times out or
         # the caller cancels while fetching a more precise reset time.
         provisional = await coordinator.mark_cooling(
@@ -905,7 +903,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                 snapshot.source_id,
                 self._fetch_usage_for_snapshot,
             )
-            cooldown_until = usage_service._cooldown_until_from_usage(usage)
+            cooldown_until = usage_service.cooldown_until_from_usage(usage)
         except Exception as exc:  # noqa: BLE001 - a failed usage lookup is non-fatal
             logger.warning(
                 "OpenAI Codex quota lookup after rate limit failed: %s",
@@ -931,7 +929,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         request_max_retries: int | None,
         session_effort: str | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
-        coordinator = runtime._get_credential_coordinator()
+        coordinator = runtime.get_coordinator()
         candidates = coordinator.providers.candidates(self._source_id)
         automatic = coordinator.providers.routing_mode(self._source_id) == "auto"
         if not automatic:
@@ -981,7 +979,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                     deadline.reschedule(startup_deadline)
                     try:
                         coordinator.ensure_inference_available(source_id)
-                        initial = coordinator._read_snapshot(source_id)
+                        initial = coordinator.read_snapshot(source_id)
                         identity = initial.account_id or initial.access_token
                         if identity and identity in seen:
                             failures.append((source_id, "duplicate_account"))
@@ -1051,7 +1049,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         seen: set[str] | None = None,
         on_stream_open: Callable[[], None] | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
-        coordinator = runtime._get_credential_coordinator()
+        coordinator = runtime.get_coordinator()
         retry_after_credential_error = True
         emitted_chunk = False
         base_payloads = deepcopy(payloads)
@@ -1202,7 +1200,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
             cache_key = self._prompt_cache_key(session_id, payloads)
             if cache_key:
                 payloads.setdefault("prompt_cache_key", cache_key)
-        session_effort = await effort._get_session_effort(session_id)
+        session_effort = await effort.get_session_effort(session_id)
         emitted = False
         try:
             async with aclosing(

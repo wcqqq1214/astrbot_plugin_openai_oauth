@@ -108,7 +108,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.registry = self.coordinator.providers
         patcher = patch.object(
-            runtime, "_get_credential_coordinator", return_value=self.coordinator
+            runtime, "get_coordinator", return_value=self.coordinator
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -295,7 +295,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(client.is_closed for _, client in self.transports))
 
     async def test_single_source_switch_updates_existing_instance_and_headers(self):
-        self.coordinator._default_source_factory = lambda: {
+        self.coordinator.default_source_factory = lambda: {
             "id": "local",
             "type": "OpenAI Subscribe",
             "key": "",
@@ -366,7 +366,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
                 "reauth_required",
             ),
         ):
-            self.coordinator._source("same")["key"] = json.dumps(creds)
+            self.coordinator.source("same")["key"] = json.dumps(creds)
             self.requests.clear()
             await self.collect()
             self.assertEqual(self.requested(), ["other"])
@@ -585,7 +585,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
                 self.catalog_outcomes = [httpx.Response(403, **body) for _ in range(2)]
                 with patch.object(oauth, "fetch_rate_limits", new=FETCH_RATE_LIMITS):
                     with self.assertRaises(httpx.HTTPStatusError):
-                        await usage_service._fetch_source_usage("same")
+                        await usage_service.fetch_source_usage("same")
                     message = await usage_service.build_usage_message("same")
                 self.assertEqual(message, "额度查询失败，请稍后重试。")
                 self.refresh.assert_not_awaited()
@@ -593,13 +593,13 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(self.coordinator.account_view("same"), view)
 
     async def test_usage_401_refreshes_once_and_retries(self):
-        token = self.coordinator._read_snapshot("same").access_token
+        token = self.coordinator.read_snapshot("same").access_token
         self.catalog_outcomes = [
             httpx.Response(401, json={"error": {"code": "token_expired"}}),
             httpx.Response(200, json=USAGE_BODY),
         ]
         with patch.object(oauth, "fetch_rate_limits", new=FETCH_RATE_LIMITS):
-            usage = await usage_service._fetch_source_usage("same")
+            usage = await usage_service.fetch_source_usage("same")
         self.assertEqual(usage["windows"][0]["used_percent"], 25.0)
         self.refresh.assert_awaited_once()
         self.assertEqual(
@@ -609,7 +609,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.refresh.reset_mock()
         self.catalog_requests.clear()
-        self.coordinator._usage_cache.clear()
+        self.coordinator.forget("same")
         self.catalog_outcomes = [httpx.Response(401) for _ in range(2)]
         with patch.object(oauth, "fetch_rate_limits", new=FETCH_RATE_LIMITS):
             message = await usage_service.build_usage_message("same")
@@ -622,7 +622,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         for catalog in (False, True):
             for status, body in AUTH_FAILURES:
                 with self.subTest(catalog=catalog, status=status, body=body):
-                    token = self.coordinator._read_snapshot("same").access_token
+                    token = self.coordinator.read_snapshot("same").access_token
                     self.refresh.reset_mock()
                     if catalog:
                         self.catalog_requests.clear()

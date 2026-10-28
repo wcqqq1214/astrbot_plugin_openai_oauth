@@ -64,7 +64,7 @@ class SingleSourceTests(unittest.IsolatedAsyncioTestCase):
                 "enable": False,
             },
         )
-        work = self.coordinator._source("work")
+        work = self.coordinator.source("work")
         self.assertEqual(work["key"], self.original["key"])
         self.assertFalse(work["enable"])
         self.assertEqual(work["oauth_routing_mode"], "auto")
@@ -236,12 +236,12 @@ class SingleSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.conf["provider_sources"]), 1)
 
     async def test_device_refresh_uses_effective_proxy_and_persists_rotation(self):
-        self.coordinator._default_source_factory = (
+        self.coordinator.default_source_factory = (
             fixtures.runtime._build_default_source_config
         )
         await self.registry.migrate()
         await self.registry.save_login("device", "Device", self.creds, creating=True)
-        account = self.coordinator._source("device")
+        account = self.coordinator.source("device")
         for account_proxy, gateway_proxy, expected in (
             ("", "http://shared:8080", "http://shared:8080"),
             ("http://account:8080", "http://shared:8080", "http://account:8080"),

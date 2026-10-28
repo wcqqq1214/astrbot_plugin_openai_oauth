@@ -102,7 +102,7 @@ async def _persist_login_credentials(
     creating: bool = True,
 ) -> str:
     """Persist only the provider bound to the server-owned device session."""
-    registry = runtime._get_credential_coordinator().providers
+    registry = runtime.get_coordinator().providers
     source_id = source_id or registry.new_id()
     await registry.save_login(source_id, name, creds, creating=creating)
     return source_id
@@ -231,7 +231,7 @@ async def handle_login(event: AstrMessageEvent) -> None:
     if current_task is not None:
         _command_login_tasks[owner] = current_task
     try:
-        proxy = runtime._get_credential_coordinator().source_settings()["proxy"]
+        proxy = runtime.get_coordinator().source_settings()["proxy"]
     except CredentialSourceError:
         proxy = ""
     try:

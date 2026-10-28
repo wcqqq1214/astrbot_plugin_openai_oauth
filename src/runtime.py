@@ -23,7 +23,7 @@ from .oauth import (
 )
 
 _REFRESH_SKEW_SECONDS = 120
-_PROVIDER_TYPE = "OpenAI Subscribe"
+PROVIDER_TYPE = "OpenAI Subscribe"
 _PLUGIN_NAME = "astrbot_plugin_openai_oauth"
 # Optional override, e.g. to keep the key on a separate secret mount.
 _CREDENTIAL_KEY_ENV = "OPENAI_OAUTH_CREDENTIAL_KEY_FILE"
@@ -47,7 +47,7 @@ def _credential_key_path() -> Path:
 def _build_default_source_config() -> dict[str, Any]:
     return {
         "provider": "openai",
-        "type": _PROVIDER_TYPE,
+        "type": PROVIDER_TYPE,
         "provider_type": "chat_completion",
         "key": "",
         "api_base": CODEX_BASE,
@@ -55,7 +55,7 @@ def _build_default_source_config() -> dict[str, Any]:
         "originator": DEFAULT_ORIGINATOR,
         # Empty follows the Codex version this plugin and local Codex name.
         "user_agent": "",
-        "id": _PROVIDER_TYPE,
+        "id": PROVIDER_TYPE,
         "enable": True,
     }
 
@@ -77,7 +77,7 @@ def _default_provider_template() -> dict[str, Any]:
     } | {"model": "gpt-5.4-mini"}
 
 
-def _get_credential_coordinator() -> CredentialCoordinator:
+def get_coordinator() -> CredentialCoordinator:
     global _credential_coordinator
     cfg_mgr = _config_mgr
     if cfg_mgr is None:
@@ -101,8 +101,8 @@ def _get_credential_coordinator() -> CredentialCoordinator:
 
     coordinator = CredentialCoordinator(
         cfg_mgr,
-        provider_type=_PROVIDER_TYPE,
-        default_source_id=_PROVIDER_TYPE,
+        provider_type=PROVIDER_TYPE,
+        default_source_id=PROVIDER_TYPE,
         default_source_factory=_build_default_source_config,
         refresh_credentials=oauth.refresh_access_token,
         refresh_skew_seconds=_REFRESH_SKEW_SECONDS,
@@ -132,7 +132,7 @@ def configure(context: Context, config: AstrBotConfig) -> None:
     _credential_sealer = FernetCredentialSealer(_credential_key_path())
     _local_codex_store = LocalCodexStore(str(config.get("codex_auth_path", "") or ""))
     oauth.set_codex_home(_local_codex_store.path.parent)
-    coordinator = _get_credential_coordinator()
+    coordinator = get_coordinator()
     _remove_source_guard = source_editor.install(coordinator)
     coordinator.legacy_follow_local = config.get("follow_local_codex", True)
     manager = getattr(context, "provider_manager", None)
@@ -140,7 +140,7 @@ def configure(context: Context, config: AstrBotConfig) -> None:
 
         def sync_sources(sources: list[dict[str, Any]]) -> None:
             manager.provider_sources_config = sources
-            manager.providers_config = coordinator._conf().get("provider", [])
+            manager.providers_config = coordinator.config().get("provider", [])
 
         coordinator.providers.on_change = sync_sources
 
@@ -149,7 +149,7 @@ async def initialize(context: Context) -> None:
     """Migrate storage and replace model instances retained across plugin reloads."""
     from .provider import ProviderOpenAICodex
 
-    coordinator = _get_credential_coordinator()
+    coordinator = get_coordinator()
     await coordinator.ensure_default_source()
     try:
         sealed = await coordinator.providers.seal_stored_credentials()
@@ -171,10 +171,10 @@ async def initialize(context: Context) -> None:
         (key for key, inst in instances.items() if inst is selected), None
     )
     try:
-        for model in list(coordinator._conf().get("provider", [])):
+        for model in list(coordinator.config().get("provider", [])):
             if model["id"] not in instances or not (
-                model.get("provider_source_id") == coordinator._default_source_id
-                or model.get("type") == _PROVIDER_TYPE
+                model.get("provider_source_id") == coordinator.default_source_id
+                or model.get("type") == PROVIDER_TYPE
             ):
                 continue
             await manager.reload(model)

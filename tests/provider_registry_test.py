@@ -65,7 +65,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.registry = self.coordinator.providers
         patcher = patch.object(
-            runtime, "_get_credential_coordinator", return_value=self.coordinator
+            runtime, "get_coordinator", return_value=self.coordinator
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -263,7 +263,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         )
         await self.registry.migrate()
         self.assertEqual(
-            self.coordinator._source("custom")["credential_mode"], "device_oauth"
+            self.coordinator.source("custom")["credential_mode"], "device_oauth"
         )
         self.assertEqual(self.conf["provider_sources"][-1]["key"], "untouched")
 
@@ -303,7 +303,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.conf["provider_sources"]), 1)
         self.assertEqual(self.registry.sources()[:-1], before[0]["oauth_accounts"])
         await self.registry.edit("new", name="Personal")
-        self.assertEqual(self.coordinator._source("new")["name"], "Personal")
+        self.assertEqual(self.coordinator.source("new")["name"], "Personal")
         self.conf["provider"].append({"id": "new-model", "provider_source_id": "new"})
         with self.assertRaises(store.CredentialSourceError):
             await self.registry.edit("new", delete=True)
@@ -359,7 +359,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.registry.sources()[:2], before[0]["oauth_accounts"])
             same = await complete({"source_id": one["source_id"], "name": "ignored"})
             self.assertEqual(same["source_id"], one["source_id"])
-            self.assertEqual(self.coordinator._source(one["source_id"])["name"], "One")
+            self.assertEqual(self.coordinator.source(one["source_id"])["name"], "One")
             self.assertEqual(len(self.registry.owned()), 4)
             with request_context({"source_id": "OpenAI Subscribe"}):
                 self.assertEqual(
@@ -439,18 +439,18 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
                         ),
                     ):
                         # Queue the new login before the old usage result writes its cooldown.
-                        async with self.coordinator._source_lock(sid):
+                        async with self.coordinator.source_lock(sid):
                             tasks.append(asyncio.create_task(replace_login()))
                             await asyncio.wait_for(saving_started.wait(), 5)
                             tasks.append(
                                 asyncio.create_task(
-                                    usage_service._fetch_source_usage(sid)
+                                    usage_service.fetch_source_usage(sid)
                                 )
                             )
                             await asyncio.wait_for(cooling_started.wait(), 5)
                         await asyncio.gather(*tasks)
                         self.assertEqual(fetch.await_count, 0 if cached else 1)
-                    snapshot = self.coordinator._read_snapshot(sid)
+                    snapshot = self.coordinator.read_snapshot(sid)
                     self.assertEqual(snapshot.account_id, "replacement")
                     self.assertFalse(snapshot.is_cooling_down())
                 finally:
@@ -478,9 +478,9 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
                 oauth, "fetch_rate_limits", new=AsyncMock(return_value=exhausted)
             ) as fetch,
         ):
-            await usage_service._fetch_source_usage(sid)
+            await usage_service.fetch_source_usage(sid)
         self.assertEqual(fetch.call_args.args[0], refreshed["access_token"])
-        self.assertTrue(self.coordinator._read_snapshot(sid).is_cooling_down())
+        self.assertTrue(self.coordinator.read_snapshot(sid).is_cooling_down())
 
     async def test_cancellation_cannot_interrupt_a_started_save(self):
         await self.registry.migrate()
@@ -517,7 +517,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
                 result = payload(await web_api._handle_device_poll())
             self.assertEqual(result["status"], "success")
             self.assertEqual(
-                self.coordinator._source(result["source_id"])["name"], "Saving"
+                self.coordinator.source(result["source_id"])["name"], "Saving"
             )
 
     async def test_usage_command_resolves_current_model_source(self):
@@ -528,7 +528,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
             send=AsyncMock(),
         )
         provider = SimpleNamespace(
-            meta=lambda: SimpleNamespace(type=runtime._PROVIDER_TYPE),
+            meta=lambda: SimpleNamespace(type=runtime.PROVIDER_TYPE),
             _source_id="selected-source",
         )
         instance = SimpleNamespace(

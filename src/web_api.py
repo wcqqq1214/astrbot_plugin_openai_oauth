@@ -56,7 +56,7 @@ async def _handle_device_start() -> Any:
     body = await request.json(default={}) or {}
     if not isinstance(body, dict):
         return _login_error_response("请求格式无效", 400)
-    coordinator = runtime._get_credential_coordinator()
+    coordinator = runtime.get_coordinator()
     source_id = body.get("source_id")
     creating = source_id is None
     try:
@@ -66,7 +66,7 @@ async def _handle_device_start() -> Any:
         else:
             if not isinstance(source_id, str) or not source_id:
                 raise CredentialSourceError("Invalid provider ID.")
-            source = coordinator._source(source_id)
+            source = coordinator.source(source_id)
             if source.get("credential_mode", "device_oauth") != "device_oauth":
                 raise CredentialSourceError(
                     "Sign in to local Codex on the AstrBot host."
@@ -224,13 +224,11 @@ async def _requested_source_id() -> str:
         raise CredentialSourceError("Invalid request body.")
     source_id = body.get(
         "source_id",
-        runtime._get_credential_coordinator().providers.routing_view()[
-            "default_account_id"
-        ],
+        runtime.get_coordinator().providers.routing_view()["default_account_id"],
     )
     if not isinstance(source_id, str) or not source_id:
         raise CredentialSourceError("Invalid provider ID.")
-    runtime._get_credential_coordinator()._source(source_id)
+    runtime.get_coordinator().source(source_id)
     return source_id
 
 
@@ -238,7 +236,7 @@ async def _handle_providers_list() -> Any:
     if message := _login_request_error():
         return _login_error_response(message, 403)
     try:
-        coordinator = runtime._get_credential_coordinator()
+        coordinator = runtime.get_coordinator()
         providers = [
             coordinator.account_view(s["id"]) for s in coordinator.providers.owned()
         ]
@@ -269,7 +267,7 @@ async def _handle_routing_update() -> Any:
             raise CredentialSourceError("Invalid account ID.")
         if "model_id" in body and (not isinstance(model_id, str) or not model_id):
             raise CredentialSourceError("Invalid model ID.")
-        registry = runtime._get_credential_coordinator().providers
+        registry = runtime.get_coordinator().providers
         await registry.update_routing(account_id, model_id=model_id)
         return json_response(
             {"status": "success", "routing": registry.routing_view()},
@@ -289,7 +287,7 @@ async def _edit_provider(*, delete: bool) -> Any:
             raise CredentialSourceError("Provider ID is required.")
         if set(body) - {"source_id", "name", "enabled", "routing_mode"}:
             raise CredentialSourceError("Unknown provider update field.")
-        coordinator = runtime._get_credential_coordinator()
+        coordinator = runtime.get_coordinator()
         await coordinator.providers.edit(
             source_id,
             delete=delete,
@@ -323,7 +321,7 @@ async def _handle_account_status() -> Any:
     if message := _login_request_error():
         return _login_error_response(message, 403)
     try:
-        coordinator = runtime._get_credential_coordinator()
+        coordinator = runtime.get_coordinator()
         status = coordinator.account_view(await _requested_source_id())
     except CredentialError:
         status = {"status": "invalid"}
@@ -336,9 +334,9 @@ async def _handle_account_usage() -> Any:
     before: dict[str, Any] = {}
     try:
         source_id = await _requested_source_id()
-        coordinator = runtime._get_credential_coordinator()
+        coordinator = runtime.get_coordinator()
         before = coordinator.account_view(source_id)
-        usage = await usage_service._fetch_source_usage(source_id)
+        usage = await usage_service.fetch_source_usage(source_id)
         account = coordinator.account_view(source_id)
         if before.get("account_revision") != account.get("account_revision"):
             return json_response(
@@ -355,7 +353,7 @@ async def _handle_account_usage() -> Any:
             headers=_NO_STORE_HEADERS,
         )
     except ReauthenticationRequiredError:
-        account = runtime._get_credential_coordinator().account_view(source_id)
+        account = runtime.get_coordinator().account_view(source_id)
         state = (
             "account_changed"
             if before.get("account_revision") != account.get("account_revision")

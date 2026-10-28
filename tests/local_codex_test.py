@@ -130,7 +130,7 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
             (await self.coordinator.get_snapshot("device")).account_id, "new-device"
         )
         self.assertEqual(
-            self.coordinator._read_snapshot("OpenAI Subscribe").credential_origin,
+            self.coordinator.read_snapshot("OpenAI Subscribe").credential_origin,
             "local_codex",
         )
         self.refresh.assert_not_awaited()
@@ -227,7 +227,7 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
         self,
     ):
         self.write(auth())
-        lock = self.coordinator._source_lock("OpenAI Subscribe")
+        lock = self.coordinator.source_lock("OpenAI Subscribe")
         await lock.acquire()
         waiting = asyncio.create_task(self.coordinator.get_snapshot())
         await asyncio.sleep(0)
@@ -308,7 +308,7 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(web_api, "_login_request_error", return_value=None),
                     patch.object(
                         runtime,
-                        "_get_credential_coordinator",
+                        "get_coordinator",
                         return_value=self.coordinator,
                     ),
                     patch.object(
@@ -329,13 +329,13 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
     def test_cooldown_without_exhausted_window_has_no_invented_reset(self):
         for used in (40, None, True, float("nan")):
             self.assertIsNone(
-                usage_service._cooldown_until_from_usage(
+                usage_service.cooldown_until_from_usage(
                     {"windows": [{"used_percent": used, "reset_at": 9999999999}]}
                 )
             )
         with patch.object(usage_service.time, "time", return_value=2000000000):
             self.assertEqual(
-                usage_service._cooldown_until_from_usage(
+                usage_service.cooldown_until_from_usage(
                     {"windows": [{"used_percent": 100, "reset_after_seconds": 60}]}
                 ),
                 2000000060,
@@ -422,7 +422,7 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
             )
             instance = plugin.OpenAI_OAuth_Plugin(context, config={})
             await instance.initialize()
-            coordinator = runtime._get_credential_coordinator()
+            coordinator = runtime.get_coordinator()
             self.assertEqual((await coordinator.get_snapshot()).account_id, "one")
             provider = plugin.ProviderOpenAICodex(dict(self.source), {})
             try:
@@ -468,9 +468,7 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(web_api, "_login_request_error", return_value=None),
-            patch.object(
-                runtime, "_get_credential_coordinator", return_value=self.coordinator
-            ),
+            patch.object(runtime, "get_coordinator", return_value=self.coordinator),
             patch.object(oauth, "fetch_rate_limits", new=switched_usage),
         ):
             response = await web_api._handle_account_usage()
@@ -488,10 +486,8 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(web_api, "_login_request_error", return_value=None),
-            patch.object(
-                runtime, "_get_credential_coordinator", return_value=self.coordinator
-            ),
-            patch.object(usage_service, "_fetch_source_usage", new=switched_usage),
+            patch.object(runtime, "get_coordinator", return_value=self.coordinator),
+            patch.object(usage_service, "fetch_source_usage", new=switched_usage),
         ):
             response = await web_api._handle_account_usage()
         data = json.loads(response.body)

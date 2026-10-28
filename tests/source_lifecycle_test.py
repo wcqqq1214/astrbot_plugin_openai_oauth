@@ -33,7 +33,7 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.original.update(
             provider_type="chat_completion", api_base="https://example.invalid"
         )
-        self.coordinator._default_source_factory = lambda: {
+        self.coordinator.default_source_factory = lambda: {
             **self.original,
             "key": "",
             "proxy": "",
@@ -117,7 +117,7 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
         reload.assert_not_awaited()
 
     async def test_migration_preserves_effective_model_timeout_and_request_body(self):
-        self.coordinator._default_source_factory = runtime._build_default_source_config
+        self.coordinator.default_source_factory = runtime._build_default_source_config
         first = self.conf["provider_sources"][0]
         first.update(
             proxy="",
@@ -231,7 +231,7 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     def pre_repair_gateway(self):
         """Build a legacy gateway with account settings but no origin history."""
-        self.coordinator._default_source_factory = runtime._build_default_source_config
+        self.coordinator.default_source_factory = runtime._build_default_source_config
         account = {
             **deepcopy(self.original),
             "proxy": "",
