@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -103,6 +104,36 @@ class CredentialStatus:
 RefreshCredentials = Callable[[dict[str, Any], str | None], Awaitable[dict[str, Any]]]
 UsageFetcher = Callable[[CredentialSnapshot], Awaitable[dict[str, Any]]]
 DefaultSourceFactory = Callable[[], dict[str, Any]]
+
+
+AUTH_CLAIM = "https://api.openai.com/auth"
+PROFILE_CLAIM = "https://api.openai.com/profile"
+
+
+def jwt_claims(token: Any) -> dict[str, Any]:
+    """Decode a JWT payload without verifying it; empty for anything else."""
+    if not isinstance(token, str):
+        return {}
+    try:
+        payload = token.split(".")[1]
+        decoded = json.loads(
+            base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+        )
+    except (ValueError, IndexError, UnicodeError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def token_account_id(token: Any) -> str:
+    """Read the ChatGPT account ID; older tokens carry it as a flat claim."""
+    claims = jwt_claims(token)
+    auth = claims.get(AUTH_CLAIM)
+    if isinstance(auth, dict):
+        value = auth.get("chatgpt_account_id")
+        if isinstance(value, str) and value:
+            return value
+    value = claims.get(f"{AUTH_CLAIM}.chatgpt_account_id")
+    return value if isinstance(value, str) else ""
 
 
 def _as_string(value: Any) -> str:

@@ -16,15 +16,12 @@ from . import usage as usage_service
 from .credential_store import (
     CredentialCooldownError,
     CredentialError,
-    CredentialSchemaError,
-    CredentialsNotConfiguredError,
     CredentialSourceError,
     ReauthenticationRequiredError,
 )
 from .oauth import (
     CODEX_DEVICE_LOGIN_TIMEOUT,
     CODEX_DEVICE_VERIFY_URL,
-    CredentialExpiredError,
     DeviceAuthError,
 )
 
@@ -343,32 +340,34 @@ async def _handle_account_usage() -> Any:
                 {"status": "account_changed", "account": account},
                 headers=_NO_STORE_HEADERS,
             )
-    except CredentialCooldownError as exc:
-        return json_response(
-            {
-                "status": "cooling",
-                "cooldown_until": exc.cooldown_until,
-                "cooldown_reason": exc.reason,
-            },
-            headers=_NO_STORE_HEADERS,
-        )
-    except ReauthenticationRequiredError:
-        account = runtime.get_coordinator().account_view(source_id)
-        state = (
-            "account_changed"
-            if before.get("account_revision") != account.get("account_revision")
-            else "reauth_required"
-        )
-        return json_response(
-            {"status": state, "account": account}, headers=_NO_STORE_HEADERS
-        )
-    except (CredentialsNotConfiguredError, CredentialExpiredError):
-        return json_response({"status": "reauth_required"}, headers=_NO_STORE_HEADERS)
-    except CredentialSchemaError:
-        return json_response({"status": "invalid"}, headers=_NO_STORE_HEADERS)
-    except CredentialError:
-        return json_response({"status": "invalid"}, headers=_NO_STORE_HEADERS)
     except Exception as exc:  # noqa: BLE001 - do not expose provider responses
+        state = usage_service.failure_state(exc)
+        if isinstance(exc, CredentialCooldownError):
+            return json_response(
+                {
+                    "status": "cooling",
+                    "cooldown_until": exc.cooldown_until,
+                    "cooldown_reason": exc.reason,
+                },
+                headers=_NO_STORE_HEADERS,
+            )
+        if isinstance(exc, ReauthenticationRequiredError):
+            # A login replaced while the lookup ran is not a broken login.
+            account = runtime.get_coordinator().account_view(source_id)
+            changed = before.get("account_revision") != account.get("account_revision")
+            return json_response(
+                {
+                    "status": "account_changed" if changed else "reauth_required",
+                    "account": account,
+                },
+                headers=_NO_STORE_HEADERS,
+            )
+        if state == "reauth_required":
+            return json_response(
+                {"status": "reauth_required"}, headers=_NO_STORE_HEADERS
+            )
+        if state is not None:
+            return json_response({"status": "invalid"}, headers=_NO_STORE_HEADERS)
         logger.error("OpenAI Codex usage API failed: %s", type(exc).__name__)
         return _login_error_response("额度查询失败，请稍后重试", 502)
     return json_response(

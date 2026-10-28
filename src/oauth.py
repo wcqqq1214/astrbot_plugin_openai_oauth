@@ -9,7 +9,6 @@ Codex OAuth flow; API calls go to the Responses-style endpoint under
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import math
 import os
@@ -23,6 +22,8 @@ from astrbot import logger
 from astrbot.core.utils.network_utils import create_proxy_client, is_connection_error
 from httpx import HTTPStatusError
 from openai import APIConnectionError, APIError
+
+from .credential_store import token_account_id
 
 CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
@@ -40,12 +41,6 @@ CODEX_DEVICE_TOKEN_URL = f"{CODEX_DEVICE_ACCOUNTS_BASE}/deviceauth/token"
 CODEX_DEVICE_VERIFY_URL = "https://auth.openai.com/codex/device"
 CODEX_OAUTH_REDIRECT_URI = "https://auth.openai.com/deviceauth/callback"
 CODEX_DEVICE_LOGIN_TIMEOUT = 15 * 60
-
-# JWT payload 里承载 ChatGPT 账号 id 的 claim。新版 token 是嵌套对象
-# `https://api.openai.com/auth` 下的 `chatgpt_account_id`；旧版是平铺 claim。
-_CHATGPT_AUTH_CLAIM = "https://api.openai.com/auth"
-_CHATGPT_ACCOUNT_ID_KEY = "chatgpt_account_id"
-_CHATGPT_ACCOUNT_ID_CLAIM = "https://api.openai.com/auth.chatgpt_account_id"
 
 # Models reachable through a ChatGPT subscription. The live catalog comes from
 # GET /codex/models; this list is the offline fallback for the WebUI dropdown.
@@ -631,24 +626,8 @@ def _parse_usage_payload(data: Any) -> dict:
 
 
 def extract_account_id(access_token: str) -> str:
-    """Read the ChatGPT account ID from an access token (a JWT).
-
-    The ID is ``chatgpt_account_id`` inside the nested
-    ``https://api.openai.com/auth`` claim; older tokens use a flat claim.
-    """
-    try:
-        _, payload_b64, _ = access_token.split(".", 2)
-        padding = "=" * (-len(payload_b64) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(payload_b64 + padding))
-    except Exception:  # noqa: BLE001 - 非 JWT 时静默返回空串
-        return ""
-    auth_claims = payload.get(_CHATGPT_AUTH_CLAIM)
-    if isinstance(auth_claims, dict):
-        value = auth_claims.get(_CHATGPT_ACCOUNT_ID_KEY)
-        if isinstance(value, str) and value:
-            return value
-    value = payload.get(_CHATGPT_ACCOUNT_ID_CLAIM)
-    return value if isinstance(value, str) else ""
+    """Read the ChatGPT account ID from an access token (a JWT)."""
+    return token_account_id(access_token)
 
 
 def build_credentials(

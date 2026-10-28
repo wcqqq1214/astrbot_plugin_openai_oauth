@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
@@ -16,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 from .credential_store import (
+    AUTH_CLAIM,
+    PROFILE_CLAIM,
     CredentialCooldownError,
     CredentialCoordinator,
     CredentialError,
@@ -24,19 +25,9 @@ from .credential_store import (
     CredentialSourceError,
     CredentialStatus,
     ReauthenticationRequiredError,
+    jwt_claims,
 )
 from .provider_registry import DEVICE, LOCAL, ProviderRegistry
-
-
-def _claims(token: str) -> dict[str, Any]:
-    try:
-        payload = token.split(".")[1]
-        decoded = json.loads(
-            base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
-        )
-        return decoded if isinstance(decoded, dict) else {}
-    except (ValueError, IndexError, UnicodeError):
-        return {}
 
 
 @dataclass(repr=False)
@@ -77,7 +68,7 @@ class LocalCodexStore:
             access = tokens.get("access_token")
             if not isinstance(access, str) or not access:
                 return None
-            claims = _claims(access)
+            claims = jwt_claims(access)
             expires = claims.get("exp")
             if (
                 isinstance(expires, bool)
@@ -85,7 +76,7 @@ class LocalCodexStore:
                 or not math.isfinite(expires)
             ):
                 return None
-            identity = claims.get("https://api.openai.com/auth")
+            identity = claims.get(AUTH_CLAIM)
             account = tokens.get("account_id")
             if not account and isinstance(identity, dict):
                 account = identity.get("chatgpt_account_id")
@@ -109,7 +100,7 @@ class LocalCodexStore:
     def write_refresh(self, login: LocalLogin, refreshed: dict[str, Any]) -> bool:
         """Replace atomically, abandoning the write if the login has changed."""
         access = refreshed.get("access_token")
-        expires = _claims(access).get("exp") if isinstance(access, str) else None
+        expires = jwt_claims(access).get("exp") if isinstance(access, str) else None
         if (
             isinstance(expires, bool)
             or not isinstance(expires, (int, float))
@@ -194,9 +185,9 @@ class LocalCredentialCoordinator(CredentialCoordinator):
             result["account_revision"] = hmac.new(
                 self._view_secret, identity, hashlib.sha256
             ).hexdigest()
-            claims = _claims(snapshot.access_token)
-            profile = claims.get("https://api.openai.com/profile", {})
-            auth = claims.get("https://api.openai.com/auth", {})
+            claims = jwt_claims(snapshot.access_token)
+            profile = claims.get(PROFILE_CLAIM, {})
+            auth = claims.get(AUTH_CLAIM, {})
             if isinstance(profile, dict) and isinstance(profile.get("email"), str):
                 result["email"] = profile["email"]
             if isinstance(auth, dict) and isinstance(

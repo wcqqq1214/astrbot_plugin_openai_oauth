@@ -124,6 +124,51 @@ def _format_cooldown(cooldown_until: int | None) -> str:
     return f"OpenAI 订阅额度当前处于冷却状态{_format_reset_at(cooldown_until, None)}。"
 
 
+async def fetch_usage(
+    snapshot: CredentialSnapshot, *, attempts: int = 3
+) -> dict[str, Any]:
+    """Query one account's allowance with its own proxy and client identity."""
+    settings = runtime.get_coordinator().source_settings(snapshot.source_id)
+    return await retry_provider_request(
+        "OpenAI Codex",
+        lambda: oauth.fetch_rate_limits(
+            snapshot.access_token,
+            snapshot.account_id,
+            settings["proxy"],
+            oauth.resolve_user_agent(settings["user_agent"]),
+        ),
+        retry_rate_limits=False,
+        max_attempts=attempts,
+    )
+
+
+def failure_state(error: BaseException) -> str | None:
+    """Map a quota lookup failure to a safe state shared by chat and WebUI."""
+    if isinstance(error, CredentialCooldownError):
+        return "cooling"
+    if isinstance(
+        error,
+        (
+            CredentialsNotConfiguredError,
+            ReauthenticationRequiredError,
+            CredentialExpiredError,
+        ),
+    ):
+        return "reauth_required"
+    if isinstance(error, CredentialSchemaError):
+        return "unsupported"
+    if isinstance(error, CredentialError):
+        return "invalid"
+    return None
+
+
+_FAILURE_MESSAGES = {
+    "reauth_required": "凭据已失效，请在插件详情页重新登录。",
+    "unsupported": "凭据配置格式不受支持，请升级插件后重新登录。",
+    "invalid": "无法读取 OpenAI 凭据，请在插件详情页重新登录。",
+}
+
+
 async def fetch_source_usage(
     source_id: str = runtime.PROVIDER_TYPE,
 ) -> dict[str, Any]:
@@ -131,31 +176,20 @@ async def fetch_source_usage(
     # Cache hits belong to the current login; fresh lookups may refresh its token.
     expected_access_token = coordinator.read_snapshot(source_id).access_token
 
-    async def fetch_usage(snapshot: CredentialSnapshot) -> dict:
+    async def fetch_for_cache(snapshot: CredentialSnapshot) -> dict:
         nonlocal expected_access_token
         expected_access_token = snapshot.access_token
-        settings = coordinator.source_settings(snapshot.source_id)
-        return await retry_provider_request(
-            "OpenAI Codex",
-            lambda: oauth.fetch_rate_limits(
-                snapshot.access_token,
-                snapshot.account_id,
-                settings["proxy"],
-                oauth.resolve_user_agent(settings["user_agent"]),
-            ),
-            retry_rate_limits=False,
-            max_attempts=3,
-        )
+        return await fetch_usage(snapshot)
 
     try:
-        usage = await coordinator.get_usage(source_id, fetch_usage)
+        usage = await coordinator.get_usage(source_id, fetch_for_cache)
     except CredentialExpiredError:
         # The backend can reject a token before its own expiry. One forced
         # refresh mends that; a second rejection means signing in again.
         await coordinator.get_snapshot(
             source_id, force_refresh=True, check_cooldown=False
         )
-        usage = await coordinator.get_usage(source_id, fetch_usage)
+        usage = await coordinator.get_usage(source_id, fetch_for_cache)
     if usage.get("limit_reached") or not usage.get("allowed", True):
         cooldown_until = cooldown_until_from_usage(usage)
         if cooldown_until is not None:
@@ -171,17 +205,12 @@ async def build_usage_message(source_id: str = runtime.PROVIDER_TYPE) -> str:
     """Fetch the selected source's quota through the credential coordinator."""
     try:
         usage = await fetch_source_usage(source_id)
-    except CredentialCooldownError as exc:
-        return _format_cooldown(exc.cooldown_until)
-    except (CredentialsNotConfiguredError, ReauthenticationRequiredError):
-        return "凭据已失效，请在插件详情页重新登录。"
-    except CredentialSchemaError:
-        return "凭据配置格式不受支持，请升级插件后重新登录。"
-    except CredentialExpiredError:
-        return "凭据已失效，请在插件详情页重新登录。"
-    except CredentialError:
-        return "无法读取 OpenAI 凭据，请在插件详情页重新登录。"
     except Exception as exc:  # noqa: BLE001 - do not expose provider responses
+        state = failure_state(exc)
+        if isinstance(exc, CredentialCooldownError):
+            return _format_cooldown(exc.cooldown_until)
+        if state is not None:
+            return _FAILURE_MESSAGES[state]
         logger.error("OpenAI Codex usage request failed: %s", type(exc).__name__)
         return "额度查询失败，请稍后重试。"
 

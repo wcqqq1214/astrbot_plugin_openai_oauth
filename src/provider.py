@@ -83,6 +83,18 @@ def _bound_call_id(call_id: Any) -> Any:
     return hashlib.sha256(call_id.strip().encode()).hexdigest()
 
 
+def _attempt_limit(request_max_retries: int | None) -> int:
+    """Resolve AstrBot's request attempt setting, warning only when it is set."""
+    return coerce_int_config(
+        request_max_retries,
+        default=REQUEST_RETRY_ATTEMPTS,
+        min_value=1,
+        field_name="request_max_retries",
+        source="OpenAI Codex",
+        warn=request_max_retries is not None,
+    )
+
+
 def _drop_unsupported_params(*bodies: dict[str, Any]) -> None:
     dropped: set[str] = set()
     for body in bodies:
@@ -511,14 +523,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
             else {}
         )
 
-        max_attempts = coerce_int_config(
-            request_max_retries,
-            default=REQUEST_RETRY_ATTEMPTS,
-            min_value=1,
-            field_name="request_max_retries",
-            source="OpenAI Codex",
-            warn=request_max_retries is not None,
-        )
+        max_attempts = _attempt_limit(request_max_retries)
         attempts = 0
         emitted_response = False
 
@@ -868,23 +873,6 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
             logger.error("OpenAI Codex model catalog failed: %s", type(exc).__name__)
         return list(CODEX_FALLBACK_MODELS)
 
-    async def _fetch_usage_for_snapshot(
-        self,
-        snapshot: CredentialSnapshot,
-    ) -> dict[str, Any]:
-        settings = runtime.get_coordinator().source_settings(snapshot.source_id)
-        return await retry_provider_request(
-            "OpenAI Codex",
-            lambda: oauth.fetch_rate_limits(
-                snapshot.access_token,
-                snapshot.account_id,
-                settings["proxy"],
-                oauth.resolve_user_agent(settings["user_agent"]),
-            ),
-            retry_rate_limits=False,
-            max_attempts=2,
-        )
-
     async def _subscription_cooldown_error(
         self,
         snapshot: CredentialSnapshot,
@@ -901,7 +889,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         try:
             usage = await coordinator.get_usage(
                 snapshot.source_id,
-                self._fetch_usage_for_snapshot,
+                lambda current: usage_service.fetch_usage(current, attempts=2),
             )
             cooldown_until = usage_service.cooldown_until_from_usage(usage)
         except Exception as exc:  # noqa: BLE001 - a failed usage lookup is non-fatal
@@ -946,16 +934,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                     yield response
             return
 
-        budget = RequestBudget(
-            coerce_int_config(
-                request_max_retries,
-                default=REQUEST_RETRY_ATTEMPTS,
-                min_value=1,
-                field_name="request_max_retries",
-                source="OpenAI Codex",
-                warn=request_max_retries is not None,
-            )
-        )
+        budget = RequestBudget(_attempt_limit(request_max_retries))
         failures: list[tuple[str, str]] = []
         seen: set[str] = set()
         emitted = False
