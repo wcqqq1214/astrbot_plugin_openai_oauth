@@ -415,6 +415,56 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.reason, "startup_timeout")
         self.assertEqual(self.requested(), ["local", "other"])
 
+    def test_replayed_history_fits_a_stateless_backend(self):
+        long_id = "call_" + "x" * 80
+        reasoning = {
+            "type": self.provider._REASONING_STATE_TYPE,
+            "items": [
+                {"type": "reasoning", "id": "rs_1", "summary": [], "status": "done"},
+                {
+                    "type": "reasoning",
+                    "id": "rs_2",
+                    "summary": [],
+                    "encrypted_content": "sealed",
+                },
+            ],
+        }
+        items = self.provider._convert_chat_messages_to_response_input(
+            [
+                {"role": "system", "content": "rules"},
+                {"role": "user", "content": "hi"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "think",
+                            "think": "",
+                            "encrypted": json.dumps(reasoning),
+                        },
+                        {"type": "text", "text": "calling"},
+                    ],
+                    "tool_calls": [
+                        {
+                            "id": long_id,
+                            "type": "function",
+                            "function": {"name": "lookup", "arguments": "{}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": long_id, "content": "done"},
+            ]
+        )
+        self.assertEqual(items[0]["role"], "developer")
+        reasoning_items = [item for item in items if item["type"] == "reasoning"]
+        self.assertEqual(
+            reasoning_items,
+            [{"type": "reasoning", "summary": [], "encrypted_content": "sealed"}],
+        )
+        self.assertFalse(any("id" in item for item in items))
+        call_ids = {item["call_id"] for item in items if "call_id" in item}
+        self.assertEqual(len(call_ids), 1)
+        self.assertEqual(len(call_ids.pop()), 64)
+
     async def test_session_names_prompt_cache_key(self):
         self.provider._prepare_chat_payload = AsyncMock(
             return_value=({"model": "test-model", "input": []}, None)

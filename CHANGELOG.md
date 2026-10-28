@@ -17,6 +17,7 @@
 - Refresh the token once and retry when the allowance endpoint rejects a token before its own expiry.
 - List one ID per model from the live catalog, skip hidden models and follow Codex's picker order.
 - Automatic fallback no longer cancels a request whose model is still thinking after 120 seconds; the startup deadline now ends once a stream opens, and a later fallback source gets a fresh window.
+- Shape requests for the stateless Codex backend: drop stored item IDs and statuses from replayed history, skip reasoning items that cannot be replayed, shorten oversized tool call IDs, and leave out sampling, output-limit and unsupported service-tier parameters the backend rejects.
 
 ## [v2.2.0] - 2026-10-18
 

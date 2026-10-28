@@ -57,6 +57,51 @@ from .provider_routing import (
     RoutingExhaustedError,
 )
 
+# The ChatGPT backend rejects sampling knobs, output limits and explicit cache
+# options that the public Responses API accepts. Codex never sends them.
+_UNSUPPORTED_REQUEST_PARAMS = (
+    "max_output_tokens",
+    "max_tokens",
+    "max_completion_tokens",
+    "temperature",
+    "top_p",
+    "user",
+    "safety_identifier",
+    "prompt_cache_options",
+)
+# Codex's Fast mode sends "priority" and Ultrafast sends "ultrafast".
+_SUPPORTED_SERVICE_TIERS = frozenset({"priority", "ultrafast"})
+# Call IDs from other providers can exceed the backend's 64-character limit.
+_CALL_ID_LIMIT = 64
+_reported_unsupported_params: set[str] = set()
+
+
+def _bound_call_id(call_id: Any) -> Any:
+    """Shorten an oversized call ID the same way on every request."""
+    if not isinstance(call_id, str) or len(call_id) <= _CALL_ID_LIMIT:
+        return call_id
+    return hashlib.sha256(call_id.strip().encode()).hexdigest()
+
+
+def _drop_unsupported_params(*bodies: dict[str, Any]) -> None:
+    dropped: set[str] = set()
+    for body in bodies:
+        for key in _UNSUPPORTED_REQUEST_PARAMS:
+            if key in body:
+                body.pop(key)
+                dropped.add(key)
+        tier = body.get("service_tier")
+        if tier is not None and tier not in _SUPPORTED_SERVICE_TIERS:
+            body.pop("service_tier")
+            dropped.add("service_tier")
+    new = dropped - _reported_unsupported_params
+    if new:
+        _reported_unsupported_params.update(new)
+        logger.warning(
+            "OpenAI Codex ignores request parameters it does not support: %s",
+            ", ".join(sorted(new)),
+        )
+
 
 def _register_provider_adapter_if_absent(cls: type) -> type:
     """Register the provider once and refresh its class on plugin reload.
@@ -291,13 +336,27 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
     def _convert_chat_messages_to_response_input(
         self, messages: list[dict]
     ) -> list[dict]:
-        # The ChatGPT Codex backend rejects role:"system" items in input and
-        # only accepts the Responses API roles (user/assistant/developer).
-        response_input = super()._convert_chat_messages_to_response_input(messages)
-        for item in response_input:
-            if item.get("type") == "message" and item.get("role") == "system":
+        """Shape replayed history for a backend that stores nothing.
+
+        Stored item IDs and message statuses refer to state the backend never
+        kept, and a reasoning item can only be replayed with its encrypted
+        content. The backend also rejects role "system" in input; "developer"
+        carries the same meaning.
+        """
+        shaped: list[dict] = []
+        for item in super()._convert_chat_messages_to_response_input(messages):
+            item_type = item.get("type")
+            if item_type == "reasoning" and not item.get("encrypted_content"):
+                continue
+            item.pop("id", None)
+            if item_type in {None, "message", "reasoning"}:
+                item.pop("status", None)
+            if "call_id" in item:
+                item["call_id"] = _bound_call_id(item["call_id"])
+            if item_type in {None, "message"} and item.get("role") == "system":
                 item["role"] = "developer"
-        return response_input
+            shaped.append(item)
+        return shaped
 
     async def _query_stream(
         self,
@@ -331,9 +390,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
             if key not in self.default_params:
                 extra_body[key] = payloads.pop(key)
 
-        max_tokens = extra_body.pop("max_tokens", None)
-        if max_tokens is not None and "max_output_tokens" not in extra_body:
-            extra_body["max_output_tokens"] = max_tokens
+        _drop_unsupported_params(payloads, extra_body)
         effective_session_effort = effort._normalize_effort(session_effort)
         if effective_session_effort:
             existing_reasoning = extra_body.get("reasoning")

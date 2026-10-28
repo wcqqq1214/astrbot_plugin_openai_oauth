@@ -130,6 +130,30 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("prompt_cache_key", requests[0])
         self.assertNotIn("session-id", self.headers[0])
 
+    async def test_unsupported_parameters_are_not_sent(self):
+        requests, _, error, _ = await self.run_stream(
+            [SUCCESS],
+            payload={
+                "model": "test",
+                "input": [],
+                "temperature": 0.2,
+                "top_p": 0.9,
+                "max_output_tokens": 100,
+                "max_tokens": 100,
+                "service_tier": "flex",
+            },
+        )
+        self.assertIsNone(error)
+        for key in ("temperature", "top_p", "max_output_tokens", "max_tokens"):
+            self.assertNotIn(key, requests[0])
+        self.assertNotIn("service_tier", requests[0])
+
+        requests, _, _, _ = await self.run_stream(
+            [SUCCESS],
+            payload={"model": "test", "input": [], "service_tier": "priority"},
+        )
+        self.assertEqual(requests[0]["service_tier"], "priority")
+
     def test_prompt_cache_key_is_stable_per_conversation(self):
         key = module.ProviderOpenAICodex._prompt_cache_key
         payload = {"model": "m", "input": [{"role": "user", "content": "hi"}]}
