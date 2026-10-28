@@ -13,7 +13,7 @@ from astrbot import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
 
 from . import messages, oauth, runtime
-from .credential_store import CredentialSourceError
+from .credential_store import CredentialSourceError, token_email
 from .oauth import (
     CODEX_DEVICE_LOGIN_TIMEOUT,
     CODEX_DEVICE_VERIFY_URL,
@@ -181,18 +181,28 @@ def begin_session(
     return session
 
 
+def _default_account_name(creds: dict[str, Any]) -> str:
+    """Name a new account after its ChatGPT email so several stay distinct."""
+    email = token_email(creds.get("access_token"))
+    return email if 1 <= len(email) <= 80 else "ChatGPT"
+
+
 async def _persist_login_credentials(
     creds: dict[str, Any],
     *,
     source_id: str | None = None,
-    name: str = "ChatGPT",
+    name: str = "",
     creating: bool = True,
-) -> str:
-    """Persist only the provider bound to the server-owned device session."""
+) -> tuple[str, str]:
+    """Persist only the provider bound to the server-owned device session.
+
+    Returns the account ID and name; an empty name defaults to the email.
+    """
     registry = runtime.get_coordinator().providers
     source_id = source_id or registry.new_id()
+    name = name or _default_account_name(creds)
     await registry.save_login(source_id, name, creds, creating=creating)
-    return source_id
+    return source_id, name
 
 
 async def _complete_device_login(
@@ -273,7 +283,7 @@ async def _run_command_device_login(
             interval=interval,
             proxy=proxy,
         )
-        source_id = await _persist_login_credentials(creds)
+        source_id, name = await _persist_login_credentials(creds)
     except asyncio.CancelledError:
         raise
     except DeviceAuthTimeout:
@@ -291,18 +301,41 @@ async def _run_command_device_login(
         await event.send(MessageChain().message(messages.text("login.save_failed")))
     else:
         await event.send(
-            MessageChain().message(messages.text("login.success", id=source_id))
+            MessageChain().message(
+                messages.text("login.success", name=name, id=source_id)
+            )
         )
 
 
-async def handle_login(event: AstrMessageEvent) -> None:
-    """Add a provider through administrator-only private-chat device login."""
+async def _cancel_command_login(event: AstrMessageEvent, owner: str) -> None:
+    task = _command_login_tasks.pop(owner, None)
+    if task is None or task.done():
+        await event.send(
+            MessageChain().message(messages.text("login.nothing_to_cancel"))
+        )
+        return
+    task.cancel()
+    await event.send(MessageChain().message(messages.text("login.cancelled")))
+
+
+async def handle_login(event: AstrMessageEvent, action: str | None = None) -> None:
+    """Add a provider through administrator-only private-chat device login.
+
+    ``/openai_login cancel`` stops this chat's login that is still waiting.
+    """
     event.should_call_llm(False)
     if not _is_private_login_event(event):
         await event.send(MessageChain().message(messages.text("login.private_only")))
         return
 
     owner = _command_login_owner(event)
+    requested = str(action or "").strip().lower()
+    if requested == "cancel":
+        await _cancel_command_login(event, owner)
+        return
+    if requested:
+        await event.send(MessageChain().message(messages.text("login.usage")))
+        return
     existing_task = _command_login_tasks.get(owner)
     if existing_task is not None and not existing_task.done():
         await event.send(MessageChain().message(messages.text("login.in_progress")))

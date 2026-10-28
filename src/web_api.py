@@ -60,7 +60,8 @@ async def _handle_device_start() -> Any:
     creating = source_id is None
     try:
         if creating:
-            name = coordinator.providers.name(body.get("name", "ChatGPT"))
+            # Without a name, the account is named after its email once saved.
+            name = coordinator.providers.name(body["name"]) if "name" in body else ""
             proxy = ""
         else:
             if not isinstance(source_id, str) or not source_id:

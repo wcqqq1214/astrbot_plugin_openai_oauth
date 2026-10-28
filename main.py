@@ -50,9 +50,13 @@ class OpenAI_OAuth_Plugin(Star):
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("openai_login")
-    async def openai_login(self, event: AstrMessageEvent) -> None:
-        """Start administrator-only private-chat device login."""
-        await login.handle_login(event)
+    async def openai_login(
+        self,
+        event: AstrMessageEvent,
+        action: str | None = None,
+    ) -> None:
+        """Start, or with "cancel" stop, an administrator private-chat login."""
+        await login.handle_login(event, action)
 
     async def terminate(self) -> None:
         """Cancel outstanding device-login work during plugin unload."""

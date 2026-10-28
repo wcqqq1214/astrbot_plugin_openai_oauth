@@ -102,7 +102,8 @@ Russian or Japanese.
 | Command | What it does |
 | --- | --- |
 | `/usage` | Shows the allowance of the account bound to your model, which may differ from the account that last answered through fallback. |
-| `/openai_login` | Adds an account in a private chat with the bot. |
+| `/openai_login` | Adds an account in a private chat with the bot, named after its ChatGPT email. |
+| `/openai_login cancel` | Cancels this chat's login that is waiting for authorization. |
 | `/effort` | Shows this conversation’s reasoning effort. |
 | `/effort high` | Changes this conversation’s effort for the next request. |
 | `/effort default` | Restores the model default. |

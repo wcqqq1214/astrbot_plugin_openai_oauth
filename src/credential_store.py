@@ -161,6 +161,13 @@ def token_account_id(token: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
+def token_email(token: Any) -> str:
+    """Read the ChatGPT account email from an access token, if present."""
+    profile = jwt_claims(token).get(PROFILE_CLAIM)
+    email = profile.get("email") if isinstance(profile, dict) else None
+    return email.strip() if isinstance(email, str) else ""
+
+
 def _as_string(value: Any) -> str:
     return value if isinstance(value, str) else ""
 

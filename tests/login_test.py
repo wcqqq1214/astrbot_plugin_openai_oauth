@@ -459,6 +459,105 @@ def test_private_command_fallback() -> None:
     login._cancel_all_command_login_tasks()
 
 
+def test_command_login_names_account_and_cancels() -> None:
+    print("\n=== Command login naming and cancellation ===")
+    conf = set_config([source()])
+
+    class _Event:
+        unified_msg_origin = "test:FriendMessage:admin-2"
+
+        def __init__(self) -> None:
+            self.sent: list = []
+
+        def should_call_llm(self, value: bool) -> None:
+            pass
+
+        def is_private_chat(self) -> bool:
+            return True
+
+        async def send(self, message) -> None:
+            self.sent.append(message)
+
+    access = jwt(
+        {
+            "https://api.openai.com/auth": {"chatgpt_account_id": "acct-mail"},
+            "https://api.openai.com/profile": {"email": "person@example.com"},
+        }
+    )
+
+    async def named_login():
+        event = _Event()
+        with (
+            mock.patch.object(
+                oauth,
+                "request_device_user_code",
+                new=mock.AsyncMock(return_value=("device", "CODE", 0)),
+            ),
+            mock.patch.object(
+                oauth,
+                "poll_device_authorization",
+                new=mock.AsyncMock(return_value=("authorization", "verifier")),
+            ),
+            mock.patch.object(
+                oauth,
+                "exchange_authorization_code",
+                new=mock.AsyncMock(
+                    return_value={
+                        "access_token": access,
+                        "refresh_token": "rt-mail",
+                        "expires_in": 3600,
+                    }
+                ),
+            ),
+        ):
+            await plugin.OpenAI_OAuth_Plugin.openai_login(None, event)
+            task = login._command_login_tasks.get(event.unified_msg_origin)
+            if task is not None:
+                await task
+        return event
+
+    event = asyncio.run(named_login())
+    added = [s for s in conf["provider_sources"] if s.get("credential_mode")]
+    check(
+        [s.get("name") for s in added] == ["person@example.com"],
+        "a command login is named after the account email",
+    )
+    check("person@example.com" in sent_text(event), "the reply names the account")
+
+    async def cancelled_login():
+        event = _Event()
+        with (
+            mock.patch.object(
+                oauth,
+                "request_device_user_code",
+                new=mock.AsyncMock(return_value=("device", "CODE", 0)),
+            ),
+            mock.patch.object(
+                oauth,
+                "poll_device_authorization",
+                new=mock.AsyncMock(side_effect=lambda *_: asyncio.Event().wait()),
+            ),
+        ):
+            await plugin.OpenAI_OAuth_Plugin.openai_login(None, event)
+            task = login._command_login_tasks[event.unified_msg_origin]
+            await plugin.OpenAI_OAuth_Plugin.openai_login(None, event, "cancel")
+            await asyncio.gather(task, return_exceptions=True)
+            await plugin.OpenAI_OAuth_Plugin.openai_login(None, event, "cancel")
+            await plugin.OpenAI_OAuth_Plugin.openai_login(None, event, "other")
+        return event, task
+
+    event, task = asyncio.run(cancelled_login())
+    text = sent_text(event)
+    check(task.cancelled(), "/openai_login cancel stops the waiting login")
+    check("已取消" in text, "cancellation is confirmed")
+    check("没有进行中" in text, "a second cancel says nothing is in progress")
+    check("用法" in text, "an unknown action shows the usage")
+    check(
+        event.unified_msg_origin not in login._command_login_tasks,
+        "the cancelled login leaves no task behind",
+    )
+
+
 def test_effort_command() -> None:
     print("\n=== Session reasoning-effort command ===")
     handler = next(
@@ -756,6 +855,7 @@ def main() -> int:
         test_login_error_and_cancel()
         test_account_status_and_usage_api()
         test_private_command_fallback()
+        test_command_login_names_account_and_cancels()
         test_effort_command()
         test_plugin_page_assets()
         test_entry_point_terminates_login_tasks()

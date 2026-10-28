@@ -97,7 +97,8 @@ AstrBot 的模型配置中始终只有一个 **OpenAI Subscribe** 来源，多�
 | 命令 | 用途 |
 | --- | --- |
 | `/usage` | 查看当前模型绑定账号的额度，不一定是上次回退后实际使用的账号。 |
-| `/openai_login` | 私聊机器人，用设备码添加账号。 |
+| `/openai_login` | 私聊机器人，用设备码添加账号，账号以 ChatGPT 邮箱命名。 |
+| `/openai_login cancel` | 取消当前私聊中等待授权的登录。 |
 | `/effort` | 查看当前会话的思考强度。 |
 | `/effort high` | 调整当前会话的思考强度，下次请求生效。 |
 | `/effort default` | 恢复模型默认设置。 |

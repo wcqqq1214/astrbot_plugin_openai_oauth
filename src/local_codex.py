@@ -17,7 +17,6 @@ from typing import Any
 
 from .credential_store import (
     AUTH_CLAIM,
-    PROFILE_CLAIM,
     CredentialCooldownError,
     CredentialCoordinator,
     CredentialError,
@@ -27,6 +26,7 @@ from .credential_store import (
     CredentialStatus,
     ReauthenticationRequiredError,
     jwt_claims,
+    token_email,
 )
 from .provider_registry import DEVICE, LOCAL, ProviderRegistry
 
@@ -215,10 +215,9 @@ class LocalCredentialCoordinator(CredentialCoordinator):
                 self._view_secret, identity, hashlib.sha256
             ).hexdigest()
             claims = jwt_claims(snapshot.access_token)
-            profile = claims.get(PROFILE_CLAIM, {})
             auth = claims.get(AUTH_CLAIM, {})
-            if isinstance(profile, dict) and isinstance(profile.get("email"), str):
-                result["email"] = profile["email"]
+            if email := token_email(snapshot.access_token):
+                result["email"] = email
             if isinstance(auth, dict) and isinstance(
                 auth.get("chatgpt_plan_type"), str
             ):
