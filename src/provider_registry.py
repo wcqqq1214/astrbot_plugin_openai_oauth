@@ -427,8 +427,7 @@ class ProviderRegistry:
                 for source in sources
                 if source.get("type") == self.coordinator.provider_type
                 and source.get("credential_mode", DEVICE) == DEVICE
-                and isinstance(source.get("key"), str)
-                and source["key"].strip()
+                and source.get("key")
                 and not is_sealed(source["key"])
             ]
             if not pending:
@@ -443,6 +442,8 @@ class ProviderRegistry:
                 try:
                     creds = parse_credentials(source["key"])
                 except CredentialSchemaError:
+                    continue
+                if not creds:
                     continue
                 source["key"] = dump_credentials(creds, sealer)
                 sealed += 1

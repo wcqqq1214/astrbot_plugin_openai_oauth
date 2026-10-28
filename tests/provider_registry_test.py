@@ -104,6 +104,56 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(Path(key_dir, "other").exists())
 
+    async def test_legacy_credential_containers_are_sealed_on_migration(self):
+        records = [
+            dict(self.creds),
+            [json.dumps(self.creds)],
+            [dict(self.creds)],
+            [self.creds["access_token"]],
+        ]
+        self.conf["provider_sources"] = [
+            {**self.original, "id": f"legacy-{i}", "key": record}
+            for i, record in enumerate(records)
+        ]
+        key_dir = self.enterContext(tempfile.TemporaryDirectory())
+        self.coordinator.sealer = credential_seal.FernetCredentialSealer(
+            Path(key_dir, "k")
+        )
+        await self.registry.migrate()
+        before = {
+            f"legacy-{i}": self.coordinator.read_snapshot(f"legacy-{i}")
+            for i in range(len(records))
+        }
+        saves = self.conf.saved
+        self.assertEqual(await self.registry.seal_stored_credentials(), len(records))
+        self.assertEqual(self.conf.saved, saves + 1)
+        for source_id, snapshot in before.items():
+            self.assertTrue(store.is_sealed(self.coordinator.source(source_id)["key"]))
+            self.assertEqual(self.coordinator.read_snapshot(source_id), snapshot)
+        serialized = json.dumps(self.conf)
+        self.assertNotIn(self.creds["access_token"], serialized)
+        self.assertNotIn(self.creds["refresh_token"], serialized)
+        self.assertEqual(await self.registry.seal_stored_credentials(), 0)
+        self.assertEqual(self.conf.saved, saves + 1)
+
+    async def test_sealing_preserves_empty_and_unreadable_legacy_records(self):
+        records = [[], {}, [""], " ", ["invalid"], {"schema_version": 2}]
+        self.conf["provider_sources"] = [
+            {**self.original, "id": f"legacy-{i}", "key": record}
+            for i, record in enumerate(records)
+        ]
+        key_dir = self.enterContext(tempfile.TemporaryDirectory())
+        self.coordinator.sealer = credential_seal.FernetCredentialSealer(
+            Path(key_dir, "k")
+        )
+        await self.registry.migrate()
+        before = deepcopy(self.conf)
+        saves = self.conf.saved
+        self.assertEqual(await self.registry.seal_stored_credentials(), 0)
+        self.assertEqual(self.conf, before)
+        self.assertEqual(self.conf.saved, saves)
+        self.assertFalse(Path(key_dir, "k").exists())
+
     async def test_local_active_migration_preserves_model_and_saved_login(self):
         model = deepcopy(self.conf["provider"])
         await self.registry.migrate()
