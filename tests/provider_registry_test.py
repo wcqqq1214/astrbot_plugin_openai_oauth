@@ -7,6 +7,7 @@ import importlib
 import json
 import sys
 import tempfile
+import threading
 import unittest
 from copy import deepcopy
 from pathlib import Path
@@ -569,6 +570,97 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 self.coordinator.source(result["source_id"])["name"], "Saving"
             )
+
+    async def test_command_cancel_cannot_interrupt_config_write(self):
+        await self._exercise_command_config_write()
+
+    async def test_command_cancel_preserves_save_failure_result(self):
+        await self._exercise_command_config_write(fail=True)
+
+    async def test_unload_waits_for_command_config_write(self):
+        await self._exercise_command_config_write(unload=True)
+
+    async def _exercise_command_config_write(self, *, fail=False, unload=False):
+        from astrbot.core.config.astrbot_config import AstrBotConfig
+
+        await self.registry.migrate()
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        path = Path(directory, "cmd_config.json")
+        conf = AstrBotConfig(str(path), default_config=deepcopy(dict(self.conf)))
+        self.coordinator.config_manager.default_conf = conf
+        before_ids = {s["id"] for s in self.registry.owned()}
+        entered, release = asyncio.Event(), threading.Event()
+        loop = asyncio.get_running_loop()
+        write = AstrBotConfig._write_config_snapshot
+
+        def delayed_write(instance, *args):
+            loop.call_soon_threadsafe(entered.set)
+            if not release.wait(10):
+                raise TimeoutError("The test did not release the config writer.")
+            if fail:
+                raise OSError("Simulated config write failure.")
+            return write(instance, *args)
+
+        event = SimpleNamespace(
+            should_call_llm=lambda value: None,
+            is_private_chat=lambda: True,
+            unified_msg_origin="test:private:committing-login",
+            send=AsyncMock(),
+        )
+        shutdown = None
+        with (
+            patch.object(AstrBotConfig, "_write_config_snapshot", new=delayed_write),
+            patch.object(
+                oauth,
+                "request_device_user_code",
+                new=AsyncMock(return_value=("device", "CODE", 1)),
+            ),
+            patch.object(
+                login, "_complete_device_login", new=AsyncMock(return_value=self.creds)
+            ),
+        ):
+            await login.handle_login(event)
+            task = login._command_login_tasks[event.unified_msg_origin]
+            try:
+                await asyncio.wait_for(entered.wait(), timeout=5)
+                await login.handle_login(event, "cancel")
+                self.assertEqual(
+                    event.send.call_args.args[0].chain[0].text,
+                    login.messages.text("login.saving"),
+                )
+                self.assertFalse(task.cancelling())
+                self.assertIs(
+                    login._command_login_tasks[event.unified_msg_origin], task
+                )
+                await login.handle_login(event)
+                self.assertEqual(
+                    event.send.call_args.args[0].chain[0].text,
+                    login.messages.text("login.in_progress"),
+                )
+                if unload:
+                    shutdown = asyncio.create_task(login.terminate())
+                    await asyncio.sleep(0)
+                    self.assertFalse(shutdown.done())
+                    self.assertFalse(task.cancelling())
+            finally:
+                release.set()
+                await asyncio.wait_for(task, timeout=5)
+                if shutdown is not None:
+                    await asyncio.wait_for(shutdown, timeout=5)
+
+        self.assertEqual(json.loads(path.read_text("utf-8-sig")), dict(conf))
+        added = [s for s in self.registry.owned() if s["id"] not in before_ids]
+        if fail:
+            self.assertEqual(added, [])
+            expected = login.messages.text("login.save_failed")
+        else:
+            self.assertEqual(len(added), 1)
+            expected = login.messages.text(
+                "login.success", name=added[0]["name"], id=added[0]["id"]
+            )
+        self.assertEqual(event.send.call_args.args[0].chain[0].text, expected)
+        self.assertNotIn(event.unified_msg_origin, login._command_login_tasks)
+        self.assertNotIn(task, login._committing_command_login_tasks)
 
     async def test_usage_command_resolves_current_model_source(self):
         event = SimpleNamespace(

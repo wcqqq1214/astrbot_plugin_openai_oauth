@@ -61,6 +61,7 @@ class DeviceLoginSession:
 
 # Both command and WebUI login tasks are owned and cleaned up here.
 _command_login_tasks: dict[str, asyncio.Task[Any]] = {}
+_committing_command_login_tasks: set[asyncio.Task[Any]] = set()
 _login_sessions: dict[str, DeviceLoginSession] = {}
 
 
@@ -88,7 +89,7 @@ def _cancel_all_command_login_tasks() -> list[asyncio.Task[Any]]:
     tasks = list(set(_command_login_tasks.values()))
     _command_login_tasks.clear()
     for task in tasks:
-        if not task.done():
+        if not task.done() and task not in _committing_command_login_tasks:
             task.cancel()
     return tasks
 
@@ -276,6 +277,7 @@ async def _run_command_device_login(
     proxy: str,
 ) -> None:
     """Complete a private-command login without exposing credential material."""
+    task = asyncio.current_task()
     try:
         creds = await _complete_device_login(
             device_auth_id=device_auth_id,
@@ -283,6 +285,10 @@ async def _run_command_device_login(
             interval=interval,
             proxy=proxy,
         )
+        # AstrBot writes config in a worker thread; cancelling its await cannot
+        # stop the write. Protect persistence and its result notification.
+        if task is not None:
+            _committing_command_login_tasks.add(task)
         source_id, name = await _persist_login_credentials(creds)
     except asyncio.CancelledError:
         raise
@@ -305,16 +311,24 @@ async def _run_command_device_login(
                 messages.text("login.success", name=name, id=source_id)
             )
         )
+    finally:
+        if task is not None:
+            _committing_command_login_tasks.discard(task)
 
 
 async def _cancel_command_login(event: AstrMessageEvent, owner: str) -> None:
-    task = _command_login_tasks.pop(owner, None)
+    task = _command_login_tasks.get(owner)
     if task is None or task.done():
         await event.send(
             MessageChain().message(messages.text("login.nothing_to_cancel"))
         )
         return
+    if task in _committing_command_login_tasks:
+        await event.send(MessageChain().message(messages.text("login.saving")))
+        return
+    _command_login_tasks.pop(owner, None)
     task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
     await event.send(MessageChain().message(messages.text("login.cancelled")))
 
 
@@ -396,7 +410,7 @@ async def handle_login(event: AstrMessageEvent, action: str | None = None) -> No
 
 
 async def terminate() -> None:
-    """Cancel all outstanding device-login work during plugin unload."""
+    """Cancel pending logins and wait for command logins already committing."""
     discard_all_sessions()
     tasks = _cancel_all_command_login_tasks()
     if tasks:
