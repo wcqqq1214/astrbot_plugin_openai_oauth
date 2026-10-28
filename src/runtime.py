@@ -117,15 +117,6 @@ def _get_credential_coordinator() -> CredentialCoordinator:
     return coordinator
 
 
-def _is_logged_in() -> bool:
-    """Return whether the default source has a credential record."""
-    try:
-        status = _get_credential_coordinator().status()
-    except CredentialError:
-        return False
-    return status.state not in {"not_logged_in", "invalid"}
-
-
 def configure(context: Context, config: AstrBotConfig) -> None:
     """Bind shared credentials to the current AstrBot configuration manager."""
     global _config_mgr, _local_codex_store, _remove_source_guard, _credential_sealer

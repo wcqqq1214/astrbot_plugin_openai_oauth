@@ -18,6 +18,9 @@ os.chdir(REPO_ROOT)
 store = importlib.import_module(
     "data.plugins.astrbot_plugin_openai_oauth.src.credential_store"
 )
+local_codex = importlib.import_module(
+    "data.plugins.astrbot_plugin_openai_oauth.src.local_codex"
+)
 
 FAILED: list[str] = []
 
@@ -191,18 +194,27 @@ def test_login_wins_over_in_flight_refresh() -> None:
                 "expires": 9999999999,
             }
 
-        coordinator = _coordinator(conf, refresh)
+        # Device logins are saved through the account registry, as in production.
+        coordinator = local_codex.LocalCredentialCoordinator(
+            _FakeConfigManager(conf),
+            provider_type="OpenAI Subscribe",
+            default_source_id="OpenAI Subscribe",
+            default_source_factory=lambda: _source(""),
+            refresh_credentials=refresh,
+        )
         refreshing = asyncio.create_task(coordinator.get_snapshot())
         await refresh_started.wait()
         replacing = asyncio.create_task(
-            coordinator.replace_credentials(
+            coordinator.providers.save_login(
                 "OpenAI Subscribe",
+                "ChatGPT",
                 {
                     "access_token": "test-jwt.new-login.token",
                     "refresh_token": "refresh-new-login",
                     "expires": 9999999999,
                     "account_id": "user-new",
                 },
+                creating=False,
             )
         )
         release_refresh.set()

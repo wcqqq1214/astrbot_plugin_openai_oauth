@@ -868,14 +868,6 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
             logger.error("OpenAI Codex model catalog failed: %s", type(exc).__name__)
         return list(CODEX_FALLBACK_MODELS)
 
-    def _request_proxy(self) -> str:
-        try:
-            return runtime._get_credential_coordinator().source_settings(
-                self._source_id
-            )["proxy"]
-        except CredentialSourceError:
-            return str(self.provider_config.get("proxy", "") or "")
-
     async def _fetch_usage_for_snapshot(
         self,
         snapshot: CredentialSnapshot,

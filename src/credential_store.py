@@ -293,13 +293,6 @@ class CredentialCoordinator:
         """Refresh the callback after a plugin module hot reload."""
         self._refresh_credentials = refresh_credentials
 
-    def close(self) -> None:
-        """Discard short-lived runtime state without touching stored credentials."""
-        self._source_locks.clear()
-        self._usage_locks.clear()
-        self._states.clear()
-        self._usage_cache.clear()
-
     def _conf(self) -> Any:
         if self._config_manager is None:
             raise CredentialSourceError(
@@ -402,23 +395,6 @@ class CredentialCoordinator:
                 "The refreshed OpenAI credential could not be confirmed after saving."
             )
         return persisted
-
-    async def replace_credentials(
-        self,
-        source_id: str | None,
-        creds: dict[str, Any],
-    ) -> CredentialSnapshot:
-        """Atomically persist credentials from a completed device login."""
-        resolved_source_id = source_id or self._default_source_id
-        async with self._source_lock(resolved_source_id):
-            source = self._source(resolved_source_id, create=True)
-            stored = normalize_credentials(creds)
-            stored.pop("cooldown_until", None)
-            stored.pop("cooldown_reason", None)
-            snapshot = await self._persist(resolved_source_id, source, stored)
-            self._states[resolved_source_id] = CredentialStatus("ready")
-            self._usage_cache.pop(resolved_source_id, None)
-            return snapshot
 
     async def get_snapshot(
         self,

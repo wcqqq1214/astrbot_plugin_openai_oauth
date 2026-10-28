@@ -160,26 +160,6 @@ def client_version_header(user_agent: str) -> str:
     return match.group(1) if match else codex_client_version()
 
 
-def load_credentials(raw: Any) -> dict:
-    """Parse the credential JSON stored in the provider key field."""
-    if isinstance(raw, list):
-        raw = raw[0] if raw else ""
-    if isinstance(raw, dict):
-        return dict(raw)
-    if isinstance(raw, str) and raw.strip():
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, dict):
-                return parsed
-        except (json.JSONDecodeError, TypeError):
-            pass
-    return {}
-
-
-def dump_credentials(creds: dict) -> str:
-    return json.dumps(creds, ensure_ascii=False)
-
-
 async def refresh_access_token(creds: dict, proxy: str | None = None) -> dict:
     """Refresh the access token via the OAuth refresh-token grant.
 

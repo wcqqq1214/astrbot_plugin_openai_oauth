@@ -274,17 +274,6 @@ class LocalCredentialCoordinator(CredentialCoordinator):
         """Migrate accounts behind the single subscription source."""
         await self.providers.migrate()
 
-    def credential_origin(self, source_id: str | None = None) -> str:
-        """Expose the credential location without disclosing the account or tokens."""
-        return self._read_snapshot(
-            source_id or self._default_source_id
-        ).credential_origin
-
-    def close(self) -> None:
-        super().close()
-        self._identities.clear()
-        self._local_cooldowns.clear()
-
     def _login(self, source_id: str) -> LocalLogin | None:
         if (
             self.local_store is not None

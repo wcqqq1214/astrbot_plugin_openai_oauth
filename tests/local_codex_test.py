@@ -129,7 +129,10 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             (await self.coordinator.get_snapshot("device")).account_id, "new-device"
         )
-        self.assertEqual(self.coordinator.credential_origin(), "local_codex")
+        self.assertEqual(
+            self.coordinator._read_snapshot("OpenAI Subscribe").credential_origin,
+            "local_codex",
+        )
         self.refresh.assert_not_awaited()
 
     async def test_missing_invalid_api_key_and_keyring_never_switch_provider(self):
