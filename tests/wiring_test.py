@@ -398,7 +398,8 @@ def test_session_effort_request_override() -> None:
     )
     default_body = asyncio.run(collect(default_provider, None))
     check(
-        default_body.get("reasoning") == {"effort": "high"},
+        default_body.get("reasoning") == {"effort": "high", "summary": "auto"}
+        and default_body.get("include") == ["reasoning.encrypted_content"],
         "requests without a session override keep model-level mapping",
     )
 

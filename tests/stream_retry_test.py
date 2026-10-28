@@ -40,7 +40,7 @@ SUCCESS = [
 
 class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
     async def run_stream(
-        self, attempts, *, limit=None, before_attempt=None, payload=None
+        self, attempts, *, limit=None, before_attempt=None, payload=None, tools=None
     ):
         requests = []
         self.headers = []
@@ -91,7 +91,7 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
                     async for item in provider._query_stream(
                         client,
                         payload or {"model": "test", "input": [], "store": True},
-                        None,
+                        tools,
                         request_max_retries=limit,
                         session_effort="high",
                         before_attempt=before_attempt,
@@ -129,6 +129,106 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
         requests, _, _, _ = await self.run_stream([SUCCESS])
         self.assertNotIn("prompt_cache_key", requests[0])
         self.assertNotIn("session-id", self.headers[0])
+
+    async def test_requests_encrypted_reasoning_and_summary(self):
+        requests, _, _, _ = await self.run_stream([SUCCESS])
+        self.assertEqual(requests[0]["include"], ["reasoning.encrypted_content"])
+        self.assertEqual(
+            requests[0]["reasoning"], {"effort": "high", "summary": "auto"}
+        )
+
+    async def test_reasoning_off_requests_no_reasoning_state(self):
+        provider = object.__new__(module.ProviderOpenAICodex)
+        payloads = {"reasoning": {"effort": "none"}, "include": ["x"]}
+        extra_body = {}
+        provider._request_reasoning_state(payloads, extra_body)
+        self.assertEqual(extra_body, {"reasoning": {"effort": "none"}})
+        self.assertEqual(payloads, {"include": ["x"]})
+
+    async def test_output_items_carry_reasoning_and_parallel_calls(self):
+        def call(index, item_id, call_id, name, arguments):
+            return {
+                "type": "response.output_item.done",
+                "output_index": index,
+                "item": {
+                    "type": "function_call",
+                    "id": item_id,
+                    "call_id": call_id,
+                    "name": name,
+                    "arguments": arguments,
+                    "status": "completed",
+                },
+            }
+
+        events = [
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "delta": "Plan",
+            },
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [{"type": "summary_text", "text": "Plan"}],
+                    "encrypted_content": "sealed",
+                },
+            },
+            call(2, "fc_2", "call_b", "b", '{"y": 2}'),
+            call(1, "fc_1", "call_a", "a", '{"x": 1}'),
+            {
+                "type": "response.completed",
+                "response": {"id": "r", "status": "completed", "output": []},
+            },
+        ]
+        tools = mock.Mock(openai_schema=mock.Mock(return_value=[]))
+        _, output, error, _ = await self.run_stream([events], tools=tools)
+        self.assertIsNone(error)
+        final = output[-1]
+        self.assertEqual(final.tools_call_name, ["a", "b"])
+        self.assertEqual(final.tools_call_args, [{"x": 1}, {"y": 2}])
+        self.assertEqual(final.tools_call_ids, ["call_a", "call_b"])
+        self.assertEqual(final.reasoning_content, "Plan")
+        state = json.loads(final.reasoning_signature)
+        self.assertEqual(state["items"][0]["encrypted_content"], "sealed")
+
+    async def test_parallel_argument_deltas_follow_their_item(self):
+        def added(item_id, call_id, name):
+            return {
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "function_call",
+                    "id": item_id,
+                    "call_id": call_id,
+                    "name": name,
+                    "arguments": "",
+                },
+            }
+
+        def delta(item_id, text):
+            return {
+                "type": "response.function_call_arguments.delta",
+                "item_id": item_id,
+                "delta": text,
+            }
+
+        events = [
+            added("fc_1", "call_a", "a"),
+            added("fc_2", "call_b", "b"),
+            delta("fc_1", '{"x":'),
+            delta("fc_2", '{"y": 2}'),
+            delta("fc_1", " 1}"),
+            {
+                "type": "response.completed",
+                "response": {"id": "r", "status": "completed", "output": []},
+            },
+        ]
+        _, output, error, _ = await self.run_stream([events])
+        self.assertIsNone(error)
+        self.assertEqual(output[-1].tools_call_args, [{"x": 1}, {"y": 2}])
 
     async def test_unsupported_parameters_are_not_sent(self):
         requests, _, error, _ = await self.run_stream(

@@ -404,6 +404,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
             reasoning_effort = extra_body.pop("reasoning_effort", None)
             if reasoning_effort is not None and "reasoning" not in extra_body:
                 extra_body["reasoning"] = {"effort": reasoning_effort}
+        self._request_reasoning_state(payloads, extra_body)
         extra_body.pop("previous_response_id", None)
         extra_body.pop("conversation", None)
         extra_body.pop("store", None)
@@ -479,6 +480,55 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
             )
             await asyncio.sleep(delay)
 
+    @staticmethod
+    def _request_reasoning_state(
+        payloads: dict[str, Any], extra_body: dict[str, Any]
+    ) -> None:
+        """Ask for reasoning the way Codex does, unless reasoning is off.
+
+        With ``store`` disabled, the encrypted reasoning content is the only
+        way to carry reasoning into the next turn or tool call. A summary lets
+        the reasoning stream instead of arriving silently.
+        """
+        reasoning = extra_body.get("reasoning")
+        if not isinstance(reasoning, dict):
+            reasoning = payloads.pop("reasoning", None)
+            reasoning = dict(reasoning) if isinstance(reasoning, dict) else {}
+        if reasoning.get("effort") == "none":
+            if reasoning:
+                extra_body["reasoning"] = reasoning
+            return
+        reasoning.setdefault("summary", "auto")
+        extra_body["reasoning"] = reasoning
+        include = extra_body.get("include", payloads.pop("include", None))
+        include = list(include) if isinstance(include, (list, tuple)) else []
+        if "reasoning.encrypted_content" not in include:
+            include.append("reasoning.encrypted_content")
+        extra_body["include"] = include
+
+    @staticmethod
+    def _response_with_output(
+        response: Any, response_id: str | None, items: dict[int, Any]
+    ) -> dict[str, Any]:
+        """Give a terminal response the output items its stream delivered.
+
+        Codex completes with an empty ``output`` list; the items arrive in
+        ``response.output_item.done`` events instead.
+        """
+
+        def field(name: str) -> Any:
+            if isinstance(response, dict):
+                return response.get(name)
+            return getattr(response, name, None)
+
+        return {
+            "id": field("id") or response_id,
+            "status": field("status"),
+            "incomplete_details": field("incomplete_details"),
+            "usage": field("usage"),
+            "output": [items[index] for index in sorted(items)],
+        }
+
     async def _consume_stream(
         self, stream: Any, tools: Any
     ) -> AsyncGenerator[LLMResponse, None]:
@@ -490,6 +540,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         reasoning_parts: list[str] = []
         reasoning_segment: tuple[Any, Any, Any] | None = None
         function_calls: list[dict] = []
+        output_items: dict[int, Any] = {}
 
         async for event in stream:
             event_type = self._field(event, "type", "")
@@ -538,6 +589,15 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                     )
                 continue
 
+            if event_type == "response.output_item.done":
+                item = self._field(event, "item")
+                if item is not None:
+                    index = self._field(event, "output_index")
+                    if isinstance(index, bool) or not isinstance(index, int):
+                        index = max(output_items, default=-1) + 1
+                    output_items[index] = item
+                continue
+
             if event_type == "response.output_item.added":
                 item = self._field(event, "item")
                 if self._field(item, "type") == "function_call":
@@ -546,6 +606,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                         arguments = json.dumps(arguments, ensure_ascii=False)
                     function_calls.append(
                         {
+                            "item_id": self._field(item, "id"),
                             "call_id": str(self._field(item, "call_id", "") or ""),
                             "name": str(self._field(item, "name", "") or ""),
                             "arguments": str(arguments or ""),
@@ -554,10 +615,14 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                 continue
 
             if event_type == "response.function_call_arguments.delta":
-                if function_calls:
-                    function_calls[-1]["arguments"] += str(
-                        self._field(event, "delta", "") or ""
-                    )
+                # Parallel calls stream their arguments by item ID.
+                item_id = self._field(event, "item_id")
+                call = next(
+                    (c for c in function_calls if item_id and c["item_id"] == item_id),
+                    function_calls[-1] if function_calls else None,
+                )
+                if call is not None:
+                    call["arguments"] += str(self._field(event, "delta", "") or "")
                 continue
 
             if event_type in {
@@ -588,6 +653,19 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                     if self._field(event_response, "output"):
                         yield await self._parse_response(event_response, tools)
                         return
+                    if output_items:
+                        try:
+                            parsed = await self._parse_response(
+                                self._response_with_output(
+                                    event_response, response_id, output_items
+                                ),
+                                tools,
+                            )
+                        except EmptyModelOutputError:
+                            parsed = None
+                        if parsed is not None:
+                            yield parsed
+                            return
                 final = self._assemble_streamed_response(
                     response_id,
                     text_parts,

@@ -5,6 +5,7 @@
 ### Added
 
 - Send a stable `prompt_cache_key` and Codex's session headers per AstrBot session so long conversations reuse the backend's cached prompt, saving allowance and first-token latency.
+- Request encrypted reasoning and reasoning summaries like Codex, and build the final reply from the stream's completed output items, so reasoning carries across turns and tool calls and parallel tool call arguments stay with their call.
 
 ### Changed
 

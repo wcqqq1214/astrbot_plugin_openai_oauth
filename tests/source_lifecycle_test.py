@@ -194,10 +194,17 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(seen), 1)
                 body, timeout = seen[0]
                 self.assertEqual(timeout["read"], original["timeout"])
-                for key in ("reasoning", "text"):
-                    self.assertEqual(
-                        body.get(key), original["custom_extra_body"].get(key)
-                    )
+                self.assertEqual(
+                    body.get("text"), original["custom_extra_body"].get("text")
+                )
+                # Codex requests a reasoning summary unless one is configured.
+                self.assertEqual(
+                    body.get("reasoning"),
+                    {
+                        "summary": "auto",
+                        **original["custom_extra_body"].get("reasoning", {}),
+                    },
+                )
                 self.assertNotIn("key", model)
                 self.assertNotIn("proxy", model)
             finally:
