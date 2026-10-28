@@ -308,9 +308,9 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         before_attempt: Callable[[], None] | None = None,
         on_stream_open: Callable[[], None] | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
-        """Stream from the Codex backend, which completes with an empty response
-        object: the content only arrives as deltas. Assemble the final response
-        from them instead of parsing the terminal event."""
+        """Stream one request shaped for the Codex backend, retrying only
+        temporary failures that happen before any output. The final response is
+        built by ``CodexStreamMixin`` from the stream's completed output items."""
         if tools:
             response_tools = []
             for tool in tools.openai_schema():
