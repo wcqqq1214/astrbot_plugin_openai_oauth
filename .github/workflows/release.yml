@@ -36,6 +36,7 @@ jobs:
             exit 1
           fi
           python3 .github/scripts/release_check.py versions
+          python3 .github/scripts/release_check.py notes "$TAG" > /dev/null
 
           # Find the preceding release in history, excluding this commit's tag.
           OLD_TAG="$(git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD^ 2>/dev/null || true)"
@@ -69,36 +70,15 @@ jobs:
           OLD_TAG="${{ needs.check-version.outputs.old_tag }}"
           REPO="${{ github.repository }}"
 
-          echo "## ${NEW_TAG}" > release_notes.md
-          echo "" >> release_notes.md
-
-          if [ "$OLD_TAG" != "none" ] && git rev-parse "$OLD_TAG" >/dev/null 2>&1; then
-            git log --pretty=format:"%s|%h|%H" "$OLD_TAG..HEAD" --no-merges > commits.txt
-
-            print_category() {
-              title="$1"; pattern="$2"
-              hits="$(grep -iE "$pattern" commits.txt || true)"
-              if [ -n "$hits" ]; then
-                echo "### $title" >> release_notes.md
-                printf '%s\n' "$hits" | while IFS='|' read -r msg hash full; do
-                  echo "- ${msg} ([${hash}](https://github.com/${REPO}/commit/${full}))" >> release_notes.md
-                done
-                echo "" >> release_notes.md
-              fi
-            }
-
-            print_category "Features" "^(feat|feature)(\([^)]*\))?:"
-            print_category "Fixes" "^fix(\([^)]*\))?:"
-            print_category "Documentation" "^docs(\([^)]*\))?:"
-            print_category "Chores" "^(chore|style|refactor|perf|test|ci|build)(\([^)]*\))?:"
-
-            rm -f commits.txt
-            echo "**Full Changelog**: https://github.com/${REPO}/compare/${OLD_TAG}...${NEW_TAG}" >> release_notes.md
-          else
-            echo "### Initial release" >> release_notes.md
-            echo "" >> release_notes.md
-            git log --pretty=format:"- %s ([%h](https://github.com/${REPO}/commit/%H))" -10 --no-merges >> release_notes.md
+          # The CHANGELOG section is the curated summary of this release.
+          python3 .github/scripts/release_check.py notes "$NEW_TAG" > release_notes.md
+          if [ "$OLD_TAG" != "none" ]; then
+            {
+              echo ""
+              echo "**Full Changelog**: https://github.com/${REPO}/compare/${OLD_TAG}...${NEW_TAG}"
+            } >> release_notes.md
           fi
+          cat release_notes.md
 
       - name: Create release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3

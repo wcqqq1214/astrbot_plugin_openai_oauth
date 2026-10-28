@@ -63,5 +63,6 @@ Pushing `main` runs tests without publishing a release. To release:
    exact commit to release.
 4. Create and push the matching `vX.Y.Z` tag.
 
-The release workflow checks that the tag matches the plugin version, then packages
-and publishes it. A local-only tag does not trigger a release.
+The release workflow checks that the tag matches the plugin version and that
+`CHANGELOG.md` has a section for it, then packages the runtime files (see
+`.gitattributes`) and publishes them with that section as the release notes. A local-only tag does not trigger a release.
