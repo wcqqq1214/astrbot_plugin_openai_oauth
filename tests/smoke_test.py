@@ -77,62 +77,65 @@ def check_entry_point(module) -> None:
 
 
 def main() -> int:
-    print("=== 1. 插件加载前 provider 不应存在 ===")
-    check(PROVIDER_TYPE not in provider_cls_map, "provider 未注册（加载前）")
+    print("=== 1. The provider is absent before the plugin loads ===")
+    check(
+        PROVIDER_TYPE not in provider_cls_map,
+        "provider is not registered before loading",
+    )
 
-    print("\n=== 2. 通过真实命名空间导入插件（模拟 StarManager.load 的导入路径） ===")
+    print("\n=== 2. Import through the real namespace (as StarManager.load does) ===")
     # Exactly how star_manager.load() names `data.plugins.<root_dir_name>.main`.
     import importlib
 
     module = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.main")
     runtime = importlib.import_module(f"{module.__package__}.src.runtime")
-    check(module is not None, "data.plugins.astrbot_plugin_openai_oauth.main 导入成功")
+    check(module is not None, "data.plugins.astrbot_plugin_openai_oauth.main imports")
     check(
         PROVIDER_TYPE == runtime.PROVIDER_TYPE,
         f"test constant matches the runtime provider type ({runtime.PROVIDER_TYPE})",
     )
 
-    print("\n=== 3. provider 已进入注册表 ===")
-    check(PROVIDER_TYPE in provider_cls_map, "provider_cls_map 包含 provider")
+    print("\n=== 3. The provider is registered ===")
+    check(PROVIDER_TYPE in provider_cls_map, "provider_cls_map contains the provider")
     meta = provider_cls_map.get(PROVIDER_TYPE)
     if meta is not None:
-        check(bool(meta.desc), f"描述非空: {meta.desc[:40]}...")
+        check(bool(meta.desc), f"description is set: {meta.desc[:40]}...")
         check(
             meta.provider_display_name == "OpenAI Subscribe",
             f"provider_display_name: {meta.provider_display_name}",
         )
-        check(meta.default_config_tmpl is not None, "default_config_tmpl 存在")
+        check(meta.default_config_tmpl is not None, "default_config_tmpl exists")
         check(
             (meta.default_config_tmpl or {}).get("provider") == "openai",
-            "config 模板带 provider=openai（前端图标查找）",
+            "config template has provider=openai (dashboard icon lookup)",
         )
         check(
             (meta.default_config_tmpl or {}).get("provider_type") == "chat_completion",
-            "config 模板带 provider_type=chat_completion（前端 tab 过滤）",
+            "config template has provider_type=chat_completion (dashboard tab filter)",
         )
         check(
             "key" in (meta.default_config_tmpl or {}),
-            "config 模板包含 key 字段",
+            "config template has a key field",
         )
-        check(meta.cls_type is not None, "cls_type 已绑定")
+        check(meta.cls_type is not None, "cls_type is bound")
     else:
-        check(False, "provider_cls_map 中无 provider 元数据")
+        check(False, "provider_cls_map has no provider metadata")
 
-    print("\n=== 4. WebUI 元数据构建（config_service）读到的同一份列表能看到它 ===")
+    print("\n=== 4. WebUI metadata (config_service) sees the same registry ===")
     check(
         any(getattr(p, "type", None) == PROVIDER_TYPE for p in cfg_registry),
-        "config_service 的 provider_registry 包含 provider",
+        "config_service provider_registry contains the provider",
     )
     check(
         cfg_registry is provider_registry,
-        "config_service 与 register 模块是同一份列表对象（同一进程共享）",
+        "config_service and the register module share one registry object",
     )
 
-    print("\n=== 5. 插件 Star 是否注册成功 ===")
+    print("\n=== 5. The plugin Star is registered ===")
     from astrbot.core.star.star import star_map
 
     registered = [k for k in star_map if "astrbot_plugin_openai_oauth" in k]
-    check(bool(registered), f"star_map 含插件注册项: {registered}")
+    check(bool(registered), f"star_map has the plugin: {registered}")
     check_entry_point(module)
 
     print(
@@ -158,9 +161,11 @@ def main() -> int:
     except ValueError as exc:
         reload_ok = False
         reload_error = str(exc)
-    check(reload_ok, "热重载后重新导入成功（无重复注册错误）")
+    check(
+        reload_ok, "re-import after hot reload succeeds without duplicate registration"
+    )
     if not reload_ok:
-        check(False, f"重复注册报错：{reload_error}")
+        check(False, f"duplicate registration failed: {reload_error}")
     check(
         provider_cls_map[PROVIDER_TYPE].cls_type is not first_cls,
         "provider metadata points to the newly imported class after reload",
@@ -195,11 +200,11 @@ def main() -> int:
 
     print()
     if FAILED:
-        print(f"=== 冒烟验证失败：{len(FAILED)} 项 ===")
+        print(f"=== Smoke test failed: {len(FAILED)} check(s) ===")
         for f in FAILED:
             print(f"  - {f}")
         return 1
-    print("=== 冒烟验证全部通过 ===")
+    print("=== Smoke test passed ===")
     return 0
 
 
