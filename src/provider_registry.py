@@ -91,7 +91,9 @@ class ProviderRegistry:
     @staticmethod
     def name(value: Any) -> str:
         if not isinstance(value, str) or not 1 <= len(value.strip()) <= 80:
-            raise CredentialSourceError("Provider name must contain 1–80 characters.")
+            raise CredentialSourceError(
+                "Provider name must contain 1–80 characters.", code="invalid_name"
+            )
         return value.strip()
 
     async def _save(self, previous: list[dict[str, Any]]) -> None:
@@ -222,17 +224,23 @@ class ProviderRegistry:
         async with self.lock:
             gateway = self.gateway()
             if gateway is None:
-                raise CredentialSourceError("Account migration has not completed.")
+                raise CredentialSourceError(
+                    "Account migration has not completed.", code="migration_pending"
+                )
             if account_id is not None:
                 self.coordinator.source(account_id)
             routing = deepcopy(self.routing())
             if model_id is None:
                 if account_id is None:
-                    raise CredentialSourceError("A default account is required.")
+                    raise CredentialSourceError(
+                        "A default account is required.", code="invalid_request"
+                    )
                 routing["default_account_id"] = account_id
             else:
                 if model_id not in {m["id"] for m in self.routing_view()["models"]}:
-                    raise CredentialSourceError("The subscription model was not found.")
+                    raise CredentialSourceError(
+                        "The subscription model was not found.", code="model_not_found"
+                    )
                 if account_id is None:
                     routing["models"].pop(model_id, None)
                 else:
@@ -451,7 +459,9 @@ class ProviderRegistry:
             previous = deepcopy(sources)
             if creating:
                 if any(s["id"] == source_id for s in sources):
-                    raise CredentialSourceError("Provider ID already exists.")
+                    raise CredentialSourceError(
+                        "Provider ID already exists.", code="provider_exists"
+                    )
                 source = self.coordinator.default_source_factory()
                 source.update(
                     id=source_id,
@@ -462,7 +472,10 @@ class ProviderRegistry:
             else:
                 source = self.coordinator.source(source_id)
                 if source.get("credential_mode", DEVICE) != DEVICE:
-                    raise CredentialSourceError("Sign in to local Codex on the host.")
+                    raise CredentialSourceError(
+                        "Sign in to local Codex on the host.",
+                        code="local_login_required",
+                    )
             stored = normalize_credentials(creds)
             stored.pop("cooldown_until", None)
             stored.pop("cooldown_reason", None)
@@ -484,12 +497,17 @@ class ProviderRegistry:
         if name is not UNSET:
             name = self.name(name)
         if enabled is not UNSET and type(enabled) is not bool:
-            raise CredentialSourceError("enabled must be a boolean.")
+            raise CredentialSourceError(
+                "enabled must be a boolean.", code="invalid_request"
+            )
         if routing_mode is not UNSET and routing_mode not in ("fixed", "auto"):
-            raise CredentialSourceError("routing_mode must be fixed or auto.")
+            raise CredentialSourceError(
+                "routing_mode must be fixed or auto.", code="invalid_request"
+            )
         if not delete and name is UNSET and enabled is UNSET and routing_mode is UNSET:
             raise CredentialSourceError(
-                "Provide name, enabled or routing_mode to update."
+                "Provide name, enabled or routing_mode to update.",
+                code="invalid_request",
             )
         async with self.lock, self.coordinator.source_lock(source_id):
             source = self.coordinator.source(source_id)
@@ -500,7 +518,8 @@ class ProviderRegistry:
             if delete:
                 if source.get("credential_mode") == LOCAL:
                     raise CredentialSourceError(
-                        "The local Codex provider cannot be deleted."
+                        "The local Codex provider cannot be deleted.",
+                        code="local_provider_locked",
                     )
                 routing = self.routing()
                 active_models = {m["id"] for m in self.routing_view()["models"]}
@@ -509,7 +528,8 @@ class ProviderRegistry:
                     for model, account in routing.get("models", {}).items()
                 ):
                     raise CredentialSourceError(
-                        "Select another default account and update model account bindings first."
+                        "Select another default account and update model account bindings first.",
+                        code="account_in_use",
                     )
                 # Model definitions are global in AstrBot; profiles select their IDs.
                 if any(
@@ -526,7 +546,8 @@ class ProviderRegistry:
                     for p in self.coordinator.config().get("provider", [])
                 ):
                     raise CredentialSourceError(
-                        "Remove this provider's model bindings in AstrBot first."
+                        "Remove this provider's model bindings in AstrBot first.",
+                        code="account_has_models",
                     )
                 sources.remove(source)
                 if gateway is not None:

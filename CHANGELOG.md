@@ -13,6 +13,7 @@
 - Reuse each account's HTTP connection between requests instead of opening a new TCP and TLS connection for every message; a transport is replaced when its account or proxy changes.
 - `/effort` accepts `none` and `minimal` and checks the level against the current model's catalog entry; a session level the model does not support falls back to the model setting instead of failing with HTTP 400.
 - Reuse a parse of an unchanged local Codex `auth.json` for up to a second instead of reading it several times per request; refreshing still reads the file fresh.
+- The WebUI API reports errors as stable codes that the Plugin View shows in the dashboard's language (Chinese, English, Russian or Japanese), instead of mixing Chinese and English server text.
 
 ### Fixed
 

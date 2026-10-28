@@ -226,6 +226,10 @@ class LoginBoundaryTests(unittest.TestCase):
         first, second, stolen_poll = asyncio.run(run())
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 429)
+        # Errors are stable codes that the Plugin View translates.
+        self.assertEqual(
+            _payload(second), {"status": "error", "message": "login_sessions_full"}
+        )
         self.assertEqual(stolen_poll.status_code, 200)
         self.assertEqual(_payload(stolen_poll), {"status": "expired"})
 

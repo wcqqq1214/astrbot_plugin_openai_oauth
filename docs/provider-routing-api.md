@@ -55,6 +55,9 @@ To pin one model, send `{"model_id": "my-model", "account_id": "account-id"}`;
 `account_id: null` for a model means follow the default. A null default is rejected.
 Success returns `{ "status": "success", "routing": {...} }`. Invalid IDs, unknown
 fields and incorrect types return HTTP 400 without changing the configuration.
+Every error response is `{ "status": "error", "message": "<code>" }` with a stable
+code such as `invalid_request` or `account_in_use`; the Plugin View translates the
+codes listed under `errors` in `pages/providers/strings.js`.
 The same authenticated, same-origin plugin bridge is required for this endpoint.
 
 Account selection is read on every request, including by already loaded provider

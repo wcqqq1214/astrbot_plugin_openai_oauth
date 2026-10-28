@@ -22,35 +22,60 @@ class CredentialSealer(Protocol):
 
 
 class CredentialError(RuntimeError):
-    """Base error for safe, user-actionable credential failures."""
+    """Base error for safe, user-actionable credential failures.
+
+    ``code`` is a stable identifier the Plugin View translates; the message is
+    English detail for logs and API callers.
+    """
+
+    code = "credential_error"
+
+    def __init__(self, *args: object, code: str | None = None) -> None:
+        super().__init__(*args)
+        if code is not None:
+            self.code = code
 
 
 class CredentialSourceError(CredentialError):
     """The configured provider source cannot safely be used."""
 
+    code = "invalid_source"
+
 
 class ProviderDisabledError(CredentialSourceError):
     """The source is disabled for new inference attempts."""
+
+    code = "provider_disabled"
 
 
 class CredentialSchemaError(CredentialError):
     """The persisted credential record has an unsupported schema."""
 
+    code = "invalid_credentials"
+
 
 class CredentialsNotConfiguredError(CredentialError):
     """The provider source has no usable access token."""
+
+    code = "not_logged_in"
 
 
 class ReauthenticationRequiredError(CredentialError):
     """The stored credentials cannot be refreshed safely."""
 
+    code = "reauth_required"
+
 
 class CredentialPersistenceError(CredentialError):
     """A refreshed credential could not be confirmed in persistent config."""
 
+    code = "save_failed"
+
 
 class CredentialCooldownError(CredentialError):
     """The subscription source is temporarily cooling down."""
+
+    code = "cooling"
 
     def __init__(
         self,
@@ -354,7 +379,8 @@ class CredentialCoordinator:
             return source
         if not create or source_id != self.default_source_id:
             raise CredentialSourceError(
-                "The configured OpenAI provider source was not found."
+                "The configured OpenAI provider source was not found.",
+                code="provider_not_found",
             )
         source = self.default_source_factory()
         if source.get("id") != source_id or source.get("type") != self.provider_type:

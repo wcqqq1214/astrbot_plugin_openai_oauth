@@ -245,13 +245,13 @@ async def _run_device_login(session_id: str, proxy: str) -> None:
         raise
     except DeviceAuthTimeout as exc:
         session.status = LoginStatus.TIMEOUT
-        session.error = str(exc)
+        session.error = exc.code
     except DeviceAuthError as exc:
         session.status = LoginStatus.ERROR
-        session.error = str(exc)
+        session.error = exc.code
     except Exception as exc:  # noqa: BLE001 - report a generic error without credential data
         session.status = LoginStatus.ERROR
-        session.error = "登录或保存失败，请重试"
+        session.error = "login_failed"
         logger.error("OpenAI Codex device login failed: %s", type(exc).__name__)
     finally:
         if _login_sessions.get(session_id) is session:

@@ -31,15 +31,19 @@ _NO_STORE_HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 def _login_request_error() -> str | None:
     owner = str(request.username or "")
     if not owner:
-        return "登录会话身份不可用"
+        return "session_identity_unavailable"
     if owner.startswith(API_KEY_USERNAME_PREFIX):
-        return "此操作仅允许已登录的 WebUI 用户，API Key 不可用"
+        return "api_key_not_allowed"
     return None
 
 
-def _login_error_response(message: str, status_code: int):
+def _login_error_response(code: str, status_code: int):
+    """Report an error as a stable code; the Plugin View translates it.
+
+    The dashboard bridge passes only ``message`` of a failed request through.
+    """
     return json_response(
-        {"status": "error", "message": message},
+        {"status": "error", "message": code},
         status_code=status_code,
         headers=_NO_STORE_HEADERS,
     )
@@ -50,7 +54,7 @@ async def _handle_device_start() -> Any:
         return _login_error_response(message, 403)
     body = await request.json(default={}) or {}
     if not isinstance(body, dict):
-        return _login_error_response("请求格式无效", 400)
+        return _login_error_response("invalid_request", 400)
     coordinator = runtime.get_coordinator()
     source_id = body.get("source_id")
     creating = source_id is None
@@ -60,16 +64,19 @@ async def _handle_device_start() -> Any:
             proxy = ""
         else:
             if not isinstance(source_id, str) or not source_id:
-                raise CredentialSourceError("Invalid provider ID.")
+                raise CredentialSourceError(
+                    "Invalid provider ID.", code="invalid_request"
+                )
             source = coordinator.source(source_id)
             if source.get("credential_mode", "device_oauth") != "device_oauth":
                 raise CredentialSourceError(
-                    "Sign in to local Codex on the AstrBot host."
+                    "Sign in to local Codex on the AstrBot host.",
+                    code="local_login_required",
                 )
             name = source.get("name") or source_id
             proxy = coordinator.source_settings(source_id)["proxy"]
     except CredentialError as exc:
-        return _login_error_response(str(exc), 400)
+        return _login_error_response(exc.code, 400)
     owner = str(request.username)
     live = login.sessions()
     for existing_id, existing in live.items():
@@ -83,7 +90,7 @@ async def _handle_device_start() -> Any:
             continue
         if same_owner:
             if existing.status != login.LoginStatus.PENDING:
-                return _login_error_response("设备登录正在启动，请稍后重试", 409)
+                return _login_error_response("login_starting", 409)
             return json_response(
                 {
                     "status": "pending",
@@ -94,14 +101,14 @@ async def _handle_device_start() -> Any:
                 },
                 headers=_NO_STORE_HEADERS,
             )
-        return _login_error_response("另一位用户正在登录该 Provider", 409)
+        return _login_error_response("login_in_use", 409)
     if len(live) >= _MAX_LOGIN_SESSIONS:
-        return _login_error_response("设备登录会话已达上限，请稍后重试", 429)
+        return _login_error_response("login_sessions_full", 429)
     owner_sessions = sum(
         secrets.compare_digest(session.owner, owner) for session in live.values()
     )
     if owner_sessions >= _MAX_LOGIN_SESSIONS_PER_USER:
-        return _login_error_response("你的设备登录会话已达上限，请稍后重试", 429)
+        return _login_error_response("login_sessions_full_user", 429)
 
     # Reserve the bounded slot before the first await so concurrent starts cannot
     # race past the quota check.
@@ -121,14 +128,14 @@ async def _handle_device_start() -> Any:
         )
     except DeviceAuthError as exc:
         login.discard_session(session_id)
-        return _login_error_response(str(exc), 400)
+        return _login_error_response(exc.code, 400)
     except Exception as exc:  # noqa: BLE001 - keep network details out of the response
         login.discard_session(session_id)
         logger.error(
             "OpenAI Codex device-code request failed: %s",
             type(exc).__name__,
         )
-        return _login_error_response("无法启动设备登录，请稍后重试", 502)
+        return _login_error_response("device_login_unavailable", 502)
     if (
         login.begin_session(
             session_id,
@@ -139,7 +146,7 @@ async def _handle_device_start() -> Any:
         )
         is None
     ):
-        return _login_error_response("登录会话已过期", 410)
+        return _login_error_response("login_expired", 410)
     return json_response(
         {
             "status": "pending",
@@ -157,7 +164,7 @@ async def _handle_device_poll() -> Any:
         return _login_error_response(message, 403)
     body = await request.json(default={}) or {}
     if not isinstance(body, dict):
-        return _login_error_response("请求格式无效", 400)
+        return _login_error_response("invalid_request", 400)
     session_id = str(body.get("session_id", "") or "")
     session = login.owned_session(session_id, str(request.username))
     if session is None:
@@ -177,15 +184,13 @@ async def _handle_device_cancel() -> Any:
         return _login_error_response(message, 403)
     body = await request.json(default={}) or {}
     if not isinstance(body, dict):
-        return _login_error_response("请求格式无效", 400)
+        return _login_error_response("invalid_request", 400)
     session_id = str(body.get("session_id", "") or "")
     session = login.owned_session(session_id, str(request.username))
     if session is None:
         return json_response({"status": "expired"}, headers=_NO_STORE_HEADERS)
     if session.status in {login.LoginStatus.SAVING, login.LoginStatus.SUCCESS}:
-        return _login_error_response(
-            "授权已完成，正在保存或已保存 Provider，请等待登录结果。", 409
-        )
+        return _login_error_response("login_saving", 409)
     login.discard_session(session_id)
     return json_response({"status": "cancelled"}, headers=_NO_STORE_HEADERS)
 
@@ -193,13 +198,13 @@ async def _handle_device_cancel() -> Any:
 async def _requested_source_id() -> str:
     body = await request.json(default={}) or {}
     if not isinstance(body, dict):
-        raise CredentialSourceError("Invalid request body.")
+        raise CredentialSourceError("Invalid request body.", code="invalid_request")
     source_id = body.get(
         "source_id",
         runtime.get_coordinator().providers.routing_view()["default_account_id"],
     )
     if not isinstance(source_id, str) or not source_id:
-        raise CredentialSourceError("Invalid provider ID.")
+        raise CredentialSourceError("Invalid provider ID.", code="invalid_request")
     runtime.get_coordinator().source(source_id)
     return source_id
 
@@ -217,7 +222,7 @@ async def _handle_providers_list() -> Any:
             headers=_NO_STORE_HEADERS,
         )
     except CredentialError:
-        return _login_error_response("Provider configuration is unavailable.", 400)
+        return _login_error_response("configuration_unavailable", 400)
 
 
 async def _handle_routing_update() -> Any:
@@ -230,15 +235,17 @@ async def _handle_routing_update() -> Any:
             or set(body) - {"account_id", "model_id"}
             or "account_id" not in body
         ):
-            raise CredentialSourceError("Invalid routing update.")
+            raise CredentialSourceError(
+                "Invalid routing update.", code="invalid_request"
+            )
         account_id = body["account_id"]
         model_id = body.get("model_id")
         if account_id is not None and (
             not isinstance(account_id, str) or not account_id
         ):
-            raise CredentialSourceError("Invalid account ID.")
+            raise CredentialSourceError("Invalid account ID.", code="invalid_request")
         if "model_id" in body and (not isinstance(model_id, str) or not model_id):
-            raise CredentialSourceError("Invalid model ID.")
+            raise CredentialSourceError("Invalid model ID.", code="invalid_request")
         registry = runtime.get_coordinator().providers
         await registry.update_routing(account_id, model_id=model_id)
         return json_response(
@@ -246,7 +253,7 @@ async def _handle_routing_update() -> Any:
             headers=_NO_STORE_HEADERS,
         )
     except CredentialError as exc:
-        return _login_error_response(str(exc), 400)
+        return _login_error_response(exc.code, 400)
 
 
 async def _edit_provider(*, delete: bool) -> Any:
@@ -256,9 +263,13 @@ async def _edit_provider(*, delete: bool) -> Any:
         source_id = await _requested_source_id()
         body = await request.json(default={}) or {}
         if "source_id" not in body:
-            raise CredentialSourceError("Provider ID is required.")
+            raise CredentialSourceError(
+                "Provider ID is required.", code="invalid_request"
+            )
         if set(body) - {"source_id", "name", "enabled", "routing_mode"}:
-            raise CredentialSourceError("Unknown provider update field.")
+            raise CredentialSourceError(
+                "Unknown provider update field.", code="invalid_request"
+            )
         coordinator = runtime.get_coordinator()
         await coordinator.providers.edit(
             source_id,
@@ -276,7 +287,7 @@ async def _edit_provider(*, delete: bool) -> Any:
             result["provider"] = coordinator.account_view(source_id)
         return json_response(result, headers=_NO_STORE_HEADERS)
     except CredentialError as exc:
-        return _login_error_response(str(exc), 400)
+        return _login_error_response(exc.code, 400)
 
 
 async def _handle_provider_update() -> Any:
@@ -342,7 +353,7 @@ async def _handle_account_usage() -> Any:
         if state is not None:
             return json_response({"status": "invalid"}, headers=_NO_STORE_HEADERS)
         logger.error("OpenAI Codex usage API failed: %s", type(exc).__name__)
-        return _login_error_response("额度查询失败，请稍后重试", 502)
+        return _login_error_response("usage_failed", 502)
     return json_response(
         {"status": "success", "usage": usage, "account": account},
         headers=_NO_STORE_HEADERS,

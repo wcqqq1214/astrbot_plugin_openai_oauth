@@ -953,15 +953,19 @@ assert.ok(shown("start") && !shown("cancel") && !shown("device-panel"));
 assert.equal(ids.get("error").hidden, true);
 waitingLogin = page.startLogin();
 await tick();
-pollResult({status: "error", error: "OpenAI rejected the code"});
+pollResult({status: "error", error: "device_login_disabled"});
 await waitingLogin;
-assert.match(read("error"), /OpenAI rejected the code/);
+assert.match(read("error"), /设备码登录未启用/);
 assert.equal(read("start"), "重新登录");
 assert.ok(shown("start") && shown("login-name-field") && !shown("cancel") && !shown("device-panel"));
 // A rejected start request is recoverable from the same form.
-startResponse = {status: "error", message: "设备登录会话已达上限，请稍后重试"};
+startResponse = {status: "error", message: "login_sessions_full"};
 await page.startLogin();
 assert.match(read("error"), /会话已达上限/);
+// Text that is not a known code (an older server, a transport error) is kept.
+startResponse = {status: "error", message: "Gateway unavailable"};
+await page.startLogin();
+assert.match(read("error"), /Gateway unavailable/);
 assert.equal(ids.get("start").disabled, false);
 assert.equal(ids.get("login-name").disabled, false);
 startResponse = null;
@@ -1133,7 +1137,8 @@ updateHandler = null;
 
 // A rejected save keeps the draft and the dialog, reloads, and can be retried.
 listsBefore = listCalls;
-updateHandler = () => { throw new Error("Provider name must contain 1–80 characters."); };
+// The server reports a stable code; the page shows it in the dashboard's language.
+updateHandler = () => { throw new Error("invalid_name"); };
 await openSettings("Held");
 typeName("Rejected");
 await click(ids.get("settings-routing-fixed"));
@@ -1141,7 +1146,7 @@ await click(saveButton);
 await tick();
 assert.equal(settingsBox.open, true);
 assert.equal(listCalls, listsBefore + 1);
-assert.match(read("settings-error"), /保存「Held」失败.*1–80/);
+assert.match(read("settings-error"), /保存「Held」失败.*名称需为 1–80 个字符/);
 assert.equal(settingsError.hidden, false);
 assert.equal(nameInput.value, "Rejected", "the draft survives a failed save");
 assert.equal(pressed("fixed"), "true");
@@ -1319,13 +1324,13 @@ assert.equal(nameInput.value, "Kept draft");
 assert.equal(deletes.length, 0);
 
 // A failed removal keeps the dialog, the provider and the draft.
-deleteHandler = () => { throw new Error("Remove this provider's model bindings in AstrBot first."); };
+deleteHandler = () => { throw new Error("account_has_models"); };
 await click(removeButton);
 await click(removeButton);
 await tick();
 assert.equal(deletes.length, 1);
 assert.equal(settingsBox.open, true);
-assert.match(read("settings-error"), /移除「Mine」失败.*model bindings/);
+assert.match(read("settings-error"), /移除「Mine」失败.*模型绑定/);
 assert.equal(nameInput.value, "Kept draft");
 assert.ok(rowFor("Mine"));
 

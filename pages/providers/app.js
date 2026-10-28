@@ -92,8 +92,10 @@ let pageErrorMessage = "";
 let saveErrorMessage = "";
 
 // Keep UI-generated messages translatable while preserving server details.
+// The server reports its own errors as stable codes, translated here.
 function messageText(message) {
-  return typeof message === "function" ? message() : message;
+  if (typeof message === "function") return message();
+  return (typeof message === "string" && Object.hasOwn(t.errors, message) && t.errors[message]) || message;
 }
 
 function showPageError(message) {
@@ -613,7 +615,7 @@ async function saveAccountRouting(accountId, modelId) {
     renderAccountRouting();
   }
   try { await loadProviders(); } catch (reason) { error ||= reason; }
-  if (error) showSaveError(() => t.saveFailed(t.accountRoutingTitle, error.message || t.saveUnknown));
+  if (error) showSaveError(() => t.saveFailed(t.accountRoutingTitle, messageText(error.message) || t.saveUnknown));
 }
 
 function renderProviders() {
@@ -887,7 +889,7 @@ async function writeProvider(sourceId, changes, { report = true } = {}) {
       status: "failed",
       message: () => t.saveFailed(
         local ? providerName(local) : sourceId,
-        reason?.message || t.saveUnknown,
+        messageText(reason?.message) || t.saveUnknown,
       ),
     };
   } finally {
@@ -1191,7 +1193,7 @@ async function removeFromSettings() {
     if (settings !== session) return;
     session.busy = null;
     session.removeArmed = false;
-    session.error = () => t.removeFailed(name, reason?.message || t.saveUnknown);
+    session.error = () => t.removeFailed(name, messageText(reason?.message) || t.saveUnknown);
     renderSettings();
     return;
   }
