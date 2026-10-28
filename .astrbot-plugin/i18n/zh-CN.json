@@ -14,6 +14,10 @@
     "codex_auth_path": {
       "description": "Codex auth.json 路径（可选）",
       "hint": "留空时读取 $CODEX_HOME/auth.json 或 ~/.codex/auth.json。Docker 请挂载整个凭据目录；自动刷新需要目录写权限。保存后重载插件生效。"
+    },
+    "chat_language": {
+      "description": "聊天回复语言",
+      "hint": "/usage、/effort 和 /openai_login 的回复语言。插件页面跟随 Dashboard 语言。保存后重载插件生效。"
     }
   }
 }

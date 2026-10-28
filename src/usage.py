@@ -14,7 +14,7 @@ from astrbot.core.provider.sources.request_retry import (
     retry_provider_request,
 )
 
-from . import oauth, runtime
+from . import messages, oauth, runtime
 from .credential_store import (
     CredentialCooldownError,
     CredentialError,
@@ -25,18 +25,18 @@ from .credential_store import (
 )
 from .oauth import CredentialExpiredError
 
-_WINDOW_LABELS = {18000: "5小时窗口", 604800: "7天窗口", 2592000: "30天窗口"}
+_WINDOW_KEYS = {18000: "window.5h", 604800: "window.7d", 2592000: "window.30d"}
 
 
 def _window_label(seconds: Any) -> str:
-    if seconds in _WINDOW_LABELS:
-        return _WINDOW_LABELS[seconds]
+    if seconds in _WINDOW_KEYS:
+        return messages.text(_WINDOW_KEYS[seconds])
     if isinstance(seconds, (int, float)) and seconds:
         if seconds % 86400 == 0:
-            return f"{seconds // 86400}天窗口"
+            return messages.text("window.days", count=int(seconds // 86400))
         if seconds % 3600 == 0:
-            return f"{seconds // 3600}小时窗口"
-    return "额度窗口"
+            return messages.text("window.hours", count=int(seconds // 3600))
+    return messages.text("window.generic")
 
 
 def _format_reset_at(reset_at: Any, reset_after: Any) -> str:
@@ -56,34 +56,39 @@ def _format_reset_at(reset_at: Any, reset_after: Any) -> str:
     except (OSError, OverflowError, ValueError):
         return ""
     now = datetime.now(UTC).astimezone()
-    date_part = f"{dt.month}月{dt.day}日"
-    if dt.year != now.year:
-        date_part = f"{dt.year}年{date_part}"
-    return f"，重置 {date_part} {dt:%H:%M}"
+    return messages.text("usage.reset", when=messages.format_datetime(dt, now))
 
 
 def format_usage(usage: dict) -> str:
     """Format the usage response as a chat message."""
-    lines = ["OpenAI 订阅额度："]
+    lines = [messages.text("usage.title")]
     windows = usage.get("windows") or []
     if not windows:
-        lines.append("当前账号暂无可用额度窗口。")
+        lines.append(messages.text("usage.no_windows"))
     for window in windows:
         used = window.get("used_percent")
         remaining = (
-            f"剩余 {max(0.0, min(100.0, 100.0 - used)):.0f}%"
+            messages.text(
+                "usage.remaining",
+                percent=f"{max(0.0, min(100.0, 100.0 - used)):.0f}",
+            )
             if isinstance(used, (int, float))
-            else "额度暂不可用"
+            else messages.text("usage.unavailable")
         )
         lines.append(
-            f"· {_window_label(window.get('label_seconds'))}："
-            f"{remaining}"
-            f"{_format_reset_at(window.get('reset_at'), window.get('reset_after_seconds'))}"
+            messages.text(
+                "usage.line",
+                label=_window_label(window.get("label_seconds")),
+                remaining=remaining,
+                reset=_format_reset_at(
+                    window.get("reset_at"), window.get("reset_after_seconds")
+                ),
+            )
         )
     if usage.get("limit_reached"):
-        lines.append("状态：已达额度上限，等待窗口重置。")
+        lines.append(messages.text("usage.limit_reached"))
     elif not usage.get("allowed"):
-        lines.append("状态：当前不可用。")
+        lines.append(messages.text("usage.not_allowed"))
     return "\n".join(lines)
 
 
@@ -121,7 +126,7 @@ def cooldown_until_from_usage(usage: dict[str, Any]) -> int | None:
 
 
 def _format_cooldown(cooldown_until: int | None) -> str:
-    return f"OpenAI 订阅额度当前处于冷却状态{_format_reset_at(cooldown_until, None)}。"
+    return messages.text("usage.cooldown", reset=_format_reset_at(cooldown_until, None))
 
 
 async def fetch_usage(
@@ -160,13 +165,6 @@ def failure_state(error: BaseException) -> str | None:
     if isinstance(error, CredentialError):
         return "invalid"
     return None
-
-
-_FAILURE_MESSAGES = {
-    "reauth_required": "凭据已失效，请在插件详情页重新登录。",
-    "unsupported": "凭据配置格式不受支持，请升级插件后重新登录。",
-    "invalid": "无法读取 OpenAI 凭据，请在插件详情页重新登录。",
-}
 
 
 async def fetch_source_usage(
@@ -210,9 +208,9 @@ async def build_usage_message(source_id: str = runtime.PROVIDER_TYPE) -> str:
         if isinstance(exc, CredentialCooldownError):
             return _format_cooldown(exc.cooldown_until)
         if state is not None:
-            return _FAILURE_MESSAGES[state]
+            return messages.text(f"usage.{state}")
         logger.error("OpenAI Codex usage request failed: %s", type(exc).__name__)
-        return "额度查询失败，请稍后重试。"
+        return messages.text("usage.failed")
 
     return format_usage(usage)
 
@@ -227,7 +225,7 @@ async def handle_usage(context: Context, event: AstrMessageEvent) -> None:
         else await context.get_using_provider_async(umo=event.unified_msg_origin)
     )
     if provider is None or provider.meta().type != runtime.PROVIDER_TYPE:
-        await event.send(MessageChain().message("请先选择 OpenAI Subscribe 模型。"))
+        await event.send(MessageChain().message(messages.text("usage.select_model")))
         return
     await event.send(
         MessageChain().message(await build_usage_message(provider._source_id))

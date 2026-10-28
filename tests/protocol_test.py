@@ -17,6 +17,7 @@ os.chdir(REPO_ROOT)
 oauth = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.src.oauth")
 plugin = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.main")
 usage_service = importlib.import_module(f"{plugin.__package__}.src.usage")
+messages = importlib.import_module(f"{plugin.__package__}.src.messages")
 
 FAILED: list[str] = []
 
@@ -215,6 +216,39 @@ def test_model_reasoning_levels() -> None:
             oauth.set_codex_home(None)
 
 
+def test_chat_languages() -> None:
+    print("\n=== Chat reply languages ===")
+    catalog = messages._CATALOG
+    check(
+        all(set(catalog[language]) == set(catalog["zh-CN"]) for language in catalog),
+        "every chat language has every reply",
+    )
+    check(set(catalog) == set(messages.LANGUAGES), "all offered languages exist")
+    usage = {
+        "windows": [{"label_seconds": 18000, "used_percent": 25}],
+        "limit_reached": True,
+    }
+    try:
+        messages.set_language("en-US")
+        english = usage_service.format_usage(usage)
+        check(
+            english.startswith("OpenAI subscription allowance:")
+            and "5-hour window: 75% left" in english
+            and "used up" in english,
+            "English replies format the allowance",
+        )
+        messages.set_language("ja-JP")
+        check("5時間枠：残り 75%" in usage_service.format_usage(usage), "Japanese")
+        messages.set_language("unknown")
+        check(messages.language() == "zh-CN", "unknown languages fall back to Chinese")
+        check(
+            "5小时窗口：剩余 75%" in usage_service.format_usage(usage),
+            "Chinese stays the default",
+        )
+    finally:
+        messages.set_language("zh-CN")
+
+
 def test_usage_schemas() -> None:
     print("\n=== Usage protocol ===")
     current = {
@@ -326,6 +360,7 @@ if __name__ == "__main__":
     test_models()
     test_client_identity()
     test_model_reasoning_levels()
+    test_chat_languages()
     test_usage_schemas()
     test_error_classification()
     print()

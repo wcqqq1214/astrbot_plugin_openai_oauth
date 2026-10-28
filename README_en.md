@@ -95,7 +95,9 @@ The next request tries the preferred account again. If none are available, it fa
 
 ## Commands and reasoning effort
 
-`/openai_login` and `/effort` require administrator access.
+`/openai_login` and `/effort` require administrator access. Command replies are in
+Chinese by default; set `chat_language` in the plugin settings for English,
+Russian or Japanese.
 
 | Command | What it does |
 | --- | --- |

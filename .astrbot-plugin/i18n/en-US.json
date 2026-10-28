@@ -14,6 +14,10 @@
     "codex_auth_path": {
       "description": "Codex auth.json path (optional)",
       "hint": "Leave blank to read $CODEX_HOME/auth.json or ~/.codex/auth.json. In Docker, mount the entire credential directory; automatic refresh requires write access to that directory. Reload the plugin after saving."
+    },
+    "chat_language": {
+      "description": "Chat reply language",
+      "hint": "Language of /usage, /effort and /openai_login replies. The plugin page follows the dashboard language. Reload the plugin after saving."
     }
   }
 }

@@ -91,7 +91,8 @@ AstrBot 的模型配置中始终只有一个 **OpenAI Subscribe** 来源，多�
 
 ## 常用命令和思考强度
 
-`/openai_login` 和 `/effort` 需要管理员权限。
+`/openai_login` 和 `/effort` 需要管理员权限。命令回复默认为中文，可在插件设置的 `chat_language`
+改为英文、俄文或日文。
 
 | 命令 | 用途 |
 | --- | --- |

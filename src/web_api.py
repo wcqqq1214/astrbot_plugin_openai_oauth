@@ -375,29 +375,29 @@ def register_routes(context: Context) -> None:
         "/astrbot_plugin_openai_oauth/device/start",
         _handle_device_start,
         ["POST"],
-        "开始 Codex 设备登录",
+        "Start a Codex device login",
     )
     context.register_web_api(
         "/astrbot_plugin_openai_oauth/device/poll",
         _handle_device_poll,
         ["POST"],
-        "查询 Codex 设备登录状态",
+        "Poll a Codex device login",
     )
     context.register_web_api(
         "/astrbot_plugin_openai_oauth/device/cancel",
         _handle_device_cancel,
         ["POST"],
-        "取消 Codex 设备登录",
+        "Cancel a Codex device login",
     )
     context.register_web_api(
         "/astrbot_plugin_openai_oauth/account/status",
         _handle_account_status,
         ["POST"],
-        "查询 OpenAI 登录状态",
+        "OpenAI account status",
     )
     context.register_web_api(
         "/astrbot_plugin_openai_oauth/account/usage",
         _handle_account_usage,
         ["POST"],
-        "查询 OpenAI 订阅额度",
+        "OpenAI subscription allowance",
     )

@@ -26,7 +26,7 @@ from astrbot.core.provider.sources.request_retry import (
 )
 from astrbot.core.utils.config_number import coerce_int_config
 
-from . import codex_request, effort, oauth, runtime
+from . import codex_request, effort, messages, oauth, runtime
 from . import usage as usage_service
 from .codex_stream import CodexStreamMixin
 from .credential_store import (
@@ -784,5 +784,5 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
             # A terminal error response preserves its no-replay branch instead.
             yield LLMResponse(
                 role="err",
-                completion_text="The response was interrupted after output; it was not replayed.",
+                completion_text=messages.text("stream.interrupted"),
             )

@@ -12,7 +12,7 @@ from typing import Any
 from astrbot import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
 
-from . import oauth, runtime
+from . import messages, oauth, runtime
 from .credential_store import CredentialSourceError
 from .oauth import (
     CODEX_DEVICE_LOGIN_TIMEOUT,
@@ -277,19 +277,21 @@ async def _run_command_device_login(
     except asyncio.CancelledError:
         raise
     except DeviceAuthTimeout:
-        await event.send(
-            MessageChain().message("设备码已过期，请重新发送 /openai_login。")
-        )
+        await event.send(MessageChain().message(messages.text("login.expired")))
     except DeviceAuthError as exc:
-        await event.send(MessageChain().message(f"OpenAI 登录失败：{exc}"))
-    except Exception as exc:  # noqa: BLE001 - never send provider or credential details
-        logger.error("OpenAI Codex admin device login failed: %s", type(exc).__name__)
-        await event.send(MessageChain().message("OpenAI 登录或保存失败，请重试。"))
-    else:
         await event.send(
             MessageChain().message(
-                f"OpenAI 登录成功，已新增 Provider：{source_id}。请在模型配置中选择此来源。"
+                messages.text(
+                    "login.failed", reason=messages.text(f"device.{exc.code}")
+                )
             )
+        )
+    except Exception as exc:  # noqa: BLE001 - never send provider or credential details
+        logger.error("OpenAI Codex admin device login failed: %s", type(exc).__name__)
+        await event.send(MessageChain().message(messages.text("login.save_failed")))
+    else:
+        await event.send(
+            MessageChain().message(messages.text("login.success", id=source_id))
         )
 
 
@@ -297,21 +299,13 @@ async def handle_login(event: AstrMessageEvent) -> None:
     """Add a provider through administrator-only private-chat device login."""
     event.should_call_llm(False)
     if not _is_private_login_event(event):
-        await event.send(
-            MessageChain().message(
-                "为保护设备码，/openai_login 仅允许在管理员私聊中使用。"
-            )
-        )
+        await event.send(MessageChain().message(messages.text("login.private_only")))
         return
 
     owner = _command_login_owner(event)
     existing_task = _command_login_tasks.get(owner)
     if existing_task is not None and not existing_task.done():
-        await event.send(
-            MessageChain().message(
-                "当前私聊已有一个 OpenAI 登录流程，请先完成或等待它结束。"
-            )
-        )
+        await event.send(MessageChain().message(messages.text("login.in_progress")))
         return
 
     current_task = asyncio.current_task()
@@ -327,22 +321,29 @@ async def handle_login(event: AstrMessageEvent) -> None:
                 proxy
             )
         except DeviceAuthError as exc:
-            await event.send(MessageChain().message(f"无法启动设备登录：{exc}"))
+            await event.send(
+                MessageChain().message(
+                    messages.text(
+                        "login.start_failed", reason=messages.text(f"device.{exc.code}")
+                    )
+                )
+            )
             return
         except Exception as exc:  # noqa: BLE001 - keep network details out of chat
             logger.error(
                 "OpenAI Codex admin device-code request failed: %s",
                 type(exc).__name__,
             )
-            await event.send(MessageChain().message("无法启动设备登录，请稍后重试。"))
+            await event.send(
+                MessageChain().message(messages.text("login.start_unavailable"))
+            )
             return
 
         await event.send(
             MessageChain().message(
-                "请在当前私聊中打开以下 OpenAI 验证网址并输入设备码：\n"
-                f"{CODEX_DEVICE_VERIFY_URL}\n"
-                f"设备码：{user_code}\n"
-                "授权完成后，AstrBot 会在服务端自动交换并保存凭据；令牌不会发送到聊天。"
+                messages.text(
+                    "login.instructions", url=CODEX_DEVICE_VERIFY_URL, code=user_code
+                )
             )
         )
         task = asyncio.create_task(

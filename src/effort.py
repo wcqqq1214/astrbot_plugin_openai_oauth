@@ -9,7 +9,7 @@ from astrbot.api import sp
 from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.star import Context
 
-from . import oauth, runtime
+from . import messages, oauth, runtime
 
 _EFFORT_LEVELS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 _SESSION_EFFORT_KEY = "openai_oauth_reasoning_effort"
@@ -79,7 +79,7 @@ async def handle_effort(
     event.should_call_llm(False)
     session_id = str(event.unified_msg_origin or "")
     if not session_id:
-        await event.send(MessageChain().message("当前会话不可用。"))
+        await event.send(MessageChain().message(messages.text("effort.no_session")))
         return
     try:
         selected_provider_id = event.get_extra("selected_provider")
@@ -92,14 +92,12 @@ async def handle_effort(
             "OpenAI Codex effort provider lookup failed: %s",
             type(exc).__name__,
         )
-        await event.send(MessageChain().message("无法识别当前会话的模型。"))
+        await event.send(
+            MessageChain().message(messages.text("effort.provider_unknown"))
+        )
         return
     if provider is None or provider.meta().type != runtime.PROVIDER_TYPE:
-        await event.send(
-            MessageChain().message(
-                "当前会话未使用 OpenAI Subscribe 模型，无法设置推理强度。"
-            )
-        )
+        await event.send(MessageChain().message(messages.text("effort.not_subscribe")))
         return
 
     requested = str(value or "").strip().lower()
@@ -107,15 +105,18 @@ async def handle_effort(
         override = await get_session_effort(session_id)
         default = _provider_default_effort(provider)
         if override:
-            message = f"当前会话推理强度：{override}（会话覆盖）。"
+            message = messages.text("effort.override", effort=override)
         elif default:
-            message = f"当前会话未设置覆盖，模型默认推理强度：{default}。"
+            message = messages.text("effort.model_default", effort=default)
         else:
-            message = "当前会话未设置推理强度，将使用模型默认行为。"
+            message = messages.text("effort.unset")
         await event.send(
             MessageChain().message(
-                f"{message}\n可用值：{', '.join(_model_efforts(provider) or _EFFORT_LEVELS)}\n"
-                "用法：/effort <值>；/effort default 恢复模型默认值。"
+                messages.text(
+                    "effort.help",
+                    message=message,
+                    levels=", ".join(_model_efforts(provider) or _EFFORT_LEVELS),
+                )
             )
         )
         return
@@ -128,13 +129,11 @@ async def handle_effort(
                 "OpenAI Codex session effort removal failed: %s",
                 type(exc).__name__,
             )
-            await event.send(MessageChain().message("恢复模型默认值失败，请稍后重试。"))
-            return
-        await event.send(
-            MessageChain().message(
-                "已恢复当前会话的模型默认推理强度，下一次 OpenAI 请求生效。"
+            await event.send(
+                MessageChain().message(messages.text("effort.reset_failed"))
             )
-        )
+            return
+        await event.send(MessageChain().message(messages.text("effort.reset")))
         return
 
     effort = normalize_effort(requested)
@@ -142,8 +141,11 @@ async def handle_effort(
     if effort is None or (supported is not None and effort not in supported):
         await event.send(
             MessageChain().message(
-                f"不支持的推理强度：{requested}\n"
-                f"可用值：{', '.join(supported or _EFFORT_LEVELS)}，或使用 default。"
+                messages.text(
+                    "effort.unsupported",
+                    value=requested,
+                    levels=", ".join(supported or _EFFORT_LEVELS),
+                )
             )
         )
         return
@@ -154,10 +156,8 @@ async def handle_effort(
             "OpenAI Codex session effort update failed: %s",
             type(exc).__name__,
         )
-        await event.send(MessageChain().message("保存推理强度失败，请稍后重试。"))
+        await event.send(MessageChain().message(messages.text("effort.save_failed")))
         return
     await event.send(
-        MessageChain().message(
-            f"已将当前会话推理强度设为 {effort}，下一次 OpenAI 请求生效。"
-        )
+        MessageChain().message(messages.text("effort.saved", effort=effort))
     )

@@ -449,8 +449,7 @@ async def request_device_user_code(proxy: str | None = None) -> tuple[str, str, 
         )
         if resp.status_code == 404:
             raise DeviceAuthError(
-                "device code 登录未启用：请先在 ChatGPT 安全设置中开启"
-                " “Enable device code authentication for Codex”",
+                "Device code login is not enabled for this ChatGPT account.",
                 code="device_login_disabled",
             )
         resp.raise_for_status()
@@ -460,7 +459,9 @@ async def request_device_user_code(proxy: str | None = None) -> tuple[str, str, 
     device_auth_id = data["device_auth_id"]
     user_code = data.get("user_code") or data.get("usercode")
     if not user_code:
-        raise DeviceAuthError("OpenAI 未返回 user_code。", code="device_code_missing")
+        raise DeviceAuthError(
+            "OpenAI returned no user code.", code="device_code_missing"
+        )
     interval = int(data.get("interval", 5))
     return device_auth_id, user_code, interval
 
@@ -500,11 +501,12 @@ async def poll_device_authorization(
             if resp.status_code in (403, 404):
                 continue  # Not authorized yet.
             raise DeviceAuthError(
-                f"设备登录轮询失败：HTTP {resp.status_code}", code="device_poll_failed"
+                f"Device login polling failed: HTTP {resp.status_code}",
+                code="device_poll_failed",
             )
     finally:
         await client.aclose()
-    raise DeviceAuthTimeout("设备码已过期，请在 15 分钟内完成授权。")
+    raise DeviceAuthTimeout("The device code expired before authorization.")
 
 
 async def exchange_authorization_code(

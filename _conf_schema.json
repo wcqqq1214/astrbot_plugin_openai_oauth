@@ -4,5 +4,23 @@
     "type": "string",
     "default": "",
     "hint": "留空时读取 $CODEX_HOME/auth.json 或 ~/.codex/auth.json。Docker 请挂载整个凭据目录；自动刷新需要目录写权限。保存后重载插件生效。"
+  },
+  "chat_language": {
+    "description": "聊天回复语言",
+    "type": "string",
+    "default": "zh-CN",
+    "options": [
+      "zh-CN",
+      "en-US",
+      "ru-RU",
+      "ja-JP"
+    ],
+    "labels": [
+      "简体中文",
+      "English",
+      "Русский",
+      "日本語"
+    ],
+    "hint": "/usage、/effort 和 /openai_login 的回复语言。插件页面跟随 Dashboard 语言。保存后重载插件生效。"
   }
 }

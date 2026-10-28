@@ -12,7 +12,7 @@ from astrbot.api.star import Context
 from astrbot.core.config.default import CONFIG_METADATA_2
 from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
 
-from . import oauth, source_editor
+from . import messages, oauth, source_editor
 from .credential_seal import FernetCredentialSealer
 from .credential_store import CredentialError
 from .local_codex import LocalCodexStore, LocalCredentialCoordinator
@@ -129,6 +129,7 @@ def configure(context: Context, config: AstrBotConfig) -> None:
         fields[key] = {"type": field_type, "invisible": True}
     _config_mgr = context.astrbot_config_mgr
     _credential_sealer = FernetCredentialSealer(_credential_key_path())
+    messages.set_language(config.get("chat_language", messages.DEFAULT_LANGUAGE))
     _local_codex_store = LocalCodexStore(str(config.get("codex_auth_path", "") or ""))
     oauth.set_codex_home(_local_codex_store.path.parent)
     coordinator = get_coordinator()
