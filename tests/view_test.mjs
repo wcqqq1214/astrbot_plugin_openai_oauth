@@ -183,10 +183,22 @@ const navigator = {
     },
   },
 };
-const source = readFileSync(
+// The page is an ES module importing its translations. The harness evaluates
+// it as one function body, so inline the dictionary in place of the import.
+const STRINGS_IMPORT = 'import { strings } from "./strings.js";\n';
+const appSource = readFileSync(
   new URL("../pages/providers/app.js", import.meta.url),
   "utf8",
 );
+assert.ok(appSource.startsWith(STRINGS_IMPORT), "app.js imports its translations");
+const stringsSource = readFileSync(
+  new URL("../pages/providers/strings.js", import.meta.url),
+  "utf8",
+);
+assert.match(stringsSource, /^export const strings = \{$/m);
+const source =
+  stringsSource.replace(/^export const strings = /m, "const strings = ") +
+  appSource.slice(STRINGS_IMPORT.length);
 const page = await vm.runInNewContext(
   `(async () => {${source}\n await queryUsage(); return {queryUsage, startLogin, cancelLogin, closeLogin, poll, selectProvider, openProvider, loadProviders, queryProvider, rowNodes, openLogin};})()`,
   { window, document, navigator, console, URL },

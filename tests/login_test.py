@@ -672,6 +672,13 @@ def test_plugin_page_assets() -> None:
         html = source_file.read()
     with open(os.path.join(page_root, "app.js"), encoding="utf-8") as source_file:
         app = source_file.read()
+    with open(os.path.join(page_root, "strings.js"), encoding="utf-8") as source_file:
+        translations = source_file.read()
+    check(
+        'import { strings } from "./strings.js";' in app,
+        "Plugin Page imports its translations as a module",
+    )
+    app += translations
 
     check("./app.js" in html, "Plugin Page loads external JavaScript")
     check("/api/plugin/page/bridge-sdk.js" in html, "Plugin Page loads the bridge SDK")
