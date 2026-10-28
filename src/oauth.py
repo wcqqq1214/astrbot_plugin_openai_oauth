@@ -1,9 +1,8 @@
 """Codex OAuth token handling for the ChatGPT subscription backend.
 
 Protocol constants and helpers follow the implementations in opencode,
-openclaw and hermes-agent. The access token is a JWT (typically carrying an
-`sk-ant-oat01-` prefix glued to the header) obtained from a Codex OAuth flow;
-API calls go to the Responses-style endpoint under
+openclaw, hermes-agent and magpie. The access token is a JWT obtained from a
+Codex OAuth flow; API calls go to the Responses-style endpoint under
 `chatgpt.com/backend-api/codex`.
 """
 
@@ -652,14 +651,13 @@ def _parse_usage_payload(data: Any) -> dict:
 
 
 def extract_account_id(access_token: str) -> str:
-    """从 access_token（JWT，可能带 sk-ant-oat01- 前缀）里解出 ChatGPT 账号 id。
+    """Read the ChatGPT account ID from an access token (a JWT).
 
-    账号 id 在嵌套 claim ``https://api.openai.com/auth`` 的
-    ``chatgpt_account_id`` 字段；旧版平铺 claim 也兼容。
+    The ID is ``chatgpt_account_id`` inside the nested
+    ``https://api.openai.com/auth`` claim; older tokens use a flat claim.
     """
-    token = access_token.removeprefix("sk-ant-oat01-")
     try:
-        _, payload_b64, _ = token.split(".", 2)
+        _, payload_b64, _ = access_token.split(".", 2)
         padding = "=" * (-len(payload_b64) % 4)
         payload = json.loads(base64.urlsafe_b64decode(payload_b64 + padding))
     except Exception:  # noqa: BLE001 - 非 JWT 时静默返回空串

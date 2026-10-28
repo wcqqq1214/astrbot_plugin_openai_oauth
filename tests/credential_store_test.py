@@ -72,7 +72,7 @@ def _coordinator(
 def test_legacy_and_schema_parsing() -> None:
     print("=== Legacy and schema parsing ===")
     legacy = {
-        "access_token": "sk-ant-oat01.legacy.token",
+        "access_token": "test-jwt.legacy.token",
         "refresh_token": "refresh-legacy",
         "expires": 9999999999,
         "account_id": "user-legacy",
@@ -82,8 +82,8 @@ def test_legacy_and_schema_parsing() -> None:
     stored = json.loads(store.dump_credentials(legacy))
     check(stored["schema_version"] == 1, "writes use schema version 1")
     check(
-        store.parse_credentials("sk-ant-oat01.raw.token")["access_token"]
-        == "sk-ant-oat01.raw.token",
+        store.parse_credentials("test-jwt.raw.token")["access_token"]
+        == "test-jwt.raw.token",
         "raw access tokens remain readable",
     )
     try:
@@ -128,7 +128,7 @@ def test_exact_source_matching() -> None:
 def test_single_flight_refresh() -> None:
     print("\n=== Source-scoped single-flight refresh ===")
     old = {
-        "access_token": "sk-ant-oat01.old.token",
+        "access_token": "test-jwt.old.token",
         "refresh_token": "refresh-old",
         "expires": 1,
         "account_id": "user-one",
@@ -143,7 +143,7 @@ def test_single_flight_refresh() -> None:
         await asyncio.sleep(0)
         return {
             **creds,
-            "access_token": "sk-ant-oat01.fresh.token",
+            "access_token": "test-jwt.fresh.token",
             "refresh_token": "refresh-fresh",
             "expires": 9999999999,
         }
@@ -158,7 +158,7 @@ def test_single_flight_refresh() -> None:
     first, second = asyncio.run(run())
     check(calls == 1, "two concurrent consumers trigger one refresh")
     check(
-        first.access_token == second.access_token == "sk-ant-oat01.fresh.token",
+        first.access_token == second.access_token == "test-jwt.fresh.token",
         "both consumers receive the persisted refreshed token",
     )
     durable = json.loads(conf["provider_sources"][0]["key"])
@@ -170,7 +170,7 @@ def test_single_flight_refresh() -> None:
 def test_login_wins_over_in_flight_refresh() -> None:
     print("\n=== Login wins over an in-flight refresh ===")
     old = {
-        "access_token": "sk-ant-oat01.old.token",
+        "access_token": "test-jwt.old.token",
         "refresh_token": "refresh-old",
         "expires": 1,
         "account_id": "user-old",
@@ -186,7 +186,7 @@ def test_login_wins_over_in_flight_refresh() -> None:
             await release_refresh.wait()
             return {
                 **creds,
-                "access_token": "sk-ant-oat01.refreshed.token",
+                "access_token": "test-jwt.refreshed.token",
                 "refresh_token": "refresh-refreshed",
                 "expires": 9999999999,
             }
@@ -198,7 +198,7 @@ def test_login_wins_over_in_flight_refresh() -> None:
             coordinator.replace_credentials(
                 "OpenAI Subscribe",
                 {
-                    "access_token": "sk-ant-oat01.new-login.token",
+                    "access_token": "test-jwt.new-login.token",
                     "refresh_token": "refresh-new-login",
                     "expires": 9999999999,
                     "account_id": "user-new",
@@ -211,7 +211,7 @@ def test_login_wins_over_in_flight_refresh() -> None:
 
     final = asyncio.run(run())
     check(
-        final.access_token == "sk-ant-oat01.new-login.token",
+        final.access_token == "test-jwt.new-login.token",
         "a completed login is not overwritten by an older refresh",
     )
 
@@ -223,7 +223,7 @@ def test_cooldown_and_reauth_states() -> None:
             "provider_sources": [
                 _source(
                     {
-                        "access_token": "sk-ant-oat01.current.token",
+                        "access_token": "test-jwt.current.token",
                         "refresh_token": "refresh-current",
                         "expires": 9999999999,
                         "account_id": "user-one",

@@ -41,7 +41,7 @@ Keep the `requirements.txt` in sync with the `dependencies` list in
 
 The Codex OAuth flow and the `chatgpt.com/backend-api/codex` endpoint shape
 follow the implementations in opencode (`sst/opencode`), openclaw
-(`openclaw/openclaw`) and hermes-agent (`NousResearch/hermes-agent`). The
-device-code flow is the one to embed in a WebUI; the token is a JWT (possibly
-with an `sk-ant-oat01-` prefix glued to the header). See `src/oauth.py` for the
-constants.
+(`openclaw/openclaw`), hermes-agent (`NousResearch/hermes-agent`) and magpie
+(`yetone/magpie`, for request shaping, prompt caching and the model catalog).
+The device-code flow is the one to embed in a WebUI; the access token is a
+plain JWT. See `src/oauth.py` for the constants.

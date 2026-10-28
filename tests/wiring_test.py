@@ -29,7 +29,7 @@ store = importlib.import_module(
 ProviderOpenAICodex = module.ProviderOpenAICodex
 
 FAILED: list[str] = []
-ACCESS_TOKEN = "sk-ant-oat01-aaaa.bbbb.cccc"
+ACCESS_TOKEN = "test-jwt-aaaa.bbbb.cccc"
 REFRESH_TOKEN = "rt-fake-refresh-token"
 ACCOUNT_ID = "user-12345"
 
@@ -121,7 +121,7 @@ def test_provider_initialization_and_request_client() -> None:
 
     snapshot = store.CredentialSnapshot(
         source_id=runtime._PROVIDER_TYPE,
-        access_token="sk-ant-oat01-new.new.new",
+        access_token="test-jwt-new.new.new",
         refresh_token="rt-new",
         expires=9999999999,
         account_id="user-new",
@@ -147,9 +147,9 @@ def test_provider_initialization_and_request_client() -> None:
         "derived client leaves root account header unchanged",
     )
 
-    provider.set_key("sk-ant-oat01-updated.updated.updated")
+    provider.set_key("test-jwt-updated.updated.updated")
     check(
-        provider.get_current_key() == "sk-ant-oat01-updated.updated.updated",
+        provider.get_current_key() == "test-jwt-updated.updated.updated",
         "set_key updates provider bootstrap metadata",
     )
     check(
@@ -500,7 +500,7 @@ def test_pre_stream_credential_recovery() -> None:
     async def refresh(creds: dict, proxy: str | None) -> dict:
         return {
             **creds,
-            "access_token": "sk-ant-oat01-refreshed.refreshed.refreshed",
+            "access_token": "test-jwt-refreshed.refreshed.refreshed",
             "refresh_token": "rt-refreshed",
             "expires": 9999999999,
         }
@@ -523,7 +523,7 @@ def test_pre_stream_credential_recovery() -> None:
     check(calls == 2, "a pre-stream 401 is retried once after refresh")
     check(bool(responses), "retry produces a response")
     check(
-        stored["access_token"] == "sk-ant-oat01-refreshed.refreshed.refreshed",
+        stored["access_token"] == "test-jwt-refreshed.refreshed.refreshed",
         "forced refresh persists the recovered token",
     )
 

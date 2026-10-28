@@ -218,7 +218,7 @@ def test_server_owned_web_login_and_source_proxy() -> None:
                 "exchange_authorization_code",
                 new=mock.AsyncMock(
                     return_value={
-                        "access_token": "sk-ant-oat01-server.server.server",
+                        "access_token": "test-jwt-server.server.server",
                         "refresh_token": "rt-server",
                         "expires_in": 3600,
                     }
@@ -325,7 +325,7 @@ def test_login_error_and_cancel() -> None:
 
 def test_account_status_and_usage_api() -> None:
     print("\n=== Account status and quota APIs ===")
-    token = "sk-ant-oat01-account.account.account"
+    token = "test-jwt-account.account.account"
     conf = set_config(
         [
             source(
@@ -436,7 +436,7 @@ def test_private_command_fallback() -> None:
                 "exchange_authorization_code",
                 new=mock.AsyncMock(
                     return_value={
-                        "access_token": "sk-ant-oat01-command.command.command",
+                        "access_token": "test-jwt-command.command.command",
                         "refresh_token": "rt-command",
                         "expires_in": 3600,
                     }

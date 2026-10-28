@@ -67,7 +67,7 @@ def test_models() -> None:
     try:
         models = asyncio.run(
             oauth.fetch_models(
-                "sk-ant-oat01-redacted.redacted.redacted",
+                "test-jwt-redacted.redacted.redacted",
                 "user-redacted",
                 "http://proxy.example:8080",
                 "originator-test",
