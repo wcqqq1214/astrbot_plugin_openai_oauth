@@ -9,6 +9,7 @@ import math
 import os
 import secrets
 import tempfile
+import time
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,11 +39,17 @@ class LocalLogin:
     credentials: dict[str, Any]
 
 
+# One request reads the login several times; reuse a parse of an unchanged file
+# for at most this long. Refreshing always reads the file again.
+_READ_CACHE_SECONDS = 1.0
+
+
 class LocalCodexStore:
-    """Read the active login on every lookup; only refresh writes to Codex."""
+    """Follow the active login on every lookup; only refresh writes to Codex."""
 
     def __init__(self, auth_path: str = "") -> None:
         self.auth_path = auth_path
+        self._cache: tuple[tuple[Any, ...], float, LocalLogin | None] | None = None
 
     @property
     def path(self) -> Path:
@@ -51,9 +58,31 @@ class LocalCodexStore:
         home = os.environ.get("CODEX_HOME") or str(Path.home() / ".codex")
         return (Path(home).expanduser() / "auth.json").resolve()
 
-    def read(self) -> LocalLogin | None:
+    def read(self, *, fresh: bool = False) -> LocalLogin | None:
+        """Return the current login, reusing a recent parse of an unchanged file."""
         try:
             path = self.path
+            stat = path.stat()
+        except (OSError, RuntimeError):
+            self._cache = None
+            return None
+        key = (str(path), stat.st_ino, stat.st_mtime_ns, stat.st_size)
+        now = time.monotonic()
+        cached = self._cache
+        if (
+            not fresh
+            and cached is not None
+            and cached[0] == key
+            and now - cached[1] < _READ_CACHE_SECONDS
+        ):
+            return cached[2]
+        login = self._read(path)
+        self._cache = (key, now, login)
+        return login
+
+    @staticmethod
+    def _read(path: Path) -> LocalLogin | None:
+        try:
             raw = path.read_bytes()
             document = json.loads(raw)
             if not isinstance(document, dict):
@@ -265,12 +294,15 @@ class LocalCredentialCoordinator(CredentialCoordinator):
         """Migrate accounts behind the single subscription source."""
         await self.providers.migrate()
 
-    def _login(self, source_id: str) -> LocalLogin | None:
+    def _login(self, source_id: str, *, fresh: bool = False) -> LocalLogin | None:
         if (
             self.local_store is not None
             and self.source(source_id).get("credential_mode") == LOCAL
         ):
-            return self.local_store.read()
+            # Refresh tokens are single use: never refresh from a cached read.
+            return (
+                self.local_store.read(fresh=True) if fresh else self.local_store.read()
+            )
         return None
 
     def read_snapshot(self, source_id: str) -> CredentialSnapshot:
@@ -347,7 +379,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
                             "Sign in to local Codex again."
                         )
                     return snapshot
-                login = self._login(source_id)
+                login = self._login(source_id, fresh=True)
                 if (
                     login is not None
                     and login.credentials["access_token"] == snapshot.access_token

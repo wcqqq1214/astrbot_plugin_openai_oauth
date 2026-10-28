@@ -12,6 +12,7 @@
 - Identify as a current Codex CLI version (User-Agent, `version` header and catalog query), following a newer local Codex when present, so the backend serves its newest models. The old placeholder User-Agent saved in existing sources upgrades automatically; custom values are kept.
 - Reuse each account's HTTP connection between requests instead of opening a new TCP and TLS connection for every message; a transport is replaced when its account or proxy changes.
 - `/effort` accepts `none` and `minimal` and checks the level against the current model's catalog entry; a session level the model does not support falls back to the model setting instead of failing with HTTP 400.
+- Reuse a parse of an unchanged local Codex `auth.json` for up to a second instead of reading it several times per request; refreshing still reads the file fresh.
 
 ### Fixed
 

@@ -104,7 +104,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
             default_source_factory=dict,
             refresh_credentials=self.refresh,
             local_store=SimpleNamespace(
-                read=lambda: SimpleNamespace(credentials=self.login)
+                read=lambda **_: SimpleNamespace(credentials=self.login)
             ),
         )
         self.registry = self.coordinator.providers

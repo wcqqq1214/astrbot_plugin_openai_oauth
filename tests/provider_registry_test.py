@@ -47,7 +47,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.local = SimpleNamespace(
-            read=lambda: SimpleNamespace(
+            read=lambda **_: SimpleNamespace(
                 credentials={
                     **self.creds,
                     "account_id": "local",

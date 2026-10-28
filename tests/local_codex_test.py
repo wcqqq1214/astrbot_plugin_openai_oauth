@@ -109,6 +109,25 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
     def write(self, document):
         self.path.write_text(json.dumps(document))
 
+    async def test_unchanged_login_is_parsed_once_per_burst(self):
+        self.write(auth("one"))
+        with patch.object(
+            local.LocalCodexStore, "_read", wraps=local.LocalCodexStore._read
+        ) as parse:
+            for _ in range(5):
+                self.coordinator.account_view("OpenAI Subscribe")
+            self.assertEqual(parse.call_count, 1)
+            self.write(auth("two", generation=1))
+            self.assertEqual(
+                self.coordinator.read_snapshot("OpenAI Subscribe").account_id, "two"
+            )
+            self.assertEqual(parse.call_count, 2)
+            self.local.read(fresh=True)
+            self.assertEqual(parse.call_count, 3)
+            with patch.object(local.time, "monotonic", return_value=10**9):
+                self.local.read()
+            self.assertEqual(parse.call_count, 4)
+
     async def test_switch_logout_and_independent_login(self):
         self.write(auth())
         first = await self.coordinator.get_snapshot()
