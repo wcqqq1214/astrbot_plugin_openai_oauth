@@ -5,38 +5,72 @@ on:
   push:
     branches:
       - main
+  # Catch AstrBot releases that change internals the plugin relies on.
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  lint-and-integration:
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install uv
+        run: python3.12 -m pip install --disable-pip-version-check "uv==0.9.9"
+
+      - name: Install plugin lint dependencies
+        run: uv sync --frozen
+
+      - name: Lint plugin
+        run: |
+          uv run ruff format --check .
+          uv run ruff check .
+
+      - name: Run Plugin Views regressions
+        run: node tests/view_test.mjs
+
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pushes and pull requests test the declared minimum and the newest
+        # verified release; the weekly run tests whatever AstrBot released last.
+        astrbot: ${{ fromJSON(github.event_name == 'schedule' && '["latest"]' || '["v4.27.1", "v4.29.3"]') }}
+    name: integration (AstrBot ${{ matrix.astrbot }})
     steps:
       - name: Checkout plugin
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: astrbot_plugin_openai_oauth
 
-      - name: Checkout AstrBot compatibility revision
+      - name: Resolve AstrBot release
+        id: astrbot
+        run: |
+          REF="${{ matrix.astrbot }}"
+          if [ "$REF" = "latest" ]; then
+            REF="$(git ls-remote --tags --refs https://github.com/AstrBotDevs/AstrBot.git 'v*' \
+              | sed 's#.*refs/tags/##' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V | tail -1)"
+          fi
+          echo "Testing against AstrBot $REF"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout AstrBot
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: AstrBotDevs/AstrBot
-          ref: c4616578d610c237766a5d497f9db4b607d1c75b
+          ref: ${{ steps.astrbot.outputs.ref }}
           path: AstrBot
 
       - name: Install uv
         run: python3.12 -m pip install --disable-pip-version-check "uv==0.9.9"
-
-      - name: Install plugin lint dependencies
-        working-directory: astrbot_plugin_openai_oauth
-        run: uv sync --frozen
-
-      - name: Lint plugin
-        working-directory: astrbot_plugin_openai_oauth
-        run: |
-          uv run ruff format --check .
-          uv run ruff check .
 
       - name: Install AstrBot test environment
         working-directory: AstrBot
@@ -47,7 +81,3 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/AstrBot/data/plugins"
           "$GITHUB_WORKSPACE/AstrBot/.venv/bin/python" \
             "$GITHUB_WORKSPACE/astrbot_plugin_openai_oauth/tests/run_tests.py"
-
-      - name: Run Plugin Views regressions
-        working-directory: astrbot_plugin_openai_oauth
-        run: node tests/view_test.mjs

@@ -48,6 +48,10 @@ isolated credentials to avoid reading or refreshing real accounts. Follow
 
 ## Releases
 
+CI runs the integration suite against the declared minimum AstrBot release and the
+newest verified one, and a weekly run tests the latest AstrBot release. When a new
+AstrBot release passes, update the newest version in `.github/workflows/test.yml`.
+
 Pushing `main` runs tests without publishing a release. To release:
 
 1. Update the version in `metadata.yaml`, `pyproject.toml`, the `main.py` registration,
