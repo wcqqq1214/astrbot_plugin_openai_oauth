@@ -7,6 +7,7 @@
 - Join streamed reasoning fragments without inserting a line break between every fragment.
 - Treat only explicit authentication failures from the allowance endpoint as expired credentials; a plain HTTP 403 no longer asks you to sign in again.
 - Refresh the token once and retry when the allowance endpoint rejects a token before its own expiry.
+- List one ID per model from the live catalog, skip hidden models and follow Codex's picker order.
 
 ## [v2.2.0] - 2026-10-18
 

@@ -78,6 +78,21 @@ def test_models() -> None:
         oauth.create_proxy_client = original
     url, kwargs = client.calls[0]
     check(models == ["gpt-model-a", "gpt-model-b"], "new model schema is normalized")
+    check(
+        oauth.extract_model_ids(
+            {
+                "models": [
+                    {"slug": "gpt-late", "display_name": "Late", "priority": 9},
+                    {"slug": "gpt-hidden", "visibility": "hide", "priority": 0},
+                    {"slug": "gpt-main", "name": "GPT Main", "id": "x", "priority": 1},
+                    {"name": "named-only"},
+                    {"slug": "gpt-main", "priority": 2},
+                ]
+            }
+        )
+        == ["gpt-main", "gpt-late", "named-only"],
+        "each catalog entry contributes one visible ID in priority order",
+    )
     check(url.endswith("/models?client_version=1.0.0"), "models endpoint is stable")
     check(
         kwargs["headers"]["originator"] == "originator-test", "originator is forwarded"

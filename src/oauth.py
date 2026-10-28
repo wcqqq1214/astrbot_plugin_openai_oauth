@@ -125,27 +125,50 @@ async def refresh_access_token(creds: dict, proxy: str | None = None) -> dict:
     return updated
 
 
-def extract_model_ids(data: Any) -> list[str]:
-    """Defensively extract model identifiers from the /codex/models payload."""
-    ids: list[str] = []
+_MODEL_ID_KEYS = ("slug", "id", "model", "name")
 
-    def add(item: Any) -> None:
-        if not isinstance(item, dict):
-            return
-        for key in ("slug", "id", "model", "name"):
-            value = item.get(key)
-            if isinstance(value, str) and value and value not in ids:
-                ids.append(value)
 
+def _catalog_items(data: Any) -> list[dict]:
+    """Return the visible model entries of a /codex/models payload in order."""
+    items: list[Any] = []
     if isinstance(data, dict):
-        for key in ("data", "models", "items"):
+        for key in ("models", "data", "items"):
             value = data.get(key)
             if isinstance(value, list):
-                for item in value:
-                    add(item)
+                items.extend(value)
     elif isinstance(data, list):
-        for item in data:
-            add(item)
+        items = list(data)
+    entries = [
+        item
+        for item in items
+        if isinstance(item, dict) and item.get("visibility") != "hide"
+    ]
+
+    def priority(item: dict) -> int | float:
+        value = item.get("priority")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return math.inf
+        return value
+
+    # Codex orders its picker by priority; entries without one keep their place.
+    return sorted(entries, key=priority)
+
+
+def _catalog_model_id(item: dict) -> str:
+    for key in _MODEL_ID_KEYS:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def extract_model_ids(data: Any) -> list[str]:
+    """Defensively extract one identifier per visible model from /codex/models."""
+    ids: list[str] = []
+    for item in _catalog_items(data):
+        model_id = _catalog_model_id(item)
+        if model_id and model_id not in ids:
+            ids.append(model_id)
     return ids
 
 
