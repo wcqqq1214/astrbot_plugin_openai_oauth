@@ -6,6 +6,7 @@ import asyncio
 import importlib
 import json
 import sys
+import tempfile
 import unittest
 from copy import deepcopy
 from pathlib import Path
@@ -21,6 +22,7 @@ oauth = importlib.import_module(f"{plugin.__package__}.src.oauth")
 runtime = importlib.import_module(f"{plugin.__package__}.src.runtime")
 usage_service = importlib.import_module(f"{plugin.__package__}.src.usage")
 web_api = importlib.import_module(f"{plugin.__package__}.src.web_api")
+credential_seal = importlib.import_module(f"{plugin.__package__}.src.credential_seal")
 
 
 class RegistryTests(unittest.IsolatedAsyncioTestCase):
@@ -68,6 +70,39 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.addCleanup(login._discard_all_login_sessions)
+
+    async def test_plaintext_credentials_are_sealed_once(self):
+        await self.registry.migrate()
+        key_dir = self.enterContext(tempfile.TemporaryDirectory())
+        sealer = credential_seal.FernetCredentialSealer(Path(key_dir, "k"))
+        self.coordinator.sealer = sealer
+        local_source, device = self.registry.owned()
+        before = self.coordinator.account_view(device["id"])
+        saves = self.conf.saved
+        self.assertEqual(await self.registry.seal_stored_credentials(), 1)
+        self.assertEqual(self.conf.saved, saves + 1)
+        device = self.registry.owned()[1]
+        self.assertTrue(store.is_sealed(device["key"]))
+        self.assertNotIn("secret-refresh", json.dumps(self.conf))
+        self.assertEqual(local_source["key"], "")
+        self.assertEqual(self.coordinator.account_view(device["id"]), before)
+        snapshot = await self.coordinator.get_snapshot(device["id"])
+        self.assertEqual(snapshot.refresh_token, "secret-refresh")
+        self.assertEqual(await self.registry.seal_stored_credentials(), 0)
+        self.assertEqual(self.conf.saved, saves + 1)
+
+        # Cooldowns and refreshes keep the record sealed.
+        await self.coordinator.mark_cooling(device["id"], 9999999999)
+        self.assertTrue(store.is_sealed(self.registry.owned()[1]["key"]))
+
+        # Without the key the account is shown as invalid, never as logged in.
+        self.coordinator.sealer = credential_seal.FernetCredentialSealer(
+            Path(key_dir, "other")
+        )
+        self.assertEqual(
+            self.coordinator.account_view(device["id"])["status"], "invalid"
+        )
+        self.assertFalse(Path(key_dir, "other").exists())
 
     async def test_local_active_migration_preserves_model_and_saved_login(self):
         model = deepcopy(self.conf["provider"])

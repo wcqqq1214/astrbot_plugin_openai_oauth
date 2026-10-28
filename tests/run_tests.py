@@ -37,7 +37,14 @@ def main() -> int:
     ]
     failed = []
     with tempfile.TemporaryDirectory(prefix="astrbot-test-codex-") as auth_home:
-        env = {**os.environ, "CODEX_HOME": auth_home}
+        env = {
+            **os.environ,
+            "CODEX_HOME": auth_home,
+            # Keep the credential encryption key out of the AstrBot data tree.
+            "OPENAI_OAUTH_CREDENTIAL_KEY_FILE": os.path.join(
+                auth_home, "plugin-data", "credential.key"
+            ),
+        }
         for case in cases:
             print(f"Running {case}", flush=True)
             result = subprocess.run(

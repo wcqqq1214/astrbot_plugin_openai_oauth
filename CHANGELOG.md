@@ -22,6 +22,10 @@
 - Automatic fallback no longer cancels a request whose model is still thinking after 120 seconds; the startup deadline now ends once a stream opens, and a later fallback source gets a fresh window.
 - Shape requests for the stateless Codex backend: drop stored item IDs and statuses from replayed history, skip reasoning items that cannot be replayed, shorten oversized tool call IDs, and leave out sampling, output-limit and unsupported service-tier parameters the backend rejects.
 
+### Security
+
+- Encrypt device-login credentials stored in `cmd_config.json` with a key kept in the plugin data directory, so AstrBot's provider source API, dashboard responses and shared configs no longer carry usable tokens. Existing plaintext records are encrypted once on startup. Keep the key with backups; downgrading to an older version requires signing in again.
+
 ## [v2.2.0] - 2026-10-18
 
 ### Added

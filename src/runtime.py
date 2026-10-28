@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
+from astrbot import logger
 from astrbot.api import AstrBotConfig
 from astrbot.api.star import Context
 from astrbot.core.config.default import CONFIG_METADATA_2
+from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
 
 from . import oauth, source_editor
+from .credential_seal import FernetCredentialSealer
 from .credential_store import CredentialError
 from .local_codex import LocalCodexStore
 from .local_codex import LocalCredentialCoordinator as CredentialCoordinator
@@ -19,6 +24,9 @@ from .oauth import (
 
 _REFRESH_SKEW_SECONDS = 120
 _PROVIDER_TYPE = "OpenAI Subscribe"
+_PLUGIN_NAME = "astrbot_plugin_openai_oauth"
+# Optional override, e.g. to keep the key on a separate secret mount.
+_CREDENTIAL_KEY_ENV = "OPENAI_OAUTH_CREDENTIAL_KEY_FILE"
 _COORDINATOR_ATTR = "_astrbot_openai_oauth_credential_coordinator"
 
 # Bound by the entry point; all consumers resolve credentials through this module.
@@ -26,6 +34,14 @@ _config_mgr: Any = None
 _credential_coordinator: CredentialCoordinator | None = None
 _local_codex_store: LocalCodexStore | None = None
 _remove_source_guard: Any = None
+_credential_sealer: FernetCredentialSealer | None = None
+
+
+def _credential_key_path() -> Path:
+    configured = os.environ.get(_CREDENTIAL_KEY_ENV)
+    if configured:
+        return Path(configured).expanduser()
+    return Path(get_astrbot_plugin_data_path()) / _PLUGIN_NAME / "credential.key"
 
 
 def _build_default_source_config() -> dict[str, Any]:
@@ -71,6 +87,7 @@ def _get_credential_coordinator() -> CredentialCoordinator:
     if isinstance(existing, CredentialCoordinator):
         existing.update_refresh_credentials(oauth.refresh_access_token)
         existing.local_store = _local_codex_store
+        existing.sealer = _credential_sealer
         _credential_coordinator = existing
         return existing
     if (
@@ -79,6 +96,7 @@ def _get_credential_coordinator() -> CredentialCoordinator:
     ):
         _credential_coordinator.update_refresh_credentials(oauth.refresh_access_token)
         _credential_coordinator.local_store = _local_codex_store
+        _credential_coordinator.sealer = _credential_sealer
         return _credential_coordinator
 
     coordinator = CredentialCoordinator(
@@ -90,6 +108,7 @@ def _get_credential_coordinator() -> CredentialCoordinator:
         refresh_skew_seconds=_REFRESH_SKEW_SECONDS,
         local_store=_local_codex_store,
     )
+    coordinator.sealer = _credential_sealer
     try:
         setattr(cfg_mgr, _COORDINATOR_ATTR, coordinator)
     except (AttributeError, TypeError):
@@ -109,7 +128,7 @@ def _is_logged_in() -> bool:
 
 def configure(context: Context, config: AstrBotConfig) -> None:
     """Bind shared credentials to the current AstrBot configuration manager."""
-    global _config_mgr, _local_codex_store, _remove_source_guard
+    global _config_mgr, _local_codex_store, _remove_source_guard, _credential_sealer
     # Account records belong to the plugin view, not the generic source editor.
     fields = CONFIG_METADATA_2["provider_group"]["metadata"]["provider"]["items"]
     for key, field_type in (
@@ -119,6 +138,7 @@ def configure(context: Context, config: AstrBotConfig) -> None:
     ):
         fields[key] = {"type": field_type, "invisible": True}
     _config_mgr = context.astrbot_config_mgr
+    _credential_sealer = FernetCredentialSealer(_credential_key_path())
     _local_codex_store = LocalCodexStore(str(config.get("codex_auth_path", "") or ""))
     oauth.set_codex_home(_local_codex_store.path.parent)
     coordinator = _get_credential_coordinator()
@@ -140,6 +160,17 @@ async def initialize(context: Context) -> None:
 
     coordinator = _get_credential_coordinator()
     await coordinator.ensure_default_source()
+    try:
+        sealed = await coordinator.providers.seal_stored_credentials()
+    except (CredentialError, OSError) as exc:
+        # Plaintext records keep working; sealing is retried on the next start.
+        logger.warning(
+            "OpenAI Subscribe could not encrypt stored credentials: %s",
+            type(exc).__name__,
+        )
+    else:
+        if sealed:
+            logger.info("OpenAI Subscribe encrypted %s stored credential(s).", sealed)
     manager = getattr(context, "provider_manager", None)
     if manager is None:
         return

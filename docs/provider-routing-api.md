@@ -17,6 +17,9 @@ holds `default_account_id` and a `models` map from model ID to preferred account
 These fields stay inside the source in `data/cmd_config.json`: AstrBot removes
 unknown top-level config keys on startup. The gateway's `key` remains empty;
 credentials are resolved from the selected account immediately before dispatch.
+Each device-login account's `key` is sealed (`enc:v1:` Fernet token) with a key in
+the plugin data directory; plaintext records from earlier versions are sealed once
+on startup.
 
 Migration preserves model IDs, rewrites their `provider_source_id` to the gateway,
 and stores their former account in the preference map. Existing profile selections

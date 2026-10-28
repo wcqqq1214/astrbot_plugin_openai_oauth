@@ -6,7 +6,7 @@ readme = "README.md"
 license = { text = "AGPL-3.0" }
 requires-python = ">=3.12"
 # The plugin's own runtime dependencies. AstrBot (and its framework
-# dependencies, including httpx and the openai SDK) is provided by the
+# dependencies, including httpx, the openai SDK and cryptography) is provided by the
 # AstrBot process the plugin runs in.
 dependencies = []
 

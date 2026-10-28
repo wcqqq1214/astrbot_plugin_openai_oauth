@@ -11,8 +11,9 @@ relative imports:
 - `oauth.py` and `login.py`: OAuth protocol, login sessions, and task cleanup.
 - `web_api.py`: WebUI endpoints.
 - `usage.py` and `effort.py`: allowance queries and conversation reasoning settings.
-- `credential_store.py`, `local_codex.py`, `provider_registry.py`, and
-  `provider_routing.py`: credentials, account sources, and routing rules.
+- `credential_store.py`, `credential_seal.py`, `local_codex.py`,
+  `provider_registry.py`, and `provider_routing.py`: credentials, encryption at
+  rest, account sources, and routing rules.
 
 WebUI assets live in `pages/providers/`. Plugin metadata and configuration descriptions
 stay at the repository root. See [routing API](provider-routing-api.md) for dispatch

@@ -138,8 +138,11 @@ network location or account conditions; the plugin can’t bypass this.
 **Upgrading from an older version?** The plugin consolidates old sources into one **OpenAI Subscribe** entry, preserving model IDs, account preferences, and logins. Local and device logins remain independent accounts.
 
 Keep login files and backups private: local login uses Codex’s `auth.json`, and
-device-code credentials are stored in plaintext in AstrBot’s `data/cmd_config.json`.
-Use HTTPS, a VPN, or an SSH tunnel for a public Dashboard. Use your own account
+device-code credentials are stored encrypted in AstrBot’s `data/cmd_config.json`, with
+the key in `data/plugin_data/astrbot_plugin_openai_oauth/credential.key` (set
+`OPENAI_OAUTH_CREDENTIAL_KEY_FILE` to keep it elsewhere). Keep the key with any
+backup you restore; accounts without it, or after downgrading to a version without
+encryption, need to sign in again. Use HTTPS, a VPN, or an SSH tunnel for a public Dashboard. Use your own account
 and follow OpenAI’s terms of service.
 
 ## Development and license

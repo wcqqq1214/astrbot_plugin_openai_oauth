@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+from contextlib import AsyncExitStack
 from copy import deepcopy
 from typing import Any
 
 from .credential_store import (
     CredentialPersistenceError,
+    CredentialSchemaError,
     CredentialSourceError,
     ProviderDisabledError,
     account_sources,
     dump_credentials,
+    is_sealed,
     normalize_credentials,
+    parse_credentials,
     subscription_gateway,
 )
 
@@ -403,6 +407,45 @@ class ProviderRegistry:
                 }
             )
 
+    async def seal_stored_credentials(self) -> int:
+        """Encrypt plaintext device-login credentials saved by earlier versions.
+
+        Returns the number of records sealed. Unreadable records stay as they
+        are so that their status remains visible.
+        """
+        sealer = self.coordinator.sealer
+        if sealer is None:
+            return 0
+        async with self.lock, AsyncExitStack() as locks:
+            sources = self.sources()
+            pending = [
+                source
+                for source in sources
+                if source.get("type") == self.coordinator._provider_type
+                and source.get("credential_mode", DEVICE) == DEVICE
+                and isinstance(source.get("key"), str)
+                and source["key"].strip()
+                and not is_sealed(source["key"])
+            ]
+            if not pending:
+                return 0
+            for source in pending:
+                await locks.enter_async_context(
+                    self.coordinator._source_lock(source["id"])
+                )
+            previous = deepcopy(sources)
+            sealed = 0
+            for source in pending:
+                try:
+                    creds = parse_credentials(source["key"])
+                except CredentialSchemaError:
+                    continue
+                source["key"] = dump_credentials(creds, sealer)
+                sealed += 1
+            if sealed:
+                await self._save(previous)
+            return sealed
+
     async def save_login(
         self, source_id: str, name: str, creds: dict[str, Any], *, creating: bool
     ) -> None:
@@ -427,7 +470,7 @@ class ProviderRegistry:
             stored = normalize_credentials(creds)
             stored.pop("cooldown_until", None)
             stored.pop("cooldown_reason", None)
-            source["key"] = dump_credentials(stored)
+            source["key"] = dump_credentials(stored, self.coordinator.sealer)
             if creating:
                 sources.append(source)
             await self._save(previous)

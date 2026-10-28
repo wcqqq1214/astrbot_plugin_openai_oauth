@@ -7,9 +7,17 @@ import json
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 _CREDENTIAL_SCHEMA_VERSION = 1
+# Stored credential records start with this marker once encrypted at rest.
+SEALED_PREFIX = "enc:v1:"
+
+
+class CredentialSealer(Protocol):
+    def seal(self, text: str) -> str: ...
+
+    def open(self, value: str) -> str: ...
 
 
 class CredentialError(RuntimeError):
@@ -111,8 +119,14 @@ def _looks_like_access_token(value: str) -> bool:
     return value.startswith("sk-") or value.count(".") >= 2
 
 
-def parse_credentials(raw: Any) -> dict[str, Any]:
-    """Read a legacy or schema-v1 credential record without mutating it."""
+def is_sealed(raw: Any) -> bool:
+    return isinstance(raw, str) and raw.strip().startswith(SEALED_PREFIX)
+
+
+def parse_credentials(
+    raw: Any, sealer: CredentialSealer | None = None
+) -> dict[str, Any]:
+    """Read a sealed, legacy or schema-v1 credential record without mutating it."""
     if isinstance(raw, list):
         raw = raw[0] if raw else ""
 
@@ -120,6 +134,10 @@ def parse_credentials(raw: Any) -> dict[str, Any]:
         parsed = dict(raw)
     elif isinstance(raw, str) and raw.strip():
         value = raw.strip()
+        if value.startswith(SEALED_PREFIX):
+            if sealer is None:
+                raise CredentialSchemaError("The stored OpenAI credential is sealed.")
+            value = sealer.open(value)
         try:
             decoded = json.loads(value)
         except json.JSONDecodeError:
@@ -166,9 +184,12 @@ def normalize_credentials(creds: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def dump_credentials(creds: dict[str, Any]) -> str:
-    """Serialize the canonical durable credential record."""
-    return json.dumps(normalize_credentials(creds), ensure_ascii=False)
+def dump_credentials(
+    creds: dict[str, Any], sealer: CredentialSealer | None = None
+) -> str:
+    """Serialize the canonical durable credential record, sealed when possible."""
+    text = json.dumps(normalize_credentials(creds), ensure_ascii=False)
+    return sealer.seal(text) if sealer is not None else text
 
 
 def subscription_gateway(
@@ -259,6 +280,7 @@ class CredentialCoordinator:
         self._usage_locks: dict[str, asyncio.Lock] = {}
         self._states: dict[str, CredentialStatus] = {}
         self._usage_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self.sealer: CredentialSealer | None = None
 
     @property
     def config_manager(self) -> Any:
@@ -321,7 +343,7 @@ class CredentialCoordinator:
         source_id: str,
         source: dict[str, Any],
     ) -> CredentialSnapshot:
-        creds = parse_credentials(source.get("key"))
+        creds = parse_credentials(source.get("key"), self.sealer)
         return CredentialSnapshot(
             source_id=source_id,
             access_token=_as_string(creds.get("access_token")),
@@ -365,11 +387,11 @@ class CredentialCoordinator:
         source: dict[str, Any],
         creds: dict[str, Any],
     ) -> CredentialSnapshot:
-        source["key"] = dump_credentials(creds)
+        source["key"] = dump_credentials(creds, self.sealer)
         committed = await self._conf().save_config_async()
         persisted = self._snapshot_from_source(source_id, self._source(source_id))
         expected = self._snapshot_from_source(
-            source_id, {"key": dump_credentials(creds)}
+            source_id, {"key": normalize_credentials(creds)}
         )
         if committed is False and not credentials_match(persisted, expected):
             raise CredentialPersistenceError(
@@ -504,7 +526,7 @@ class CredentialCoordinator:
             current = self._snapshot_from_source(resolved_source_id, source)
             if expected_access_token and current.access_token != expected_access_token:
                 return current
-            creds = parse_credentials(source.get("key"))
+            creds = parse_credentials(source.get("key"), self.sealer)
             if cooldown_until is not None:
                 creds["cooldown_until"] = cooldown_until
             else:

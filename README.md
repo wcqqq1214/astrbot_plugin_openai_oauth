@@ -128,8 +128,11 @@ Docker 需要挂载整个 Codex 凭据目录，并填写容器内的路径，不
 
 **从旧版升级？** 插件会将旧的多个来源合并为一个 **OpenAI Subscribe** 入口，保留模型 ID、原账号偏好和登录信息。本地登录和设备登录仍是独立账号，无需手动迁移。
 
-请保管好登录文件及备份：本地登录使用 Codex 的 `auth.json`，设备码登录信息以明文保存在
-AstrBot 的 `data/cmd_config.json`。公网访问 Dashboard 请使用 HTTPS、VPN 或 SSH 隧道。
+请保管好登录文件及备份：本地登录使用 Codex 的 `auth.json`；设备码登录信息加密后保存在
+AstrBot 的 `data/cmd_config.json`，密钥在 `data/plugin_data/astrbot_plugin_openai_oauth/credential.key`
+（可用环境变量 `OPENAI_OAUTH_CREDENTIAL_KEY_FILE` 指定其他位置）。迁移或恢复备份时请连同密钥一起保留，
+缺少密钥的账号需要重新登录；退回不支持加密的旧版插件后也需要重新登录。
+公网访问 Dashboard 请使用 HTTPS、VPN 或 SSH 隧道。
 请使用自己的账号，并遵守 OpenAI 的服务条款。
 
 ## 开发与许可证

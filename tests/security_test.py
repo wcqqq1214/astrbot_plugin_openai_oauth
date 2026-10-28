@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,6 +31,8 @@ login = importlib.import_module(f"{plugin.__package__}.src.login")
 oauth = importlib.import_module(f"{plugin.__package__}.src.oauth")
 runtime = importlib.import_module(f"{plugin.__package__}.src.runtime")
 web_api = importlib.import_module(f"{plugin.__package__}.src.web_api")
+credential_seal = importlib.import_module(f"{plugin.__package__}.src.credential_seal")
+credential_store = importlib.import_module(f"{plugin.__package__}.src.credential_store")
 from astrbot.api.web import PluginRequest, bind_request_context
 
 
@@ -315,6 +318,9 @@ class LoginBoundaryTests(unittest.TestCase):
     def test_success_is_server_persisted_without_returning_credentials(self) -> None:
         fake_manager = _FakeConfigManager()
         runtime._config_mgr = fake_manager
+        key_dir = self.enterContext(tempfile.TemporaryDirectory(prefix="seal-"))
+        sealer = credential_seal.FernetCredentialSealer(Path(key_dir, "credential.key"))
+        self.enterContext(mock.patch.object(runtime, "_credential_sealer", sealer))
 
         async def run():
             with (
@@ -367,7 +373,15 @@ class LoginBoundaryTests(unittest.TestCase):
         self.assertEqual(replay.status_code, 200)
         self.assertEqual(_payload(replay), {"status": "expired"})
         source = fake_manager.default_conf["provider_sources"][0]
-        self.assertEqual(json.loads(source["key"])["access_token"], "fake-access")
+        # The config holds only ciphertext; the key stays in plugin data.
+        self.assertTrue(source["key"].startswith(credential_store.SEALED_PREFIX))
+        self.assertNotIn("fake-access", source["key"])
+        self.assertNotIn("fake-refresh", source["key"])
+        self.assertEqual(
+            credential_store.parse_credentials(source["key"], sealer)["access_token"],
+            "fake-access",
+        )
+        self.assertEqual(os.stat(sealer.key_path).st_mode & 0o777, 0o600)
         self.assertEqual(fake_manager.default_conf.saved, 1)
         self.assertFalse(hasattr(web_api, "_handle_save_creds"))
 
