@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-ASTRBOT_ROOT = PLUGIN_ROOT.parent / "AstrBot"
+ASTRBOT_ROOT = Path(os.environ.get("ASTRBOT_ROOT") or PLUGIN_ROOT.parent / "AstrBot")
 sys.path[:0] = [str(ASTRBOT_ROOT), str(PLUGIN_ROOT.parent)]
 os.chdir(ASTRBOT_ROOT)
 

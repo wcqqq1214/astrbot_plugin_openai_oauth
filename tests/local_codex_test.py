@@ -14,7 +14,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-ASTRBOT_ROOT = Path(__file__).resolve().parents[2] / "AstrBot"
+ASTRBOT_ROOT = Path(
+    os.environ.get("ASTRBOT_ROOT") or Path(__file__).resolve().parents[2] / "AstrBot"
+)
 sys.path.insert(0, str(ASTRBOT_ROOT))
 os.chdir(ASTRBOT_ROOT)
 local = importlib.import_module(

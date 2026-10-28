@@ -15,7 +15,8 @@ from pathlib import Path
 
 # 解析 AstrBot 仓库根（本文件位于 Project/astrbot_plugin_openai_oauth/tests/ 下）
 REPO_ROOT = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "AstrBot")
+    os.environ.get("ASTRBOT_ROOT")
+    or os.path.join(os.path.dirname(__file__), "..", "..", "AstrBot")
 )
 sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)  # 使 `data` 命名空间包可解析

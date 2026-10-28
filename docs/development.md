@@ -36,6 +36,9 @@ Run `tests/run_tests.py` with the local AstrBot checkout's virtualenv Python:
 /path/to/AstrBot/.venv/bin/python tests/run_tests.py
 ```
 
+The tests expect the AstrBot checkout next to this repository (`../AstrBot`).
+Set `ASTRBOT_ROOT=/path/to/AstrBot` to use a checkout elsewhere.
+
 The runner tests this checkout rather than the deployed plugin copy. Tests use
 isolated credentials to avoid reading or refreshing real accounts. Follow
 [AGENTS.md](../AGENTS.md) for repository conventions and local setup.

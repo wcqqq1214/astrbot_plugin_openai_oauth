@@ -12,7 +12,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 REPO_ROOT = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "AstrBot")
+    os.environ.get("ASTRBOT_ROOT")
+    or os.path.join(os.path.dirname(__file__), "..", "..", "AstrBot")
 )
 sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)
