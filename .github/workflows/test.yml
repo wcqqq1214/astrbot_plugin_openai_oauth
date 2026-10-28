@@ -20,6 +20,11 @@ jobs:
       - name: Checkout plugin
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
       - name: Install uv
         run: python3.12 -m pip install --disable-pip-version-check "uv==0.9.9"
 
@@ -71,6 +76,11 @@ jobs:
           repository: AstrBotDevs/AstrBot
           ref: ${{ steps.astrbot.outputs.ref }}
           path: AstrBot
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
 
       - name: Install uv
         run: python3.12 -m pip install --disable-pip-version-check "uv==0.9.9"
