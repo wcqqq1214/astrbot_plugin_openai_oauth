@@ -150,7 +150,15 @@ async def _fetch_source_usage(
             max_attempts=3,
         )
 
-    usage = await coordinator.get_usage(source_id, fetch_usage)
+    try:
+        usage = await coordinator.get_usage(source_id, fetch_usage)
+    except CredentialExpiredError:
+        # The backend can reject a token before its own expiry. One forced
+        # refresh mends that; a second rejection means signing in again.
+        await coordinator.get_snapshot(
+            source_id, force_refresh=True, check_cooldown=False
+        )
+        usage = await coordinator.get_usage(source_id, fetch_usage)
     if usage.get("limit_reached") or not usage.get("allowed", True):
         cooldown_until = _cooldown_until_from_usage(usage)
         if cooldown_until is not None:

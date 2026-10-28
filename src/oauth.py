@@ -376,9 +376,13 @@ async def fetch_rate_limits(
     client = create_proxy_client("OpenAI Codex", proxy)
     try:
         resp = await client.get(CODEX_USAGE_URL, headers=headers, timeout=15)
-        if resp.status_code in (401, 403):
-            raise CredentialExpiredError()
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except HTTPStatusError as exc:
+            # A plain 403 (Cloudflare, region) says nothing about the token.
+            if classify_codex_error(exc) == "credential":
+                raise CredentialExpiredError() from exc
+            raise
         data = resp.json()
     finally:
         await client.aclose()

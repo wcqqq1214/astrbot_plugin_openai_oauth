@@ -22,7 +22,11 @@ oauth = importlib.import_module(f"{plugin.__package__}.src.oauth")
 provider_module = importlib.import_module(f"{plugin.__package__}.src.provider")
 provider_routing = importlib.import_module(f"{plugin.__package__}.src.provider_routing")
 runtime = importlib.import_module(f"{plugin.__package__}.src.runtime")
+usage_service = importlib.import_module(f"{plugin.__package__}.src.usage")
 web_api = importlib.import_module(f"{plugin.__package__}.src.web_api")
+
+FETCH_RATE_LIMITS = oauth.fetch_rate_limits
+USAGE_BODY = {"rate_limit": {"primary_window": {"used_percent": 25}}}
 
 FORBIDDEN_BODIES = (
     {"text": "<html><body>Forbidden</body></html>"},
@@ -429,6 +433,47 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(self.requested(), [source_id])
                     self.assertEqual(self.output[-1].completion_text, source_id)
                     self.refresh.assert_not_awaited()
+
+    async def test_usage_403_is_not_a_credential_failure(self):
+        for body in FORBIDDEN_BODIES:
+            with self.subTest(body=body):
+                before = deepcopy(self.conf)
+                view = self.coordinator.account_view("same")
+                self.catalog_requests.clear()
+                self.catalog_outcomes = [httpx.Response(403, **body) for _ in range(2)]
+                with patch.object(oauth, "fetch_rate_limits", new=FETCH_RATE_LIMITS):
+                    with self.assertRaises(httpx.HTTPStatusError):
+                        await usage_service._fetch_source_usage("same")
+                    message = await usage_service.build_usage_message("same")
+                self.assertEqual(message, "额度查询失败，请稍后重试。")
+                self.refresh.assert_not_awaited()
+                self.assertEqual(self.conf, before)
+                self.assertEqual(self.coordinator.account_view("same"), view)
+
+    async def test_usage_401_refreshes_once_and_retries(self):
+        token = self.coordinator._read_snapshot("same").access_token
+        self.catalog_outcomes = [
+            httpx.Response(401, json={"error": {"code": "token_expired"}}),
+            httpx.Response(200, json=USAGE_BODY),
+        ]
+        with patch.object(oauth, "fetch_rate_limits", new=FETCH_RATE_LIMITS):
+            usage = await usage_service._fetch_source_usage("same")
+        self.assertEqual(usage["windows"][0]["used_percent"], 25.0)
+        self.refresh.assert_awaited_once()
+        self.assertEqual(
+            [r.headers["authorization"] for r in self.catalog_requests],
+            ["Bearer " + token, "Bearer " + token + "-new"],
+        )
+
+        self.refresh.reset_mock()
+        self.catalog_requests.clear()
+        self.coordinator._usage_cache.clear()
+        self.catalog_outcomes = [httpx.Response(401) for _ in range(2)]
+        with patch.object(oauth, "fetch_rate_limits", new=FETCH_RATE_LIMITS):
+            message = await usage_service.build_usage_message("same")
+        self.assertEqual(message, "凭据已失效，请在插件详情页重新登录。")
+        self.refresh.assert_awaited_once()
+        self.assertEqual(len(self.catalog_requests), 2)
 
     async def test_explicit_auth_failures_refresh_and_retry(self):
         self.provider._source_id = "same"
