@@ -168,6 +168,30 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(error, APIError)
                 self.assertEqual(delays, [])
 
+    async def test_reasoning_deltas_are_joined_without_separators(self):
+        events = [
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "delta": delta,
+            }
+            for delta in ("Think", "ing ", "fast")
+        ]
+        events.append(
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 1,
+                "delta": "Then answer",
+            }
+        )
+        requests, output, error, _ = await self.run_stream([[*events, *SUCCESS]])
+        self.assertIsNone(error)
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(output[-1].reasoning_content, "Thinking fast\nThen answer")
+        self.assertEqual(output[-1].completion_text, "ok")
+
     async def test_specific_error_codes(self):
         for code, retryable in (
             ("server_error", True),

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Join streamed reasoning fragments without inserting a line break between every fragment.
+
 ## [v2.2.0] - 2026-10-18
 
 ### Added

@@ -375,7 +375,10 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         """Keep partial response state scoped to a single stream attempt."""
         response_id: str | None = None
         text_parts: list[str] = []
+        # Deltas are fragments of one text; a new item or summary part starts
+        # a new segment, matching how complete responses separate them.
         reasoning_parts: list[str] = []
+        reasoning_segment: tuple[Any, Any, Any] | None = None
         function_calls: list[dict] = []
 
         async for event in stream:
@@ -408,7 +411,15 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
             }:
                 delta = self._field(event, "delta", "")
                 if delta:
-                    reasoning_parts.append(str(delta))
+                    segment = (
+                        self._field(event, "item_id"),
+                        self._field(event, "summary_index"),
+                        self._field(event, "content_index"),
+                    )
+                    if not reasoning_parts or segment != reasoning_segment:
+                        reasoning_parts.append("")
+                        reasoning_segment = segment
+                    reasoning_parts[-1] += str(delta)
                     yield LLMResponse(
                         "assistant",
                         reasoning_content=str(delta),
