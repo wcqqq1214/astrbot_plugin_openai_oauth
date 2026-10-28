@@ -1,0 +1,13 @@
+# Release archives carry only what AstrBot loads at runtime (git archive).
+# README links point at GitHub for the screenshots and docs left out here.
+/.github export-ignore
+/.gitattributes export-ignore
+/.gitignore export-ignore
+/.python-version export-ignore
+/AGENTS.md export-ignore
+/CLAUDE.md export-ignore
+/docs export-ignore
+/images export-ignore
+/tests export-ignore
+/pyproject.toml export-ignore
+/uv.lock export-ignore

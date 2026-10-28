@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="logo.png" alt="OpenAI Subscribe" width="240">
+  <img src="https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/logo.png" alt="OpenAI Subscribe" width="240">
 </p>
 
 <p align="center">
@@ -37,7 +37,7 @@ In ChatGPT, open **Settings → Security and login** and turn on
 <details>
 <summary>Show where to find the switch</summary>
 
-![Enable Codex device-code authorization](images/enable-device-code-auth-codex.png)
+![Enable Codex device-code authorization](https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/images/enable-device-code-auth-codex.png)
 
 </details>
 
@@ -62,7 +62,7 @@ The source ID is fixed to `OpenAI Subscribe` and cannot be renamed. Refresh any 
 - **Click the gear** to edit the name or routing mode, then save. Device-code accounts can also be reauthorized or removed here.
 - **Use the switch** to allow or stop new requests on that account. Turning it off keeps the login and lets requests already running finish.
 
-![Account allowance panels](images/providers-overview-en.png)
+![Account allowance panels](https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/images/providers-overview-en.png)
 
 *Accounts and allowances shown are examples. The page follows AstrBot’s language setting and supports Chinese, English, Russian, and Japanese.*
 
@@ -87,7 +87,7 @@ The next request tries the preferred account again. If none are available, it fa
 <details>
 <summary>Show the settings dialog</summary>
 
-![Choose automatic fallback in account settings](images/provider-settings-en.png)
+![Choose automatic fallback in account settings](https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/images/provider-settings-en.png)
 
 *Automatic fallback is selected in this example; click Save to apply it.*
 
@@ -118,7 +118,7 @@ conversations and model defaults unchanged.
 <details>
 <summary>Show where to set the model default</summary>
 
-![Set Reasoning Effort](images/reasoning-effort-preset-en.png)
+![Set Reasoning Effort](https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/images/reasoning-effort-preset-en.png)
 
 </details>
 
@@ -150,6 +150,6 @@ and follow OpenAI’s terms of service.
 
 ## Development and license
 
-See the [development guide](docs/development.md) for tests and releases, and the
-[API guide](docs/provider-routing-api.md) for detailed routing rules.
+See the [development guide](https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/blob/main/docs/development.md) for tests and releases, and the
+[API guide](https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/blob/main/docs/provider-routing-api.md) for detailed routing rules.
 Licensed under [AGPL-3.0](LICENSE).

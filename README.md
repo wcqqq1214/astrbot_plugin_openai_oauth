@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="logo.png" alt="OpenAI Subscribe" width="240">
+  <img src="https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/logo.png" alt="OpenAI Subscribe" width="240">
 </p>
 
 <p align="center">
@@ -35,7 +35,7 @@
 <details>
 <summary>查看开关位置</summary>
 
-![开启 Codex 设备代码授权](images/enable-device-code-auth-codex-zh.png)
+![开启 Codex 设备代码授权](https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/images/enable-device-code-auth-codex-zh.png)
 
 </details>
 
@@ -60,7 +60,7 @@ AstrBot 的模型配置中始终只有一个 **OpenAI Subscribe** 来源，多�
 - **点齿轮**修改名称和路由，改好后点保存。设备码登录的账号也可在这里重新授权或移除。
 - **右侧开关**决定是否继续使用这个账号。关闭不会删除登录，也不会中断正在进行的请求。
 
-![多账号额度页面](images/providers-overview-zh.png)
+![多账号额度页面](https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/images/providers-overview-zh.png)
 
 *截图中的账号和额度均为示例。页面支持中文、英语、俄语和日语，跟随 AstrBot 的语言设置。*
 
@@ -83,7 +83,7 @@ AstrBot 的模型配置中始终只有一个 **OpenAI Subscribe** 来源，多�
 <details>
 <summary>查看设置弹窗</summary>
 
-![在账号设置中选择自动回退](images/provider-settings-zh.png)
+![在账号设置中选择自动回退](https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/images/provider-settings-zh.png)
 
 *示例中已选“自动回退”，点击保存后才生效。*
 
@@ -111,7 +111,7 @@ AstrBot 的模型配置中始终只有一个 **OpenAI Subscribe** 来源，多�
 <details>
 <summary>查看模型默认值的设置位置</summary>
 
-![填写 Reasoning Effort](images/reasoning-effort-preset-zh.png)
+![填写 Reasoning Effort](https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/images/reasoning-effort-preset-zh.png)
 
 </details>
 
@@ -139,5 +139,5 @@ AstrBot 的 `data/cmd_config.json`，密钥在 `data/plugin_data/astrbot_plugin_
 
 ## 开发与许可证
 
-开发、测试和发布方式见[开发说明](docs/development.md)，详细路由规则见[接口说明](docs/provider-routing-api.md)。
+开发、测试和发布方式见[开发说明](https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/blob/main/docs/development.md)，详细路由规则见[接口说明](https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/blob/main/docs/provider-routing-api.md)。
 本项目采用 [AGPL-3.0](LICENSE) 许可证。

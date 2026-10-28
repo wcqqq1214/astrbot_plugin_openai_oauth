@@ -58,7 +58,9 @@ jobs:
         run: |
           TAG="${{ needs.check-version.outputs.new_tag }}"
           mkdir -p dist
-          git ls-files | grep -v '^\.github/' | zip -@ "dist/astrbot_plugin_openai_oauth-${TAG}.zip"
+          # .gitattributes keeps development files out of the archive.
+          git archive --format=zip -o "dist/astrbot_plugin_openai_oauth-${TAG}.zip" HEAD
+          unzip -l "dist/astrbot_plugin_openai_oauth-${TAG}.zip"
 
       - name: Generate release notes
         id: notes

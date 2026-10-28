@@ -16,6 +16,7 @@
 - `/effort` accepts `none` and `minimal` and checks the level against the current model's catalog entry; a session level the model does not support falls back to the model setting instead of failing with HTTP 400.
 - Reuse a parse of an unchanged local Codex `auth.json` for up to a second instead of reading it several times per request; refreshing still reads the file fresh.
 - The WebUI API reports errors as stable codes that the Plugin View shows in the dashboard's language (Chinese, English, Russian or Japanese), instead of mixing Chinese and English server text.
+- Release archives contain only the files AstrBot loads (no tests, screenshots or development docs); README images and docs links point at GitHub so they also render in the dashboard's README dialog.
 
 ### Fixed
 
