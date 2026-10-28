@@ -1,4 +1,4 @@
-"""astrbot_plugin_openai_oauth — OpenAI 订阅登录插件。"""
+"""astrbot_plugin_openai_oauth: sign in with a ChatGPT subscription in AstrBot."""
 
 from .main import OpenAI_OAuth_Plugin, ProviderOpenAICodex
 

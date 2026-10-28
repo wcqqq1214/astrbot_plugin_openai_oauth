@@ -32,9 +32,9 @@ CODEX_MODELS_URL = f"{CODEX_BASE}/models"
 # Window durations come from the response; Pro may return only a weekly window.
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 
-# Codex CLI 的新版设备登录流程（device_code_auth.rs）：先取 user_code，
-# 用户去 codex/device 输入并授权，轮询到 authorization_code 后换 token。
-# PKCE 的 code_verifier 由服务端在授权后随 authorization_code 一并下发。
+# Codex CLI's device login (device_code_auth.rs): request a user code, let the
+# user enter it at codex/device, poll for the authorization code, then exchange
+# it for tokens. The server returns the PKCE code_verifier with that code.
 CODEX_DEVICE_ACCOUNTS_BASE = "https://auth.openai.com/api/accounts"
 CODEX_DEVICE_USERCODE_URL = f"{CODEX_DEVICE_ACCOUNTS_BASE}/deviceauth/usercode"
 CODEX_DEVICE_TOKEN_URL = f"{CODEX_DEVICE_ACCOUNTS_BASE}/deviceauth/token"
@@ -346,11 +346,11 @@ async def fetch_models(
 
 
 class DeviceAuthError(Exception):
-    """设备登录流程的硬性失败（未启用、被拒绝等）。"""
+    """A device login failed for good (not enabled, denied, and so on)."""
 
 
 class DeviceAuthTimeout(DeviceAuthError):
-    """设备码在有效期内未被用户授权。"""
+    """The device code expired before the user authorized it."""
 
 
 class CredentialExpiredError(Exception):
@@ -422,10 +422,10 @@ def classify_codex_error(error: BaseException) -> str:
 
 
 async def request_device_user_code(proxy: str | None = None) -> tuple[str, str, int]:
-    """请求一个设备码，返回 ``(device_auth_id, user_code, interval)``。
+    """Request a device code; returns ``(device_auth_id, user_code, interval)``.
 
-    该流程要求 ChatGPT 账号已开启 “Enable device code authentication for
-    Codex”（安全设置），否则接口返回 404。
+    The ChatGPT account must enable "Enable device code authentication for
+    Codex" in its security settings; otherwise the endpoint returns 404.
     """
     client = create_proxy_client("OpenAI Codex", proxy)
     try:
@@ -459,9 +459,10 @@ async def poll_device_authorization(
     proxy: str | None = None,
     timeout_seconds: int = CODEX_DEVICE_LOGIN_TIMEOUT,
 ) -> tuple[str, str]:
-    """轮询用户是否完成授权，返回 ``(authorization_code, code_verifier)``。
+    """Poll until the user authorizes; returns ``(authorization_code, code_verifier)``.
 
-    403/404 表示仍在等待；到时抛 ``DeviceAuthTimeout``。
+    403 and 404 mean the authorization is still pending. Raises
+    ``DeviceAuthTimeout`` once the code expires.
     """
     client = create_proxy_client("OpenAI Codex", proxy)
     deadline = time.monotonic() + timeout_seconds
@@ -475,14 +476,16 @@ async def poll_device_authorization(
                     headers={"Accept": "application/json"},
                     timeout=30,
                 )
-            except Exception:  # noqa: BLE001 - 瞬时网络错误只需继续轮询
-                logger.warning("Codex 设备登录轮询网络错误，重试。")
+            except Exception:  # noqa: BLE001 - a transient network error only delays polling
+                logger.warning(
+                    "Codex device login poll failed on the network; retrying."
+                )
                 continue
             if resp.status_code == 200:
                 data = resp.json()
                 return data["authorization_code"], data["code_verifier"]
             if resp.status_code in (403, 404):
-                continue  # 尚未授权
+                continue  # Not authorized yet.
             raise DeviceAuthError(f"设备登录轮询失败：HTTP {resp.status_code}")
     finally:
         await client.aclose()
@@ -494,7 +497,7 @@ async def exchange_authorization_code(
     code_verifier: str,
     proxy: str | None = None,
 ) -> dict:
-    """用授权码换取 token，返回原始 token 载荷（access_token 等）。"""
+    """Exchange the authorization code for the raw token payload."""
     client = create_proxy_client("OpenAI Codex", proxy)
     try:
         resp = await client.post(
@@ -520,13 +523,13 @@ async def fetch_rate_limits(
     proxy: str | None = None,
     user_agent: str = DEFAULT_USER_AGENT,
 ) -> dict:
-    """查询 ChatGPT 订阅剩余额度（GET /wham/usage）。
+    """Query the ChatGPT subscription allowance (GET /wham/usage).
 
-    返回 ``{"allowed": bool, "limit_reached": bool, "windows": [...]}``，
-    每个 window 含 ``used_percent``/``label_seconds``/``reset_after_seconds``/
-    ``reset_at``。当前后端返回 ``rate_limit.primary_window/secondary_window``
-    （各带 used_percent）；兼容旧版 ``rate_limits.codex[]`` 的
-    usage_in_seconds/limit_in_seconds 形态。
+    Returns ``{"allowed": bool, "limit_reached": bool, "windows": [...]}``; each
+    window has ``used_percent``, ``label_seconds``, ``reset_after_seconds`` and
+    ``reset_at``. The backend returns ``rate_limit.primary_window`` and
+    ``secondary_window`` with ``used_percent``; the older ``rate_limits.codex[]``
+    shape with ``usage_in_seconds``/``limit_in_seconds`` is still accepted.
     """
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -578,7 +581,7 @@ def _parse_usage_payload(data: Any) -> dict:
                         "reset_at": item.get("reset_at"),
                     }
                 )
-    # 旧版 /wham/usage 形态：rate_limits.codex[].{usage_in_seconds,
+    # Older /wham/usage shape: rate_limits.codex[].{usage_in_seconds,
     # limit_in_seconds, resets_in_seconds}
     if not windows and isinstance(data, dict):
         codex = data.get("rate_limits")
@@ -635,7 +638,7 @@ def build_credentials(
     refresh_token: str,
     expires_in: int,
 ) -> dict:
-    """把登录/刷新结果组装成 provider key 字段使用的凭据 JSON。"""
+    """Build the stored credential record from a login or refresh result."""
     return {
         "schema_version": 1,
         "access_token": access_token,

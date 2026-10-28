@@ -1,9 +1,9 @@
-"""最小冒烟验证：插件能否通过真实 `data.plugins.` 命名空间注册 provider，
-且 WebUI 元数据构建（config_service 读取的 provider_registry）能看到它。
+"""Minimal smoke test: the plugin registers its provider through the real
+`data.plugins.` namespace, and WebUI metadata (the provider registry that
+config_service reads) can see it.
 
-从仓库根运行（需 AstrBot 仓库 venv，见 AGENTS.md）：
-    /Users/wcqqq1214/Project/AstrBot/.venv/bin/python \
-        /Users/wcqqq1214/Project/astrbot_plugin_openai_oauth/tests/smoke_test.py
+Run with the AstrBot checkout's virtualenv (see docs/development.md):
+    /path/to/AstrBot/.venv/bin/python tests/run_tests.py smoke_test.py
 """
 
 from __future__ import annotations
@@ -13,13 +13,13 @@ import os
 import sys
 from pathlib import Path
 
-# 解析 AstrBot 仓库根（本文件位于 Project/astrbot_plugin_openai_oauth/tests/ 下）
+# Locate the AstrBot checkout (next to this repository unless ASTRBOT_ROOT is set).
 REPO_ROOT = os.path.abspath(
     os.environ.get("ASTRBOT_ROOT")
     or os.path.join(os.path.dirname(__file__), "..", "..", "AstrBot")
 )
 sys.path.insert(0, REPO_ROOT)
-os.chdir(REPO_ROOT)  # 使 `data` 命名空间包可解析
+os.chdir(REPO_ROOT)  # Make the `data` namespace package importable.
 
 from astrbot.core.provider.register import (
     provider_cls_map,
@@ -81,7 +81,7 @@ def main() -> int:
     check(PROVIDER_TYPE not in provider_cls_map, "provider 未注册（加载前）")
 
     print("\n=== 2. 通过真实命名空间导入插件（模拟 StarManager.load 的导入路径） ===")
-    # 与 star_manager.load() 的 `data.plugins.<root_dir_name>.main` 完全一致
+    # Exactly how star_manager.load() names `data.plugins.<root_dir_name>.main`.
     import importlib
 
     module = importlib.import_module("data.plugins.astrbot_plugin_openai_oauth.main")
