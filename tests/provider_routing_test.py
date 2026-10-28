@@ -261,6 +261,39 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
     def requested(self):
         return [sid for sid, _ in self.requests]
 
+    def transports_released(self):
+        """Only the pooled per-source transports may stay open between requests."""
+        pooled = {id(client) for client in self.provider._transport_pool.clients}
+        return all(
+            client.is_closed or id(client) in pooled for _, client in self.transports
+        )
+
+    async def test_transport_is_reused_per_source_until_account_changes(self):
+        self.provider._source_id = "same"
+        await self.collect()
+        await self.collect()
+        inference = [c for proxy, c in self.transports if proxy == "http://same:8080"]
+        self.assertEqual(len(inference), 1)
+        self.assertFalse(inference[0].is_closed)
+
+        self.conf["provider_sources"][1]["key"] = json.dumps(
+            {
+                "access_token": jwt("c"),
+                "account_id": "c",
+                "refresh_token": "refresh-c",
+                "expires": 9999999999,
+            }
+        )
+        await self.collect()
+        inference = [c for proxy, c in self.transports if proxy == "http://same:8080"]
+        self.assertEqual(len(inference), 2)
+        self.assertTrue(inference[0].is_closed)
+        self.assertFalse(inference[1].is_closed)
+        self.assertTrue(self.transports_released())
+
+        await self.provider.terminate()
+        self.assertTrue(all(client.is_closed for _, client in self.transports))
+
     async def test_single_source_switch_updates_existing_instance_and_headers(self):
         self.coordinator._default_source_factory = lambda: {
             "id": "local",
@@ -295,7 +328,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.headers["x-source"], "other")
         self.assertEqual(json.loads(request.content)["model"], "test-model")
         self.assertEqual(self.transports[-1][0], "http://other:8080")
-        self.assertTrue(all(client.is_closed for _, client in self.transports))
+        self.assertTrue(self.transports_released())
         self.assertEqual(self.conf["provider"], before)
         self.assertEqual(self.provider._source_id, "local")
         self.assertEqual(self.coordinator.account_view("same")["status"], "cooling")
@@ -511,9 +544,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
                         {sid: self.coordinator.account_view(sid) for sid in views},
                         views,
                     )
-                    self.assertTrue(
-                        all(client.is_closed for _, client in self.transports)
-                    )
+                    self.assertTrue(self.transports_released())
                     await self.collect()
                     self.assertEqual(self.requested(), [source_id, source_id])
                     self.assertEqual(self.output[-1].completion_text, source_id)
@@ -538,9 +569,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(getattr(self.conf, "saved", 0), 0)
                     self.assertEqual(self.login, login_before)
                     self.assertEqual(self.coordinator.account_view(source_id), view)
-                    self.assertTrue(
-                        all(client.is_closed for _, client in self.transports)
-                    )
+                    self.assertTrue(self.transports_released())
                     self.requests.clear()
                     await self.collect()
                     self.assertEqual(self.requested(), [source_id])
@@ -617,9 +646,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(
                         self.coordinator.account_view("same")["status"], "ready"
                     )
-                    self.assertTrue(
-                        all(client.is_closed for _, client in self.transports)
-                    )
+                    self.assertTrue(self.transports_released())
 
     async def test_repeated_invalid_token_requires_reauthentication(self):
         self.provider._source_id = "same"
@@ -637,7 +664,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self.coordinator.account_view("same")["status"], "reauth_required"
         )
-        self.assertTrue(all(client.is_closed for _, client in self.transports))
+        self.assertTrue(self.transports_released())
 
     async def test_catalog_invalid_grant_refresh_failure_requires_reauthentication(
         self,
@@ -654,7 +681,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(store.ReauthenticationRequiredError):
             await self.collect()
         self.assertEqual(self.requests, [])
-        self.assertTrue(all(client.is_closed for _, client in self.transports))
+        self.assertTrue(self.transports_released())
 
     async def test_output_then_failure_returns_terminal_error_without_replay(self):
         self.outcomes["local"] = ["partial"]
@@ -701,7 +728,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         first = await anext(stream)
         self.assertTrue(first.is_chunk)
         await stream.aclose()
-        self.assertTrue(all(client.is_closed for _, client in self.transports))
+        self.assertTrue(self.transports_released())
 
     async def test_local_account_change_does_not_clear_other_entry_cooldown(self):
         self.outcomes["local"] = ["quota"]
@@ -747,7 +774,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await self.collect()
         self.assertEqual(self.requested(), ["local"])
-        self.assertTrue(all(client.is_closed for _, client in self.transports))
+        self.assertTrue(self.transports_released())
 
     async def test_startup_timeout_is_shared_and_closes_transport(self):
         self.outcomes["local"] = ["wait"]
@@ -757,7 +784,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         ):
             await self.collect()
         self.assertEqual(ctx.exception.reason, "startup_timeout")
-        self.assertTrue(all(client.is_closed for _, client in self.transports))
+        self.assertTrue(self.transports_released())
 
     async def test_auth_refresh_once_then_skip_until_reauthorization(self):
         await self.registry.edit("local", enabled=False)

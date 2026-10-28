@@ -176,10 +176,12 @@ when it is eligible again. The next tool-loop invocation is a new request.
 | Ordinary rate limit | Try another account; do not mark subscription quota exhausted. |
 | Invalid request, unsupported model, other unclassified error | Fail; do not silently change the model or rotate accounts. |
 | Any output already emitted, including reasoning/tool output | Never replay. The public stream emits a final `role="err"` response so AstrBot's streaming fallback cannot repeat the request. |
-| Cancellation | Propagate cancellation and close transports; no fallback. |
+| Cancellation | Propagate cancellation; no fallback. |
 
 The request body/model remains the same across accounts. Each chosen source uses
-its own credentials, account header, proxy, originator and user agent; fallback
+its own credentials, account header, proxy, originator, user agent and HTTP
+transport; a source's transport is kept for later requests (connection reuse) and
+replaced when its account or proxy changes, so cookies never cross accounts. Fallback
 does not inherit the preferred source's custom headers. Explicit model headers
 are retained on the preferred account; inherited headers are re-read from the
 chosen account so switching does not reuse the previous account’s headers. The

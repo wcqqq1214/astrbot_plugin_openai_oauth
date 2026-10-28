@@ -103,6 +103,66 @@ def _drop_unsupported_params(*bodies: dict[str, Any]) -> None:
         )
 
 
+class _PooledTransport:
+    __slots__ = ("client", "fingerprint", "retired", "users")
+
+    def __init__(self, fingerprint: tuple[str, str], client: Any) -> None:
+        self.fingerprint = fingerprint
+        self.client = client
+        self.users = 0
+        self.retired = False
+
+
+class _TransportPool:
+    """Reuse one HTTP transport per account source between requests.
+
+    Reusing a transport keeps its TCP and TLS connections alive. Each source
+    gets its own transport, so cookies set for one account never travel with
+    another. A transport is replaced when its account or proxy changes and is
+    closed once the requests still using it finish.
+    """
+
+    def __init__(self) -> None:
+        self._entries: dict[str, _PooledTransport] = {}
+
+    @property
+    def clients(self) -> list[Any]:
+        return [entry.client for entry in self._entries.values()]
+
+    @asynccontextmanager
+    async def lease(
+        self,
+        source_id: str,
+        fingerprint: tuple[str, str],
+        create: Callable[[], Any],
+    ):
+        entry = self._entries.get(source_id)
+        if entry is None or entry.fingerprint != fingerprint or entry.client.is_closed:
+            if entry is not None:
+                await self._retire(entry)
+            entry = _PooledTransport(fingerprint, create())
+            self._entries[source_id] = entry
+        entry.users += 1
+        try:
+            yield entry.client
+        finally:
+            entry.users -= 1
+            if entry.retired and entry.users == 0:
+                await entry.client.aclose()
+
+    async def _retire(self, entry: _PooledTransport) -> None:
+        entry.retired = True
+        if entry.users == 0:
+            await entry.client.aclose()
+
+    async def close(self) -> None:
+        entries = list(self._entries.values())
+        self._entries.clear()
+        for entry in entries:
+            entry.retired = True
+            await entry.client.aclose()
+
+
 def _register_provider_adapter_if_absent(cls: type) -> type:
     """Register the provider once and refresh its class on plugin reload.
 
@@ -190,6 +250,17 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
     def get_keys(self) -> list[str]:
         return [self._bootstrap_access_token]
 
+    @property
+    def _transport_pool(self) -> _TransportPool:
+        pool = self.__dict__.get("_transports")
+        if pool is None:
+            pool = self.__dict__["_transports"] = _TransportPool()
+        return pool
+
+    async def terminate(self) -> None:
+        await self._transport_pool.close()
+        await super().terminate()
+
     def get_current_key(self) -> str:
         return self._bootstrap_access_token
 
@@ -237,7 +308,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
 
     @asynccontextmanager
     async def _source_client(self, snapshot: CredentialSnapshot):
-        """Own the selected source's transport for this request, never globally."""
+        """Build a request client on the selected source's own transport."""
         coordinator = runtime._get_credential_coordinator()
         source = coordinator._source(snapshot.source_id)
         settings = coordinator.source_settings(snapshot.source_id)
@@ -290,18 +361,22 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         )
         if snapshot.account_id:
             headers["chatgpt-account-id"] = snapshot.account_id
-        transport = self._create_http_client(
-            {**self.provider_config, "proxy": settings["proxy"]}
-        )
-        try:
-            async with self._request_client(
+        proxy = settings["proxy"]
+        identity = hashlib.sha256(
+            (snapshot.account_id or snapshot.access_token).encode()
+        ).hexdigest()
+        async with self._transport_pool.lease(
+            snapshot.source_id,
+            (identity, proxy),
+            lambda: self._create_http_client({**self.provider_config, "proxy": proxy}),
+        ) as transport:
+            # The SDK wrapper shares the pooled transport; closing it would not
+            # close the transport, so it is left to the garbage collector.
+            yield self._request_client(
                 snapshot,
                 headers=headers,
                 http_client=transport,
-            ) as client:
-                yield client
-        finally:
-            await transport.aclose()
+            )
 
     @staticmethod
     def _prompt_cache_key(session_id: Any, payloads: dict[str, Any]) -> str | None:

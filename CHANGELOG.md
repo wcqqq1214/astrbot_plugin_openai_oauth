@@ -10,6 +10,7 @@
 ### Changed
 
 - Identify as a current Codex CLI version (User-Agent, `version` header and catalog query), following a newer local Codex when present, so the backend serves its newest models. The old placeholder User-Agent saved in existing sources upgrades automatically; custom values are kept.
+- Reuse each account's HTTP connection between requests instead of opening a new TCP and TLS connection for every message; a transport is replaced when its account or proxy changes.
 
 ### Fixed
 
