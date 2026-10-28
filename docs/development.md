@@ -56,6 +56,8 @@ Pushing `main` runs tests without publishing a release. To release:
 
 1. Update the version in `metadata.yaml`, `pyproject.toml`, the `main.py` registration,
    and both README badges. Run `uv lock` and add the release notes to `CHANGELOG.md`.
+   `python3 .github/scripts/release_check.py versions` confirms every reference
+   agrees; CI and the release workflow run the same check.
 2. Keep the plugin descriptions in `.astrbot-plugin/i18n/` aligned with `metadata.yaml`.
 3. Run the checks above and the integration suite, then confirm CI passes on the
    exact commit to release.

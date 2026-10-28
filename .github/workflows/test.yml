@@ -31,6 +31,9 @@ jobs:
           uv run ruff format --check .
           uv run ruff check .
 
+      - name: Check version references
+        run: python3.12 .github/scripts/release_check.py versions
+
       - name: Run Plugin Views regressions
         run: node tests/view_test.mjs
 
