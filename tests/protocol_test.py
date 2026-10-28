@@ -161,6 +161,60 @@ def test_client_identity() -> None:
             oauth.set_codex_home(None)
 
 
+def test_model_reasoning_levels() -> None:
+    print("\n=== Model reasoning levels ===")
+    import json
+    import tempfile
+    from pathlib import Path
+
+    catalog = {
+        "models": [
+            {
+                "slug": "gpt-levels",
+                "supported_reasoning_levels": [
+                    {"effort": "low"},
+                    {"effort": "High"},
+                    {"effort": "ultra"},
+                    {"effort": ""},
+                ],
+            },
+            {"slug": "gpt-unlisted"},
+        ]
+    }
+    with tempfile.TemporaryDirectory() as home:
+        oauth.set_codex_home(home)
+        try:
+            check(oauth.supported_efforts("gpt-levels") is None, "unknown before")
+            oauth.remember_catalog(catalog)
+            check(
+                oauth.supported_efforts("gpt-levels") == ("low", "high", "max"),
+                "catalog levels are normalized; Codex's ultra is max",
+            )
+            check(
+                oauth.supported_efforts("gpt-unlisted") is None,
+                "a model without listed levels is not restricted",
+            )
+            Path(home, "models_cache.json").write_text(
+                json.dumps(
+                    {
+                        "models": [
+                            {
+                                "slug": "gpt-local",
+                                "supported_reasoning_levels": [{"effort": "medium"}],
+                            }
+                        ]
+                    }
+                )
+            )
+            check(
+                oauth.supported_efforts("gpt-local") == ("medium",),
+                "local Codex's cached catalog fills in before the live one",
+            )
+        finally:
+            oauth._catalog_efforts.clear()
+            oauth.set_codex_home(None)
+
+
 def test_usage_schemas() -> None:
     print("\n=== Usage protocol ===")
     current = {
@@ -271,6 +325,7 @@ def test_error_classification() -> None:
 if __name__ == "__main__":
     test_models()
     test_client_identity()
+    test_model_reasoning_levels()
     test_usage_schemas()
     test_error_classification()
     print()

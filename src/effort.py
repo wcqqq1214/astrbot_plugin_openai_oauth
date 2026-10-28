@@ -9,9 +9,9 @@ from astrbot.api import sp
 from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.star import Context
 
-from . import runtime
+from . import oauth, runtime
 
-_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+_EFFORT_LEVELS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 _SESSION_EFFORT_KEY = "openai_oauth_reasoning_effort"
 
 
@@ -19,7 +19,22 @@ def _normalize_effort(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     normalized = value.strip().lower()
+    if normalized == "ultra":
+        # Codex CLI's name for the top level, which the backend calls "max".
+        normalized = "max"
     return normalized if normalized in _EFFORT_LEVELS else None
+
+
+def _provider_model(provider: Any) -> str | None:
+    getter = getattr(provider, "get_model", None)
+    model = getter() if callable(getter) else None
+    if not model:
+        model = getattr(provider, "provider_config", {}).get("model")
+    return model if isinstance(model, str) and model else None
+
+
+def _model_efforts(provider: Any) -> tuple[str, ...] | None:
+    return oauth.supported_efforts(_provider_model(provider))
 
 
 async def _get_session_effort(session_id: Any) -> str | None:
@@ -99,7 +114,7 @@ async def handle_effort(
             message = "当前会话未设置推理强度，将使用模型默认行为。"
         await event.send(
             MessageChain().message(
-                f"{message}\n可用值：{', '.join(_EFFORT_LEVELS)}\n"
+                f"{message}\n可用值：{', '.join(_model_efforts(provider) or _EFFORT_LEVELS)}\n"
                 "用法：/effort <值>；/effort default 恢复模型默认值。"
             )
         )
@@ -123,11 +138,12 @@ async def handle_effort(
         return
 
     effort = _normalize_effort(requested)
-    if effort is None:
+    supported = _model_efforts(provider)
+    if effort is None or (supported is not None and effort not in supported):
         await event.send(
             MessageChain().message(
                 f"不支持的推理强度：{requested}\n"
-                f"可用值：{', '.join(_EFFORT_LEVELS)}，或使用 default。"
+                f"可用值：{', '.join(supported or _EFFORT_LEVELS)}，或使用 default。"
             )
         )
         return

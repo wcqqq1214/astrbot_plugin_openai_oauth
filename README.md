@@ -101,7 +101,8 @@ AstrBot 的模型配置中始终只有一个 **OpenAI Subscribe** 来源，多�
 | `/effort high` | 调整当前会话的思考强度，下次请求生效。 |
 | `/effort default` | 恢复模型默认设置。 |
 
-思考强度可以不设。可选值为 `low`、`medium`、`high`、`xhigh`、`max`。
+思考强度可以不设。可选值为 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，
+实际以当前模型支持的为准；`/effort` 会列出当前模型可用的值。
 要给模型设置默认值，在模型配置的 **自定义请求体参数 → Reasoning Effort** 中填写并保存。
 会话命令只影响当前会话，不会修改其他会话或模型默认值。
 

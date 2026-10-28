@@ -105,7 +105,9 @@ The next request tries the preferred account again. If none are available, it fa
 | `/effort high` | Changes this conversation’s effort for the next request. |
 | `/effort default` | Restores the model default. |
 
-Reasoning effort is optional. Choose `low`, `medium`, `high`, `xhigh`, or `max`.
+Reasoning effort is optional. Choose `none`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, or `max`, as far as the current model supports it; `/effort` lists the
+model's own levels.
 To set a model default, enter the value under **Custom request body parameters →
 Reasoning Effort** in its settings and save. Conversation commands leave other
 conversations and model defaults unchanged.

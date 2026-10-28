@@ -259,6 +259,70 @@ def _catalog_model_id(item: dict) -> str:
     return ""
 
 
+# Reasoning levels each model accepts, from the live catalog. A level the model
+# does not list is rejected by the backend with HTTP 400.
+_catalog_efforts: dict[str, tuple[str, ...]] = {}
+_local_catalog: tuple[Path, int, dict[str, tuple[str, ...]]] | None = None
+
+
+def _effort_name(value: str) -> str:
+    # Codex CLI calls the top level "ultra" and sends it as "max".
+    value = value.strip().lower()
+    return "max" if value == "ultra" else value
+
+
+def _catalog_efforts_by_model(data: Any) -> dict[str, tuple[str, ...]]:
+    result: dict[str, tuple[str, ...]] = {}
+    for item in _catalog_items(data):
+        model_id = _catalog_model_id(item)
+        levels = item.get("supported_reasoning_levels")
+        if not model_id or not isinstance(levels, list):
+            continue
+        efforts = tuple(
+            dict.fromkeys(
+                _effort_name(level["effort"])
+                for level in levels
+                if isinstance(level, dict)
+                and isinstance(level.get("effort"), str)
+                and level["effort"].strip()
+            )
+        )
+        if efforts:
+            result[model_id] = efforts
+    return result
+
+
+def remember_catalog(data: Any) -> None:
+    """Keep the reasoning levels a fetched catalog reports for each model."""
+    _catalog_efforts.update(_catalog_efforts_by_model(data))
+
+
+def supported_efforts(model: Any) -> tuple[str, ...] | None:
+    """Return a model's reasoning levels when a catalog has listed them.
+
+    The live catalog is fetched when models are listed; local Codex keeps the
+    same catalog in ``models_cache.json``, which covers the time before that.
+    """
+    global _local_catalog
+    if not isinstance(model, str) or not model:
+        return None
+    if model in _catalog_efforts:
+        return _catalog_efforts[model]
+    home = (
+        _codex_home
+        or Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
+    )
+    path = home / "models_cache.json"
+    try:
+        mtime = path.stat().st_mtime_ns
+        if _local_catalog is None or _local_catalog[:2] != (path, mtime):
+            parsed = _catalog_efforts_by_model(json.loads(path.read_text("utf-8")))
+            _local_catalog = (path, mtime, parsed)
+    except (OSError, ValueError):
+        return None
+    return _local_catalog[2].get(model)
+
+
 def extract_model_ids(data: Any) -> list[str]:
     """Defensively extract one identifier per visible model from /codex/models."""
     ids: list[str] = []
@@ -300,7 +364,9 @@ async def fetch_models(
             if classify_codex_error(exc) == "credential":
                 raise CredentialExpiredError() from exc
             raise
-        return extract_model_ids(resp.json())
+        data = resp.json()
+        remember_catalog(data)
+        return extract_model_ids(data)
     finally:
         await client.aclose()
 

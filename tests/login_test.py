@@ -560,6 +560,49 @@ def test_effort_command() -> None:
     check("high" in text, "/effort shows the current session override")
     check("不支持" in text, "/effort rejects unsupported values")
 
+    limited_provider = _Provider(runtime._PROVIDER_TYPE)
+    limited_provider.provider_config["model"] = "gpt-limited"
+    limited_event = _Event()
+    limited_sp = SimpleNamespace(
+        get_async=mock.AsyncMock(return_value=None),
+        put_async=mock.AsyncMock(),
+        remove_async=mock.AsyncMock(),
+    )
+    oauth.remember_catalog(
+        {
+            "models": [
+                {
+                    "slug": "gpt-limited",
+                    "supported_reasoning_levels": [
+                        {"effort": "low"},
+                        {"effort": "high"},
+                    ],
+                }
+            ]
+        }
+    )
+
+    async def run_limited() -> None:
+        with mock.patch.object(effort, "sp", limited_sp):
+            limited = SimpleNamespace(context=_Context(limited_provider))
+            await plugin.OpenAI_OAuth_Plugin.effort(limited, limited_event, "max")
+            await plugin.OpenAI_OAuth_Plugin.effort(limited, limited_event)
+            await plugin.OpenAI_OAuth_Plugin.effort(limited, limited_event, "ultra")
+
+    try:
+        asyncio.run(run_limited())
+    finally:
+        oauth._catalog_efforts.clear()
+    limited_text = sent_text(limited_event)
+    check(
+        limited_sp.put_async.await_count == 0,
+        "/effort rejects a level the current model does not list",
+    )
+    check(
+        "可用值：low, high" in limited_text,
+        "/effort lists the current model's own levels",
+    )
+
     selected_event = _Event()
     selected_event.extras["selected_provider"] = "OpenAI Subscribe/gpt-5.6-luna"
     selected_context = _Context(

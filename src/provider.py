@@ -467,6 +467,19 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
 
         _drop_unsupported_params(payloads, extra_body)
         effective_session_effort = effort._normalize_effort(session_effort)
+        supported = oauth.supported_efforts(payloads.get("model"))
+        if (
+            effective_session_effort
+            and supported is not None
+            and effective_session_effort not in supported
+        ):
+            logger.warning(
+                "OpenAI Codex model %s does not support reasoning effort %s; "
+                "using the model setting.",
+                payloads.get("model"),
+                effective_session_effort,
+            )
+            effective_session_effort = None
         if effective_session_effort:
             existing_reasoning = extra_body.get("reasoning")
             reasoning = (

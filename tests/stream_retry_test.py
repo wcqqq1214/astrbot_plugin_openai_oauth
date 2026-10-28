@@ -130,6 +130,25 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("prompt_cache_key", requests[0])
         self.assertNotIn("session-id", self.headers[0])
 
+    async def test_session_effort_the_model_does_not_list_is_skipped(self):
+        oauth.remember_catalog(
+            {
+                "models": [
+                    {
+                        "slug": "limited",
+                        "supported_reasoning_levels": [{"effort": "low"}],
+                    }
+                ]
+            }
+        )
+        self.addCleanup(oauth._catalog_efforts.clear)
+        requests, _, error, _ = await self.run_stream(
+            [SUCCESS], payload={"model": "limited", "input": []}
+        )
+        self.assertIsNone(error)
+        # The model's own "low" setting applies instead of the session's "high".
+        self.assertEqual(requests[0]["reasoning"]["effort"], "low")
+
     async def test_requests_encrypted_reasoning_and_summary(self):
         requests, _, _, _ = await self.run_stream([SUCCESS])
         self.assertEqual(requests[0]["include"], ["reasoning.encrypted_content"])
