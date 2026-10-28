@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import time
 from collections.abc import AsyncGenerator, Callable
@@ -257,6 +258,36 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         finally:
             await transport.aclose()
 
+    @staticmethod
+    def _prompt_cache_key(session_id: Any, payloads: dict[str, Any]) -> str | None:
+        """Name the conversation so the backend reuses its cached prompt prefix.
+
+        Codex sends its thread ID. An AstrBot session is the closest stable
+        equivalent and survives context truncation; without one, the start of
+        the conversation (instructions and input up to the first user message),
+        which every later turn repeats, identifies it. Only a hash is sent.
+        """
+        digest = hashlib.sha256()
+        if isinstance(session_id, str) and session_id:
+            digest.update(b"astrbot-session\0")
+            digest.update(session_id.encode())
+            digest.update(b"\0")
+            digest.update(str(payloads.get("model", "")).encode())
+        else:
+            digest.update(str(payloads.get("instructions", "")).encode())
+            found_user = False
+            for item in payloads.get("input") or []:
+                digest.update(
+                    json.dumps(item, sort_keys=True, ensure_ascii=False).encode()
+                )
+                if isinstance(item, dict) and item.get("role") == "user":
+                    found_user = True
+                    break
+            if not found_user:
+                return None
+        value = digest.hexdigest()
+        return f"{value[:8]}-{value[8:12]}-{value[12:16]}-{value[16:20]}-{value[20:32]}"
+
     def _convert_chat_messages_to_response_input(
         self, messages: list[dict]
     ) -> list[dict]:
@@ -323,6 +354,17 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         payloads.pop("conversation", None)
         payloads["store"] = False
 
+        # The backend finds a conversation's cached prompt by Codex's session
+        # headers rather than by the body's key alone.
+        cache_key = extra_body.get("prompt_cache_key") or payloads.get(
+            "prompt_cache_key"
+        )
+        session_headers = (
+            {"session-id": cache_key, "thread-id": cache_key}
+            if isinstance(cache_key, str) and cache_key
+            else {}
+        )
+
         max_attempts = coerce_int_config(
             request_max_retries,
             default=REQUEST_RETRY_ATTEMPTS,
@@ -343,6 +385,7 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
                 **payloads,
                 stream=True,
                 extra_body=extra_body,
+                **({"extra_headers": session_headers} if session_headers else {}),
             )
 
         while attempts < max_attempts:
@@ -936,6 +979,14 @@ class ProviderOpenAICodex(ProviderOpenAIResponses):
         )
         if func_tool and not func_tool.empty():
             payloads["tool_choice"] = tool_choice
+        custom_extra_body = self.provider_config.get("custom_extra_body")
+        if not (
+            isinstance(custom_extra_body, dict)
+            and custom_extra_body.get("prompt_cache_key")
+        ):
+            cache_key = self._prompt_cache_key(session_id, payloads)
+            if cache_key:
+                payloads.setdefault("prompt_cache_key", cache_key)
         session_effort = await effort._get_session_effort(session_id)
         emitted = False
         try:

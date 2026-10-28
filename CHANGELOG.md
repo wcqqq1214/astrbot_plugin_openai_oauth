@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Send a stable `prompt_cache_key` and Codex's session headers per AstrBot session so long conversations reuse the backend's cached prompt, saving allowance and first-token latency.
+
 ### Changed
 
 - Identify as a current Codex CLI version (User-Agent, `version` header and catalog query), following a newer local Codex when present, so the backend serves its newest models. The old placeholder User-Agent saved in existing sources upgrades automatically; custom values are kept.

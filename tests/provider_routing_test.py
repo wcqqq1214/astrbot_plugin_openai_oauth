@@ -415,6 +415,22 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.reason, "startup_timeout")
         self.assertEqual(self.requested(), ["local", "other"])
 
+    async def test_session_names_prompt_cache_key(self):
+        self.provider._prepare_chat_payload = AsyncMock(
+            return_value=({"model": "test-model", "input": []}, None)
+        )
+        async for item in self.provider.text_chat_stream(
+            prompt="test", session_id="platform:FriendMessage:42"
+        ):
+            self.output.append(item)
+        request = self.requests[-1][1]
+        key = self.provider._prompt_cache_key(
+            "platform:FriendMessage:42", {"model": "test-model"}
+        )
+        self.assertEqual(json.loads(request.content)["prompt_cache_key"], key)
+        self.assertEqual(request.headers["session-id"], key)
+        self.assertEqual(request.headers["thread-id"], key)
+
     async def test_bad_request_does_not_rotate(self):
         self.outcomes["local"] = [400]
         with self.assertRaises(BadRequestError):

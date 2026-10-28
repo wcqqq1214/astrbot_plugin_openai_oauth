@@ -39,8 +39,11 @@ SUCCESS = [
 
 
 class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
-    async def run_stream(self, attempts, *, limit=None, before_attempt=None):
+    async def run_stream(
+        self, attempts, *, limit=None, before_attempt=None, payload=None
+    ):
         requests = []
+        self.headers = []
         responses = []
         output = []
 
@@ -57,6 +60,7 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
         def handle(request):
             self.assertTrue(all(response.is_closed for response in responses))
             requests.append(json.loads(request.content))
+            self.headers.append(request.headers)
             attempt = attempts[min(len(requests) - 1, len(attempts) - 1)]
             if isinstance(attempt, int):
                 response = httpx.Response(
@@ -86,7 +90,7 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
                 try:
                     async for item in provider._query_stream(
                         client,
-                        {"model": "test", "input": [], "store": True},
+                        payload or {"model": "test", "input": [], "store": True},
                         None,
                         request_max_retries=limit,
                         session_effort="high",
@@ -111,6 +115,37 @@ class StreamRetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(requests[1]["store"])
         self.assertEqual(output[-1].completion_text, "ok")
         self.assertEqual(delays, [1])
+
+    async def test_prompt_cache_key_names_the_codex_session(self):
+        requests, _, error, _ = await self.run_stream(
+            [SUCCESS],
+            payload={"model": "test", "input": [], "prompt_cache_key": "conv-1"},
+        )
+        self.assertIsNone(error)
+        self.assertEqual(requests[0]["prompt_cache_key"], "conv-1")
+        self.assertEqual(self.headers[0]["session-id"], "conv-1")
+        self.assertEqual(self.headers[0]["thread-id"], "conv-1")
+
+        requests, _, _, _ = await self.run_stream([SUCCESS])
+        self.assertNotIn("prompt_cache_key", requests[0])
+        self.assertNotIn("session-id", self.headers[0])
+
+    def test_prompt_cache_key_is_stable_per_conversation(self):
+        key = module.ProviderOpenAICodex._prompt_cache_key
+        payload = {"model": "m", "input": [{"role": "user", "content": "hi"}]}
+        self.assertEqual(key("umo:1", payload), key("umo:1", {"model": "m"}))
+        self.assertNotEqual(key("umo:1", payload), key("umo:2", payload))
+        self.assertNotIn("umo", key("umo:1", payload))
+        start = [
+            {"role": "developer", "content": "rules"},
+            {"role": "user", "content": "first"},
+        ]
+        later = {"model": "m", "input": [*start, {"role": "user", "content": "x"}]}
+        self.assertEqual(key(None, {"model": "m", "input": start}), key(None, later))
+        self.assertIsNone(key(None, {"model": "m", "input": start[:1]}))
+        self.assertRegex(
+            key(None, later), r"^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+        )
 
     async def test_disabled_before_retry_prevents_another_http_request(self):
         count = 0
