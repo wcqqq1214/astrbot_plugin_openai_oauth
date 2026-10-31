@@ -4,9 +4,9 @@ The provider screenshots were captured on 2026-10-16. The overview was refreshed
 from main commit `87d0fa6dfb67dd5dfe08233897eb3d03d861e9d2`; the settings dialog
 was captured from `1d173430f47c45e2e37745104bded81a4e059aa2`.
 
-- `providers-overview-zh.png` / `providers-overview-en.png`: two independent
+- `providers-overview-zh.webp` / `providers-overview-en.webp`: two independent
   allowance panels expanded, with source settings and enable controls visible.
-- `provider-settings-zh.png` / `provider-settings-en.png`: the device-account
+- `provider-settings-zh.webp` / `provider-settings-en.webp`: the device-account
   settings dialog with Automatic fallback selected but not saved.
 
 These are browser captures of the unchanged production HTML, CSS, JavaScript,
