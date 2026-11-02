@@ -55,6 +55,8 @@ AstrBot shows one **OpenAI Subscribe** source. Manage all accounts in
 
 The source ID is fixed to `OpenAI Subscribe` and cannot be renamed. Refresh any old account source editors left open before upgrading.
 
+The plugin creates this source automatically, so it is not listed in **Add Provider**. To add models, select the existing **OpenAI Subscribe** source.
+
 - **Default account** is used by new models and models set to **Follow default account**.
 - **Account selection** can pin each model to an account or follow the default. Changes save immediately and apply to the next request. Migrated models retain their previous account.
 

@@ -12,6 +12,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 # Locate the AstrBot checkout (next to this repository unless ASTRBOT_ROOT is set).
 REPO_ROOT = os.path.abspath(
@@ -24,6 +25,10 @@ os.chdir(REPO_ROOT)  # Make the `data` namespace package importable.
 from astrbot.core.provider.register import (
     provider_cls_map,
     provider_registry,
+)
+from astrbot.dashboard.services.config_service import (
+    ConfigDisplayService,
+    ProviderConfigService,
 )
 from astrbot.dashboard.services.config_service import (
     provider_registry as cfg_registry,
@@ -76,6 +81,30 @@ def check_entry_point(module) -> None:
     )
 
 
+def check_source_hidden_from_add_provider(runtime) -> None:
+    source = runtime._build_default_source_config()
+    lifecycle = SimpleNamespace(
+        astrbot_config={"provider_sources": [source], "provider": []},
+        provider_manager=None,
+    )
+    schema = ProviderConfigService(lifecycle).get_provider_schema()
+    templates = schema["config_schema"]["provider"]["config_template"]
+    check(PROVIDER_TYPE not in templates, "Add Provider omits the subscription source")
+    check(bool(templates), "other provider templates remain available")
+    check(
+        source in schema["provider_sources"],
+        "the existing subscription source remains available for models",
+    )
+    config = asyncio.run(ConfigDisplayService(lifecycle).get_astrbot_config())
+    check(
+        PROVIDER_TYPE
+        not in config["metadata"]["provider_group"]["metadata"]["provider"][
+            "config_template"
+        ],
+        "the legacy dashboard also omits the subscription template",
+    )
+
+
 def main() -> int:
     print("=== 1. The provider is absent before the plugin loads ===")
     check(
@@ -104,18 +133,9 @@ def main() -> int:
             meta.provider_display_name == "OpenAI Subscribe",
             f"provider_display_name: {meta.provider_display_name}",
         )
-        check(meta.default_config_tmpl is not None, "default_config_tmpl exists")
         check(
-            (meta.default_config_tmpl or {}).get("provider") == "openai",
-            "config template has provider=openai (dashboard icon lookup)",
-        )
-        check(
-            (meta.default_config_tmpl or {}).get("provider_type") == "chat_completion",
-            "config template has provider_type=chat_completion (dashboard tab filter)",
-        )
-        check(
-            "key" in (meta.default_config_tmpl or {}),
-            "config template has a key field",
+            meta.default_config_tmpl is None,
+            "the plugin-managed source has no manual-add template",
         )
         check(meta.cls_type is not None, "cls_type is bound")
     else:
@@ -130,6 +150,7 @@ def main() -> int:
         cfg_registry is provider_registry,
         "config_service and the register module share one registry object",
     )
+    check_source_hidden_from_add_provider(runtime)
 
     print("\n=== 5. The plugin Star is registered ===")
     from astrbot.core.star.star import star_map
@@ -145,6 +166,10 @@ def main() -> int:
     from astrbot.core.star.star_manager import PluginManager
 
     first_cls = provider_cls_map[PROVIDER_TYPE].cls_type
+    # Simulate upgrading from a version that advertised manual source creation.
+    provider_cls_map[
+        PROVIDER_TYPE
+    ].default_config_tmpl = runtime._build_default_source_config()
     prefix = "data.plugins.astrbot_plugin_openai_oauth"
     metadata = star_map[module.__name__]
     metadata.root_dir_name = "astrbot_plugin_openai_oauth"
@@ -172,6 +197,7 @@ def main() -> int:
     )
     if reload_ok:
         check_entry_point(reloaded)
+        check_source_hidden_from_add_provider(runtime)
 
     print("\n=== 7. Native Plugin Page and server-side persistence ===")
     root = Path(__file__).resolve().parents[1]

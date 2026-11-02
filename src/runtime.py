@@ -59,23 +59,6 @@ def _build_default_source_config() -> dict[str, Any]:
     }
 
 
-def _default_provider_template() -> dict[str, Any]:
-    source = _build_default_source_config()
-    return {
-        key: source[key]
-        for key in (
-            "provider",
-            "provider_type",
-            "key",
-            "model",
-            "proxy",
-            "originator",
-            "user_agent",
-        )
-        if key in source
-    } | {"model": "gpt-5.4-mini"}
-
-
 def get_coordinator() -> LocalCredentialCoordinator:
     global _credential_coordinator
     cfg_mgr = _config_mgr

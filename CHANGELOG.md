@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Remove OpenAI Subscribe from the Add Provider list because the plugin creates its source automatically. Clear the old manual-add template when upgrading or reloading the plugin while preserving the existing source and models.
+
 ## [v2.3.0] - 2026-10-28
 
 ### Added

@@ -68,25 +68,27 @@ def _attempt_limit(request_max_retries: int | None) -> int:
     )
 
 
-def _register_provider_adapter_if_absent(cls: type) -> type:
+def _register_subscription_adapter(cls: type) -> type:
     """Register the provider once and refresh its class on plugin reload.
 
     AstrBot keeps ``provider_cls_map`` when a plugin module is reloaded. Avoiding
     duplicate registration is necessary, but the metadata must still point to the
     newly imported class or provider instances will continue using stale code.
+    The plugin creates its own source, so no manual-add template is published.
     """
     if runtime.PROVIDER_TYPE not in provider_cls_map:
-        return register_provider_adapter(
+        register_provider_adapter(
             runtime.PROVIDER_TYPE,
             "OpenAI 订阅登录 (Codex OAuth) Provider",
             provider_display_name="OpenAI Subscribe",
-            default_config_tmpl=runtime._default_provider_template(),
         )(cls)
-    provider_cls_map[runtime.PROVIDER_TYPE].cls_type = cls
+    metadata = provider_cls_map[runtime.PROVIDER_TYPE]
+    metadata.cls_type = cls
+    metadata.default_config_tmpl = None
     return cls
 
 
-@_register_provider_adapter_if_absent
+@_register_subscription_adapter
 class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
     """ChatGPT subscription provider backed by the Codex OAuth flow.
 

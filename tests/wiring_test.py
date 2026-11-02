@@ -170,9 +170,7 @@ def test_hot_reload_and_offline_models() -> None:
 
     metadata.cls_type = _StaleProvider
     try:
-        returned = provider_module._register_provider_adapter_if_absent(
-            ProviderOpenAICodex
-        )
+        returned = provider_module._register_subscription_adapter(ProviderOpenAICodex)
         check(returned is ProviderOpenAICodex, "hot reload returns the new class")
         check(
             metadata.cls_type is ProviderOpenAICodex, "hot reload replaces stale class"
