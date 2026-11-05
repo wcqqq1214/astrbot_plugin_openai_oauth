@@ -26,7 +26,15 @@ from astrbot.core.provider.sources.request_retry import (
 )
 from astrbot.core.utils.config_number import coerce_int_config
 
-from . import codex_request, effort, messages, oauth, runtime
+from . import (
+    astrbot_image_bridge,
+    codex_request,
+    effort,
+    image_input,
+    messages,
+    oauth,
+    runtime,
+)
 from . import usage as usage_service
 from .codex_stream import CodexStreamMixin
 from .credential_store import (
@@ -295,9 +303,9 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         content. The backend also rejects role "system" in input; "developer"
         carries the same meaning.
         """
-        return codex_request.shape_replayed_input(
-            super()._convert_chat_messages_to_response_input(messages)
-        )
+        items = super()._convert_chat_messages_to_response_input(messages)
+        image_input.restore_original_detail(messages, items)
+        return codex_request.shape_replayed_input(items)
 
     async def _query_stream(
         self,
@@ -748,13 +756,16 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
             prompt,
             image_urls,
             audio_urls,
-            contexts,
+            astrbot_image_bridge.shape_messages(
+                self._ensure_message_to_dicts(contexts), codex=True
+            ),
             system_prompt,
             tool_calls_result,
             model=model,
             extra_user_content_parts=extra_user_content_parts,
             **kwargs,
         )
+        await image_input.resize_input_images(payloads["input"])
         if func_tool and not func_tool.empty():
             payloads["tool_choice"] = tool_choice
         custom_extra_body = self.provider_config.get("custom_extra_body")

@@ -12,7 +12,7 @@ from astrbot.api.star import Context
 from astrbot.core.config.default import CONFIG_METADATA_2
 from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
 
-from . import messages, oauth, source_editor
+from . import astrbot_image_bridge, messages, oauth, source_editor
 from .credential_seal import FernetCredentialSealer
 from .credential_store import CredentialError
 from .local_codex import LocalCodexStore, LocalCredentialCoordinator
@@ -33,6 +33,7 @@ _config_mgr: Any = None
 _credential_coordinator: LocalCredentialCoordinator | None = None
 _local_codex_store: LocalCodexStore | None = None
 _remove_source_guard: Any = None
+_remove_image_bridge: Any = None
 _credential_sealer: FernetCredentialSealer | None = None
 
 
@@ -130,6 +131,7 @@ def configure(context: Context, config: AstrBotConfig) -> None:
 
 async def initialize(context: Context) -> None:
     """Migrate storage and replace model instances retained across plugin reloads."""
+    global _remove_image_bridge
     from .provider import ProviderOpenAICodex
 
     coordinator = get_coordinator()
@@ -168,11 +170,15 @@ async def initialize(context: Context) -> None:
     finally:
         if selected_id in instances:
             manager.curr_provider_inst = instances[selected_id]
+    _remove_image_bridge = astrbot_image_bridge.install(PROVIDER_TYPE)
 
 
 def terminate() -> None:
-    """Remove the dashboard guard when this plugin is unloaded."""
-    global _remove_source_guard
+    """Remove AstrBot integration hooks when the plugin is unloaded."""
+    global _remove_source_guard, _remove_image_bridge
+    if _remove_image_bridge is not None:
+        _remove_image_bridge()
+        _remove_image_bridge = None
     if _remove_source_guard is not None:
         _remove_source_guard()
         _remove_source_guard = None
