@@ -105,8 +105,14 @@ class OpenAI_OAuth_Plugin(Star):
         Args:
             prompt(string): A description of the image to generate.
         """
+        invocation = image_generation.tool_invocation.get()
         error = await self._send_image(
-            event, image_generation.tool_account.get(), prompt
+            event,
+            invocation.account if invocation is not None else None,
+            prompt,
+            runner_timeout=invocation.runner_timeout
+            if invocation is not None
+            else None,
         )
         return error or messages.text("image.sent")
 
@@ -115,6 +121,8 @@ class OpenAI_OAuth_Plugin(Star):
         event: AstrMessageEvent,
         account: image_generation.ChatAccount | None,
         prompt: str,
+        *,
+        runner_timeout: float | None = None,
     ) -> str | None:
         if not self.config.get("image_enabled", False):
             return messages.text("image.disabled")
@@ -130,7 +138,8 @@ class OpenAI_OAuth_Plugin(Star):
             return messages.text("image.no_account")
         try:
             timeout = image_generation.timeout_for_session(
-                self.context.get_config(umo=event.unified_msg_origin)
+                self.context.get_config(umo=event.unified_msg_origin),
+                runner_timeout=runner_timeout,
             )
             async with asyncio.timeout(timeout):
                 image = await image_generation.generate(

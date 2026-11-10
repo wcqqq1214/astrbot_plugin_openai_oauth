@@ -170,7 +170,7 @@ def install(provider_type: str):
     from astrbot.core import astr_main_agent
     from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
 
-    from .image_generation import tool_account
+    from .image_generation import ToolInvocation, tool_invocation
 
     state = getattr(ToolLoopAgentRunner, _STATE_ATTR, None)
     first_install = state is None
@@ -255,17 +255,22 @@ def install(provider_type: str):
 
     async def tool_scope(original, runner, request, response, *args, **kwargs):
         binding = getattr(response, "_codex_image_account", None)
+        invocation = (
+            ToolInvocation(binding, runner.run_context.tool_call_timeout)
+            if binding is not None
+            else None
+        )
         async with aclosing(
             original(runner, request, response, *args, **kwargs)
         ) as stream:
             while True:
-                token = tool_account.set(binding)
+                token = tool_invocation.set(invocation)
                 try:
                     item = await anext(stream)
                 except StopAsyncIteration:
                     return
                 finally:
-                    tool_account.reset(token)
+                    tool_invocation.reset(token)
                 yield item
 
     generation = object()

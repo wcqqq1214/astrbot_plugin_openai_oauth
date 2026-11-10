@@ -15,6 +15,7 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from zlib import compress, crc32
 
 sys.path.insert(0, str(Path(__file__).parent))
 import httpx
@@ -513,24 +514,43 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         await self.collect()
         account = self.output[-1]._codex_image_account
         png = sample_png()
+        idat = png.index(b"IDAT")
+        length = int.from_bytes(png[idat - 4 : idat], "big")
+        empty_data = compress(b"")
+        chunk = b"IDAT" + empty_data
+        missing_pixels = (
+            png[: idat - 4]
+            + len(empty_data).to_bytes(4, "big")
+            + chunk
+            + crc32(chunk).to_bytes(4, "big")
+            + png[idat + 8 + length :]
+        )
         corrupt = bytearray(png)
-        corrupt[png.index(b"IDAT") + 4] ^= 1
+        corrupt[idat + 4] ^= 1
         self.outcomes["other"] = [
             image_response(png[:8]),
             image_response(png[:-4]),
             image_response(bytes(corrupt)),
+            image_response(missing_pixels),
+            image_response(png),
             image_response(png),
         ]
         star, event = await self.image_entrypoints()
-        token = image_generation.tool_account.set(account)
+        token = image_generation.tool_invocation.set(
+            image_generation.ToolInvocation(account, 120)
+        )
         try:
-            for _ in range(3):
+            for _ in range(4):
+                result = await star.codex_generate_image(event, "Draw a cat")
+                self.assertEqual(result, plugin.messages.text("image.failed"))
+                event.send.assert_not_awaited()
+            with patch.object(image_generation, "MAX_IMAGE_PIXELS", 5):
                 result = await star.codex_generate_image(event, "Draw a cat")
                 self.assertEqual(result, plugin.messages.text("image.failed"))
                 event.send.assert_not_awaited()
             result = await star.codex_generate_image(event, "Draw a cat")
         finally:
-            image_generation.tool_account.reset(token)
+            image_generation.tool_invocation.reset(token)
         self.assertEqual(result, plugin.messages.text("image.sent"))
         self.assertEqual(
             event.send.await_args.args[0].chain[0].file,
@@ -541,7 +561,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.outcomes["local"] = ["quota"]
         await self.collect()
         account = self.output[-1]._codex_image_account
-        self.outcomes["other"] = ["wait", "wait"]
+        self.outcomes["other"] = ["wait", "wait", "wait"]
         limit = 1
         runner = {"config": {"misc": {"tool_call_timeout": limit}}}
         star, event = await self.image_entrypoints({"agent": runner})
@@ -550,16 +570,25 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.send.await_args.args[0].chain[0].text, expected)
         event.send.reset_mock()
         star.context.get_config = lambda *, umo: {"agent_runner": runner}
-        token = image_generation.tool_account.set(account)
+        token = image_generation.tool_invocation.set(
+            image_generation.ToolInvocation(account, limit)
+        )
         try:
             result = await asyncio.wait_for(
                 star.codex_generate_image(event, "Draw a cat"), timeout=limit
             )
+            self.assertEqual(result, expected)
+            runner["config"]["misc"]["tool_call_timeout"] = 300
+            result = await asyncio.wait_for(
+                star.codex_generate_image(event, "Draw a cat"), timeout=limit
+            )
         finally:
-            image_generation.tool_account.reset(token)
+            image_generation.tool_invocation.reset(token)
         self.assertEqual(result, expected)
         event.send.assert_not_awaited()
-        self.assertEqual(self.requested(), ["local", "other", "other", "other"])
+        self.assertEqual(
+            self.requested(), ["local", "other", "other", "other", "other"]
+        )
 
     async def test_all_disabled_is_actionable_without_reenabling(self):
         for sid in ("local", "same", "other"):

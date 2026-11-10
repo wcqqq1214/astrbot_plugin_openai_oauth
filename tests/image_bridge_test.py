@@ -100,19 +100,29 @@ class ImageBridgeTests(unittest.IsolatedAsyncioTestCase):
 
         async def read_binding():
             await asyncio.sleep(0)
-            return generation.tool_account.get()
+            return generation.tool_invocation.get()
 
-        async def consume(account):
+        async def consume(invocation):
             response = LLMResponse(role="assistant")
-            if account is not None:
-                response._codex_image_account = account
-            stream = state["tool_scope"](run_tool, None, None, response)
+            runner = None
+            if invocation is not None:
+                response._codex_image_account = invocation.account
+                runner = SimpleNamespace(
+                    run_context=SimpleNamespace(
+                        tool_call_timeout=invocation.runner_timeout
+                    )
+                )
+            stream = state["tool_scope"](run_tool, runner, None, response)
             output = [value async for value in stream]
-            self.assertIsNone(generation.tool_account.get())
+            self.assertIsNone(generation.tool_invocation.get())
             return output
 
-        first = generation.ChatAccount("model", "first", "first-account")
-        second = generation.ChatAccount("model", "second", "second-account")
+        first = generation.ToolInvocation(
+            generation.ChatAccount("model", "first", "first-account"), 120
+        )
+        second = generation.ToolInvocation(
+            generation.ChatAccount("model", "second", "second-account"), 60
+        )
         self.assertEqual(
             await asyncio.gather(consume(first), consume(second), consume(None)),
             [[first, first], [second, second], [None, None]],

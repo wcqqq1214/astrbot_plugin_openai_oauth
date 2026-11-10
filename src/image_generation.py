@@ -26,20 +26,27 @@ IMAGE_MODEL = "gpt-image-2"
 TOOL_NAME = "codex_generate_image"
 SIZES = ("auto", "1024x1024", "1024x1536", "1536x1024")
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+MAX_IMAGE_PIXELS = 16 * 1024 * 1024
 MAX_TIMEOUT_SECONDS = 300
 _PNG_END = b"\x00\x00\x00\x00IEND\xaeB\x60\x82"
 
 
-def timeout_for_session(config: dict) -> float:
+def _valid_timeout(timeout: object) -> bool:
+    return (
+        isinstance(timeout, (int, float))
+        and not isinstance(timeout, bool)
+        and isfinite(timeout)
+        and timeout > 0
+    )
+
+
+def timeout_for_session(config: dict, *, runner_timeout: float | None = None) -> float:
     runner = config.get("agent", config.get("agent_runner", {}))
     timeout = runner.get("config", {}).get("misc", {}).get("tool_call_timeout", 120)
-    if (
-        isinstance(timeout, bool)
-        or not isinstance(timeout, (int, float))
-        or not isfinite(timeout)
-        or timeout <= 0
-    ):
+    if not _valid_timeout(timeout):
         timeout = 120
+    if runner_timeout is not None and _valid_timeout(runner_timeout):
+        timeout = min(timeout, runner_timeout)
     # Leave time for AstrBot to receive the tool result before its own deadline.
     return min(MAX_TIMEOUT_SECONDS, timeout - min(1.0, timeout / 10))
 
@@ -51,8 +58,14 @@ class ChatAccount:
     identity: str
 
 
-tool_account: ContextVar[ChatAccount | None] = ContextVar(
-    "codex_image_account", default=None
+@dataclass(frozen=True)
+class ToolInvocation:
+    account: ChatAccount
+    runner_timeout: float | None
+
+
+tool_invocation: ContextVar[ToolInvocation | None] = ContextVar(
+    "codex_image_tool_invocation", default=None
 )
 
 
@@ -169,8 +182,14 @@ def _decode_image(body: bytearray) -> bytes:
         image = base64.b64decode(encoded, validate=True)
         if not image.endswith(_PNG_END):
             raise ValueError("Missing PNG end chunk.")
-        with Image.open(BytesIO(image), formats=("PNG",)) as png:
+        stream = BytesIO(image)
+        with Image.open(stream, formats=("PNG",)) as png:
+            if png.width * png.height > MAX_IMAGE_PIXELS:
+                raise ValueError("PNG exceeds the pixel limit.")
             png.verify()
+        stream.seek(0)
+        with Image.open(stream, formats=("PNG",)) as png:
+            png.load()
     except (
         ValueError,
         TypeError,
