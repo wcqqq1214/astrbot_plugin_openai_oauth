@@ -7,6 +7,8 @@ from collections import defaultdict, deque
 from contextlib import aclosing
 from copy import copy
 from functools import wraps
+from importlib import import_module
+from importlib.util import find_spec
 from weakref import WeakKeyDictionary
 
 from astrbot.core.agent.message import ImageURLPart
@@ -167,7 +169,6 @@ def shape_messages(messages, *, codex: bool):
 
 def install(provider_type: str):
     """Enable stable dispatchers without removing another plugin's wrappers."""
-    from astrbot.core import astr_main_agent
     from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
 
     from .image_generation import ToolInvocation, tool_invocation
@@ -198,6 +199,10 @@ def install(provider_type: str):
         setattr(target, name, dispatch)
 
     if first_install:
+        legacy_module = "astrbot.core.astr_main_agent"
+        astr_main_agent = (
+            import_module(legacy_module) if find_spec(legacy_module) else None
+        )
         if hasattr(astr_main_agent, "_compress_image_for_provider"):
             patch(astr_main_agent, "_compress_image_for_provider", "compress")
         else:

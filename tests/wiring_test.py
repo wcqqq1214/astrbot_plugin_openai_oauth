@@ -10,6 +10,7 @@ import sys
 from base64 import b64decode, b64encode
 from contextlib import ExitStack
 from copy import deepcopy
+from importlib.util import find_spec
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -29,13 +30,17 @@ oauth = importlib.import_module(f"{module.__package__}.src.oauth")
 provider_module = importlib.import_module(f"{module.__package__}.src.provider")
 from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.star import Context
-from astrbot.core import astr_main_agent
 from astrbot.core.message.components import Image as ImageComponent
 from astrbot.core.platform.astrbot_message import AstrBotMessage, MessageMember
 from astrbot.core.platform.message_type import MessageType
 from astrbot.core.platform.platform_metadata import PlatformMetadata
 from astrbot.core.provider.entities import LLMResponse
 from PIL import Image
+
+if find_spec("astrbot.core.astr_agent_runtime") is not None:
+    from astrbot.core.astr_agent_runtime import main_agent
+else:
+    from astrbot.core import astr_main_agent as main_agent
 
 image_bridge = importlib.import_module(f"{module.__package__}.src.astrbot_image_bridge")
 image_input = importlib.import_module(f"{module.__package__}.src.image_input")
@@ -411,15 +416,15 @@ def test_group_chat_image_resize() -> None:
             dispatched.extend(payloads["input"])
             yield LLMResponse(role="assistant", completion_text="Read")
 
-        config = astr_main_agent.MainAgentBuildConfig(
+        config = main_agent.MainAgentBuildConfig(
             tool_call_timeout=60,
             add_cron_tools=False,
             llm_safety_mode=False,
             provider_settings={"image_compress_options": {"max_size": 1280}},
         )
         with ExitStack() as stack:
-            if hasattr(astr_main_agent, "builder"):
-                builder = astr_main_agent.builder
+            if hasattr(main_agent, "builder"):
+                builder = main_agent.builder
                 stack.enter_context(
                     mock.patch.object(
                         builder.persona, "apply_persona", mock.AsyncMock()
@@ -433,14 +438,14 @@ def test_group_chat_image_resize() -> None:
             else:
                 for name in ("_decorate_llm_request", "_apply_kb"):
                     stack.enter_context(
-                        mock.patch.object(astr_main_agent, name, mock.AsyncMock())
+                        mock.patch.object(main_agent, name, mock.AsyncMock())
                     )
             stack.callback(event.cleanup_temporary_local_files)
             stack.callback(image_bridge.install(runtime.PROVIDER_TYPE))
             stack.enter_context(
                 mock.patch.object(provider, "_stream_with_current_credentials", capture)
             )
-            result = await astr_main_agent.build_main_agent(
+            result = await main_agent.build_main_agent(
                 event=event, plugin_context=context, config=config, provider=provider
             )
             assert result is not None

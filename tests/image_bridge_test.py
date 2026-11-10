@@ -11,6 +11,7 @@ import unittest
 from base64 import b64decode
 from copy import deepcopy
 from functools import wraps
+from importlib.util import find_spec
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -23,12 +24,15 @@ REPO_ROOT = os.path.abspath(
 sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)
 
-from astrbot.core import astr_main_agent
 from astrbot.core.agent.message import Message
 from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
 from astrbot.core.provider.entities import LLMResponse, ProviderRequest
 from PIL import Image
 
+legacy_module = "astrbot.core.astr_main_agent"
+astr_main_agent = (
+    importlib.import_module(legacy_module) if find_spec(legacy_module) else None
+)
 bridge = importlib.import_module(
     "data.plugins.astrbot_plugin_openai_oauth.src.astrbot_image_bridge"
 )
