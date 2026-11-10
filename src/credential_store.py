@@ -471,10 +471,13 @@ class CredentialCoordinator:
         *,
         force_refresh: bool = False,
         check_cooldown: bool = True,
+        validate_snapshot: Callable[[CredentialSnapshot], None] | None = None,
     ) -> CredentialSnapshot:
         """Return a current source snapshot, refreshing it once when needed."""
         resolved_source_id = source_id or self.default_source_id
         snapshot = self.read_snapshot(resolved_source_id)
+        if validate_snapshot is not None:
+            validate_snapshot(snapshot)
         if not snapshot.access_token:
             self._states[resolved_source_id] = CredentialStatus("not_logged_in")
             raise CredentialsNotConfiguredError(
@@ -497,6 +500,8 @@ class CredentialCoordinator:
 
         async with self.source_lock(resolved_source_id):
             snapshot = self.read_snapshot(resolved_source_id)
+            if validate_snapshot is not None:
+                validate_snapshot(snapshot)
             if check_cooldown and snapshot.is_cooling_down():
                 status = CredentialStatus(
                     "cooling",

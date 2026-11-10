@@ -10,6 +10,7 @@ import os
 import secrets
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -345,20 +346,28 @@ class LocalCredentialCoordinator(CredentialCoordinator):
         *,
         force_refresh: bool = False,
         check_cooldown: bool = True,
+        validate_snapshot: Callable[[CredentialSnapshot], None] | None = None,
         _switch_attempt: int = 0,
     ) -> CredentialSnapshot:
         source_id = source_id or self.default_source_id
         initial = self.read_snapshot(source_id)
+        if validate_snapshot is not None:
+            validate_snapshot(initial)
         if initial.credential_origin == LOCAL and not initial.access_token:
             raise ReauthenticationRequiredError(
                 "Sign in to local Codex on the AstrBot host."
             )
         if initial.credential_origin != "local_codex":
             return await super().get_snapshot(
-                source_id, force_refresh=force_refresh, check_cooldown=check_cooldown
+                source_id,
+                force_refresh=force_refresh,
+                check_cooldown=check_cooldown,
+                validate_snapshot=validate_snapshot,
             )
         async with self.source_lock(source_id):
             snapshot = self.read_snapshot(source_id)
+            if validate_snapshot is not None:
+                validate_snapshot(snapshot)
             if snapshot.credential_origin == "local_codex":
                 if not snapshot.access_token:
                     raise ReauthenticationRequiredError(
@@ -425,6 +434,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
         return await self.get_snapshot(
             source_id,
             check_cooldown=check_cooldown,
+            validate_snapshot=validate_snapshot,
             _switch_attempt=_switch_attempt + 1,
         )
 

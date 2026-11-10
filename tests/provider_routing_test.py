@@ -9,7 +9,9 @@ import sys
 import unittest
 from base64 import b64encode
 from collections import OrderedDict
+from contextlib import asynccontextmanager
 from copy import deepcopy
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -19,6 +21,7 @@ import httpx
 from local_codex_test import Config, jwt, local, store
 from login_test import payload, plugin, request_context
 from openai import BadRequestError, PermissionDeniedError
+from PIL import Image
 
 oauth = importlib.import_module(f"{plugin.__package__}.src.oauth")
 provider_module = importlib.import_module(f"{plugin.__package__}.src.provider")
@@ -31,6 +34,19 @@ web_api = importlib.import_module(f"{plugin.__package__}.src.web_api")
 
 FETCH_RATE_LIMITS = oauth.fetch_rate_limits
 USAGE_BODY = {"rate_limit": {"primary_window": {"used_percent": 25}}}
+STARTUP_WINDOW = 0.5
+
+
+def image_response(png: bytes) -> httpx.Response:
+    return httpx.Response(200, json={"data": [{"b64_json": b64encode(png).decode()}]})
+
+
+def sample_png() -> bytes:
+    output = BytesIO()
+    with Image.new("RGB", (3, 2), "blue") as image:
+        image.save(output, format="PNG")
+    return output.getvalue()
+
 
 FORBIDDEN_BODIES = (
     {"text": "<html><body>Forbidden</body></html>"},
@@ -188,7 +204,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
                     async def __aiter__(self):
                         loop = asyncio.get_running_loop()
                         ready = loop.create_future()
-                        loop.call_later(0.06, ready.set_result, None)
+                        loop.call_later(STARTUP_WINDOW * 2, ready.set_result, None)
                         await ready
                         yield body.encode()
 
@@ -344,17 +360,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         await self.collect()
         self.assertEqual(self.requested(), ["same"])
 
-    async def test_image_uses_actual_chat_account_even_after_refresh_or_refusal(self):
-        self.outcomes["local"] = ["quota"]
-        await self.collect()
-        account = self.output[-1]._codex_image_account
-        self.assertEqual(account.source_id, "other")
-        png = b"\x89PNG\r\n\x1a\n"
-        self.outcomes["other"] = [
-            401,
-            httpx.Response(200, json={"data": [{"b64_json": b64encode(png).decode()}]}),
-            403,
-        ]
+    async def image_entrypoints(self, config=None):
         star = object.__new__(plugin.OpenAI_OAuth_Plugin)
         star.config = {"image_enabled": True}
         star._image_accounts = OrderedDict()
@@ -365,6 +371,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
             get_provider_by_id=lambda provider_id: (
                 self.provider if provider_id == "model" else None
             ),
+            get_config=lambda *, umo: config or {},
         )
         extras = {}
         event = SimpleNamespace(
@@ -378,6 +385,16 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
             event, SimpleNamespace(conversation=SimpleNamespace(cid="conversation"))
         )
         await star.remember_image_account(event, self.output[-1])
+        return star, event
+
+    async def test_image_uses_actual_chat_account_even_after_refresh_or_refusal(self):
+        self.outcomes["local"] = ["quota"]
+        await self.collect()
+        account = self.output[-1]._codex_image_account
+        self.assertEqual(account.source_id, "other")
+        png = sample_png()
+        self.outcomes["other"] = [401, image_response(png), 403]
+        star, event = await self.image_entrypoints()
         await star.draw(event, "Draw a cat")
         component = event.send.await_args.args[0].chain[0]
         self.assertEqual(component.file, "base64://" + b64encode(png).decode())
@@ -415,6 +432,134 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
                 self.provider, account, "Draw a cat", "auto"
             )
         self.assertEqual(len(self.requests), 5)
+
+    async def test_image_never_refreshes_replacement_login(self):
+        self.outcomes["local"] = ["quota"]
+        await self.collect()
+        account = self.output[-1]._codex_image_account
+        self.assertEqual(account.source_id, "other")
+        lock = self.coordinator.source_lock("other")
+        replacement = {
+            "access_token": jwt("replacement"),
+            "account_id": "replacement",
+            "refresh_token": "replacement-refresh",
+            "expires": 9999999999,
+        }
+        real_get = self.coordinator.get_snapshot
+        relogin = None
+        holding_lock = False
+        sent_accounts = []
+        login_started = asyncio.Event()
+
+        async def replace_login():
+            login_started.set()
+            await self.registry.save_login(
+                "other", "Replacement", replacement, creating=False
+            )
+
+        async def reject_image(request):
+            nonlocal relogin, holding_lock
+            sent_accounts.append(request.headers["chatgpt-account-id"])
+            await lock.acquire()
+            holding_lock = True
+            relogin = asyncio.create_task(replace_login())
+            await login_started.wait()
+            return httpx.Response(401)
+
+        @asynccontextmanager
+        async def source_transport(snapshot):
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(reject_image)
+            ) as client:
+                yield client, {"chatgpt-account-id": snapshot.account_id}
+
+        def release_lock():
+            nonlocal holding_lock
+            if holding_lock:
+                holding_lock = False
+                lock.release()
+
+        async def release_before_refresh(source_id, **kwargs):
+            if kwargs.get("force_refresh"):
+                asyncio.get_running_loop().call_soon(release_lock)
+            return await real_get(source_id, **kwargs)
+
+        try:
+            with (
+                patch.object(self.provider, "source_transport", source_transport),
+                patch.object(self.coordinator, "get_snapshot", release_before_refresh),
+                self.assertRaisesRegex(
+                    image_generation.ImageError, "image.account_changed"
+                ),
+            ):
+                await asyncio.wait_for(
+                    image_generation.generate(
+                        self.provider, account, "Draw a cat", "auto"
+                    ),
+                    timeout=10,
+                )
+        finally:
+            release_lock()
+            if relogin is not None:
+                await relogin
+        self.refresh.assert_not_awaited()
+        self.assertEqual(sent_accounts, ["b"])
+        self.assertEqual(
+            self.coordinator.read_snapshot("other").account_id, "replacement"
+        )
+
+    async def test_image_tool_rejects_incomplete_and_corrupt_png(self):
+        self.outcomes["local"] = ["quota"]
+        await self.collect()
+        account = self.output[-1]._codex_image_account
+        png = sample_png()
+        corrupt = bytearray(png)
+        corrupt[png.index(b"IDAT") + 4] ^= 1
+        self.outcomes["other"] = [
+            image_response(png[:8]),
+            image_response(png[:-4]),
+            image_response(bytes(corrupt)),
+            image_response(png),
+        ]
+        star, event = await self.image_entrypoints()
+        token = image_generation.tool_account.set(account)
+        try:
+            for _ in range(3):
+                result = await star.codex_generate_image(event, "Draw a cat")
+                self.assertEqual(result, plugin.messages.text("image.failed"))
+                event.send.assert_not_awaited()
+            result = await star.codex_generate_image(event, "Draw a cat")
+        finally:
+            image_generation.tool_account.reset(token)
+        self.assertEqual(result, plugin.messages.text("image.sent"))
+        self.assertEqual(
+            event.send.await_args.args[0].chain[0].file,
+            "base64://" + b64encode(png).decode(),
+        )
+
+    async def test_image_command_and_tool_share_the_session_deadline(self):
+        self.outcomes["local"] = ["quota"]
+        await self.collect()
+        account = self.output[-1]._codex_image_account
+        self.outcomes["other"] = ["wait", "wait"]
+        limit = 1
+        runner = {"config": {"misc": {"tool_call_timeout": limit}}}
+        star, event = await self.image_entrypoints({"agent": runner})
+        expected = plugin.messages.text("image.timeout")
+        await asyncio.wait_for(star.draw(event, "Draw a cat"), timeout=limit)
+        self.assertEqual(event.send.await_args.args[0].chain[0].text, expected)
+        event.send.reset_mock()
+        star.context.get_config = lambda *, umo: {"agent_runner": runner}
+        token = image_generation.tool_account.set(account)
+        try:
+            result = await asyncio.wait_for(
+                star.codex_generate_image(event, "Draw a cat"), timeout=limit
+            )
+        finally:
+            image_generation.tool_account.reset(token)
+        self.assertEqual(result, expected)
+        event.send.assert_not_awaited()
+        self.assertEqual(self.requested(), ["local", "other", "other", "other"])
 
     async def test_all_disabled_is_actionable_without_reenabling(self):
         for sid in ("local", "same", "other"):
@@ -485,7 +630,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.usage.side_effect = wait_for_usage
         with (
-            patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", 0.02),
+            patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", STARTUP_WINDOW),
             self.assertRaises(provider_routing.RoutingExhaustedError),
         ):
             await self.collect()
@@ -494,7 +639,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_open_stream_may_think_past_startup_deadline(self):
         self.outcomes["local"] = ["slow"]
-        with patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", 0.02):
+        with patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", STARTUP_WINDOW):
             await self.collect()
         self.assertEqual(self.requested(), ["local"])
         self.assertEqual(self.output[-1].completion_text, "local")
@@ -512,7 +657,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
             yield  # pragma: no cover
 
         with (
-            patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", 0.02),
+            patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", STARTUP_WINDOW),
             patch.object(
                 provider_module.ProviderOpenAICodex,
                 "_consume_stream",
@@ -817,11 +962,11 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.provider._prepare_chat_payload = AsyncMock(
             return_value=({"model": "test-model", "input": []}, None)
         )
-        with patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", 0.02):
+        with patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", STARTUP_WINDOW):
             stream = self.provider.text_chat_stream(prompt="test")
             await anext(stream)
             done = asyncio.Event()
-            asyncio.get_running_loop().call_later(0.04, done.set)
+            asyncio.get_running_loop().call_later(STARTUP_WINDOW * 2, done.set)
             await done.wait()
             await stream.aclose()
         self.assertEqual(self.requested(), ["local"])
@@ -855,7 +1000,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_startup_timeout_is_shared_and_closes_transport(self):
         self.outcomes["local"] = ["wait"]
         with (
-            patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", 0.02),
+            patch.object(provider_module, "ROUTING_TIMEOUT_SECONDS", STARTUP_WINDOW),
             self.assertRaises(provider_routing.RoutingExhaustedError) as ctx,
         ):
             await self.collect()

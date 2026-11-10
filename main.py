@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import OrderedDict
 from copy import copy
 
@@ -128,10 +129,16 @@ class OpenAI_OAuth_Plugin(Star):
         if not isinstance(provider, ProviderOpenAICodex):
             return messages.text("image.no_account")
         try:
-            image = await image_generation.generate(
-                provider, account, prompt, self.config.get("image_size", "auto")
+            timeout = image_generation.timeout_for_session(
+                self.context.get_config(umo=event.unified_msg_origin)
             )
-            await event.send(MessageChain(chain=[Image.fromBytes(image)]))
+            async with asyncio.timeout(timeout):
+                image = await image_generation.generate(
+                    provider, account, prompt, self.config.get("image_size", "auto")
+                )
+                await event.send(MessageChain(chain=[Image.fromBytes(image)]))
+        except TimeoutError:
+            return messages.text("image.timeout")
         except image_generation.ImageError as exc:
             return messages.text(str(exc))
         except CredentialCooldownError:
