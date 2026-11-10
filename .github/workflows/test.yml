@@ -49,7 +49,7 @@ jobs:
       matrix:
         # Pushes and pull requests test the declared minimum and the newest
         # verified release; the weekly run tests whatever AstrBot released last.
-        astrbot: ${{ fromJSON(github.event_name == 'schedule' && '["latest"]' || '["v4.27.1", "v4.29.3"]') }}
+        astrbot: ${{ fromJSON(github.event_name == 'schedule' && '["latest"]' || '["v4.27.1", "v4.29.4"]') }}
     name: integration (AstrBot ${{ matrix.astrbot }})
     steps:
       - name: Checkout plugin

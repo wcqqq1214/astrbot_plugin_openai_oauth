@@ -2,9 +2,21 @@
 
 ## [Unreleased]
 
+## [v2.4.0] - 2026-11-11
+
+### Added
+
+- Generate images through Codex with the same ChatGPT OAuth account and subscription used for the chat. Describe the image in chat, or use `/draw` to skip follow-up questions. Describe orientation and composition in the prompt. Codex chooses the pixel dimensions, and the plugin sends the returned PNG as-is.
+- Resize oversized chat image inputs for Codex while preserving the original attachments and AstrBot's shared history. The longest edge is limited to 2048 pixels by default or 6000 pixels when original detail is requested.
+
 ### Changed
 
 - Remove OpenAI Subscribe from the Add Provider list because the plugin creates its source automatically. Clear the old manual-add template when upgrading or reloading the plugin while preserving the existing source and models.
+
+### Fixed
+
+- Distinguish exhausted subscription allowance from ordinary request rate limits, including when Codex reports the allowance error in `error.type`. Image generation stays on the account that handled the chat.
+- Support AstrBot's relocated main-agent builder and image hooks while retaining compatibility with the minimum supported version, AstrBot 4.27.1.
 
 ## [v2.3.0] - 2026-10-28
 
