@@ -379,8 +379,9 @@ def _status_code(error: BaseException) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def _error_details(error: BaseException) -> tuple[str, str]:
+def _error_details(error: BaseException) -> tuple[str, str, str]:
     code = getattr(error, "code", "")
+    error_type = getattr(error, "type", "")
     message = ""
     body = getattr(error, "body", None)
     if body is None and isinstance(error, HTTPStatusError):
@@ -392,12 +393,17 @@ def _error_details(error: BaseException) -> tuple[str, str]:
         nested = body.get("error")
         payload = nested if isinstance(nested, dict) else body
         code = payload.get("code", nested if isinstance(nested, str) else code)
+        error_type = payload.get("type", error_type)
         message = payload.get("message", "")
     elif isinstance(body, str) and body.lower() in {"invalid_grant", "invalid_token"}:
         code = body
     if not message:
         message = str(error)
-    return str(code or "").lower(), str(message or "").lower()
+    return (
+        str(code or "").lower(),
+        str(error_type or "").lower(),
+        str(message or "").lower(),
+    )
 
 
 def classify_codex_error(error: BaseException) -> str:
@@ -405,10 +411,10 @@ def classify_codex_error(error: BaseException) -> str:
     if isinstance(error, APIConnectionError) or is_connection_error(error):
         return "temporary"
     status_code = _status_code(error)
-    code, message = _error_details(error)
+    code, error_type, message = _error_details(error)
     if status_code == 401 or code in {"invalid_grant", "invalid_token"}:
         return "credential"
-    if code == "usage_limit_reached" or (
+    if "usage_limit_reached" in (code, error_type) or (
         status_code == 429
         and ("usage_limit_reached" in code or "usage_limit_reached" in message)
     ):

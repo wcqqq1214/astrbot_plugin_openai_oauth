@@ -332,6 +332,7 @@ def test_error_classification() -> None:
 
     class _Error(RuntimeError):
         def __init__(self, status_code: int, body=None) -> None:
+            super().__init__(f"HTTP {status_code}")
             self.status_code = status_code
             self.body = body
 
@@ -345,6 +346,13 @@ def test_error_classification() -> None:
         )
         == "usage_limit",
         "subscription quota 429 is distinguished from ordinary rate limiting",
+    )
+    check(
+        oauth.classify_codex_error(
+            _Error(429, {"error": {"type": "usage_limit_reached"}})
+        )
+        == "usage_limit",
+        "subscription quota is recognized when only the error type is set",
     )
     check(
         oauth.classify_codex_error(_Error(429)) == "rate_limit",

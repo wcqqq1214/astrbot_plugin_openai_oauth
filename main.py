@@ -149,7 +149,7 @@ class OpenAI_OAuth_Plugin(Star):
         except image_generation.ImageError as exc:
             return messages.text(str(exc))
         except CredentialCooldownError:
-            return messages.text("image.limit")
+            return messages.text("image.usage_limit")
         except ReauthenticationRequiredError:
             return messages.text("usage.reauth_required")
         except CredentialError:

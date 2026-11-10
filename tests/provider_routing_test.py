@@ -436,6 +436,53 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
             await image_generation.generate(self.provider, account, prompt)
         self.assertEqual(len(self.requests), 5)
 
+    async def test_image_entries_distinguish_429_errors_without_account_fallback(self):
+        self.outcomes["local"] = [429]
+        await self.collect()
+        self.assertEqual(self.requested(), ["local", "other"])
+        self.assertEqual(self.coordinator.account_view("local")["status"], "ready")
+        account = self.output[-1]._codex_image_account
+        chat_request = self.requests[-1][1]
+        star, event = await self.image_entrypoints()
+        token = image_generation.tool_invocation.set(
+            image_generation.ToolInvocation(account, 120)
+        )
+        try:
+            for body, key in (
+                (b'{"error":{"type":"usage_limit_reached"}}', "image.usage_limit"),
+                (b'{"error":{"code":"rate_limit_exceeded"}}', "image.rate_limit"),
+                (b"<html>Too Many Requests</html>", "image.rate_limit"),
+            ):
+                with self.subTest(key=key, body=body):
+                    self.outcomes["other"] = [
+                        httpx.Response(429, stream=httpx.ByteStream(body))
+                        for _ in range(2)
+                    ]
+                    start = len(self.requests)
+                    await star.draw(event, "Draw a cat")
+                    self.assertEqual(
+                        event.send.await_args.args[0].chain[0].text,
+                        plugin.messages.text(key),
+                    )
+                    event.send.reset_mock()
+                    self.assertEqual(
+                        await star.codex_generate_image(event, "Draw a cat"),
+                        plugin.messages.text(key),
+                    )
+                    event.send.assert_not_awaited()
+                    self.assertEqual(self.requested()[start:], ["other", "other"])
+                    for _, request in self.requests[start:]:
+                        self.assertEqual(
+                            str(request.url), f"{oauth.CODEX_BASE}/images/generations"
+                        )
+                        for header in ("authorization", "chatgpt-account-id"):
+                            self.assertEqual(
+                                request.headers[header], chat_request.headers[header]
+                            )
+        finally:
+            image_generation.tool_invocation.reset(token)
+        self.refresh.assert_not_awaited()
+
     async def test_image_never_refreshes_replacement_login(self):
         self.outcomes["local"] = ["quota"]
         await self.collect()

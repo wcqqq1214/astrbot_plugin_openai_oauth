@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 IMAGE_MODEL = "gpt-image-2"
 TOOL_NAME = "codex_generate_image"
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+MAX_ERROR_RESPONSE_BYTES = 64 * 1024
 MAX_IMAGE_PIXELS = 16 * 1024 * 1024
 MAX_TIMEOUT_SECONDS = 300
 _PNG_END = b"\x00\x00\x00\x00IEND\xaeB\x60\x82"
@@ -157,7 +158,7 @@ async def generate(
                     if response.status_code == 403:
                         raise ImageError("image.forbidden")
                     if response.status_code == 429:
-                        raise ImageError("image.limit")
+                        raise ImageError(await _rate_limit_message(response))
                     if not response.is_success:
                         raise ImageError("image.failed")
                     body = bytearray()
@@ -171,6 +172,25 @@ async def generate(
     except httpx.HTTPError as exc:
         raise ImageError("image.failed") from exc
     raise ImageError("image.failed")
+
+
+async def _rate_limit_message(response: httpx.Response) -> str:
+    body = bytearray()
+    try:
+        async for chunk in response.aiter_bytes():
+            if len(body) + len(chunk) > MAX_ERROR_RESPONSE_BYTES:
+                return "image.rate_limit"
+            body.extend(chunk)
+    except httpx.HTTPError:
+        return "image.rate_limit"
+
+    buffered = httpx.Response(response.status_code, content=bytes(body))
+    error = httpx.HTTPStatusError(
+        "Codex image rate limit", request=response.request, response=buffered
+    )
+    if oauth.classify_codex_error(error) == "usage_limit":
+        return "image.usage_limit"
+    return "image.rate_limit"
 
 
 def _decode_image(body: bytearray) -> bytes:
