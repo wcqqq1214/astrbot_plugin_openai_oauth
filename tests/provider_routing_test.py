@@ -7,6 +7,8 @@ import importlib
 import json
 import sys
 import unittest
+from base64 import b64encode
+from collections import OrderedDict
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,6 +26,7 @@ provider_routing = importlib.import_module(f"{plugin.__package__}.src.provider_r
 runtime = importlib.import_module(f"{plugin.__package__}.src.runtime")
 usage_service = importlib.import_module(f"{plugin.__package__}.src.usage")
 codex_request = importlib.import_module(f"{plugin.__package__}.src.codex_request")
+image_generation = importlib.import_module(f"{plugin.__package__}.src.image_generation")
 web_api = importlib.import_module(f"{plugin.__package__}.src.web_api")
 
 FETCH_RATE_LIMITS = oauth.fetch_rate_limits
@@ -340,6 +343,78 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         await self.registry.edit("local", enabled=False)
         await self.collect()
         self.assertEqual(self.requested(), ["same"])
+
+    async def test_image_uses_actual_chat_account_even_after_refresh_or_refusal(self):
+        self.outcomes["local"] = ["quota"]
+        await self.collect()
+        account = self.output[-1]._codex_image_account
+        self.assertEqual(account.source_id, "other")
+        png = b"\x89PNG\r\n\x1a\n"
+        self.outcomes["other"] = [
+            401,
+            httpx.Response(200, json={"data": [{"b64_json": b64encode(png).decode()}]}),
+            403,
+        ]
+        star = object.__new__(plugin.OpenAI_OAuth_Plugin)
+        star.config = {"image_enabled": True}
+        star._image_accounts = OrderedDict()
+        star.context = SimpleNamespace(
+            conversation_manager=SimpleNamespace(
+                get_curr_conversation_id=AsyncMock(return_value="conversation")
+            ),
+            get_provider_by_id=lambda provider_id: (
+                self.provider if provider_id == "model" else None
+            ),
+        )
+        extras = {}
+        event = SimpleNamespace(
+            unified_msg_origin="session",
+            set_extra=extras.__setitem__,
+            get_extra=extras.get,
+            send=AsyncMock(),
+            should_call_llm=lambda _: None,
+        )
+        await star.prepare_image_tool(
+            event, SimpleNamespace(conversation=SimpleNamespace(cid="conversation"))
+        )
+        await star.remember_image_account(event, self.output[-1])
+        await star.draw(event, "Draw a cat")
+        component = event.send.await_args.args[0].chain[0]
+        self.assertEqual(component.file, "base64://" + b64encode(png).decode())
+        self.assertEqual(self.requested(), ["local", "other", "other", "other"])
+        first, second = [request for _, request in self.requests[-2:]]
+        self.assertEqual(str(first.url), f"{oauth.CODEX_BASE}/images/generations")
+        self.assertEqual(json.loads(first.content)["model"], "gpt-image-2")
+        self.assertEqual(first.headers["accept"], "application/json")
+        self.assertEqual(first.headers["chatgpt-account-id"], "b")
+        self.assertEqual(second.headers["chatgpt-account-id"], "b")
+        self.assertNotEqual(
+            first.headers["authorization"], second.headers["authorization"]
+        )
+        with self.assertRaisesRegex(image_generation.ImageError, "image.forbidden"):
+            await image_generation.generate(
+                self.provider, account, "Draw a cat", "auto"
+            )
+        self.assertEqual(
+            self.requested(), ["local", "other", "other", "other", "other"]
+        )
+
+        source = self.coordinator.source("other")
+        source["key"] = json.dumps(
+            {
+                "access_token": jwt("different"),
+                "account_id": "different",
+                "refresh_token": "different-refresh",
+                "expires": 9999999999,
+            }
+        )
+        with self.assertRaisesRegex(
+            image_generation.ImageError, "image.account_changed"
+        ):
+            await image_generation.generate(
+                self.provider, account, "Draw a cat", "auto"
+            )
+        self.assertEqual(len(self.requests), 5)
 
     async def test_all_disabled_is_actionable_without_reenabling(self):
         for sid in ("local", "same", "other"):

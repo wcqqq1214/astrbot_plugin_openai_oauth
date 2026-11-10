@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import os
@@ -30,6 +31,9 @@ from PIL import Image
 
 bridge = importlib.import_module(
     "data.plugins.astrbot_plugin_openai_oauth.src.astrbot_image_bridge"
+)
+generation = importlib.import_module(
+    "data.plugins.astrbot_plugin_openai_oauth.src.image_generation"
 )
 CODEX = "OpenAI Subscribe"
 
@@ -86,6 +90,33 @@ class ImageBridgeTests(unittest.IsolatedAsyncioTestCase):
                 prepared=cache if cache is not None else {},
             )
         return request
+
+    async def test_tool_scope_tracks_its_own_response_in_concurrent_runs(self):
+        state = getattr(ToolLoopAgentRunner, bridge._STATE_ATTR)
+
+        async def run_tool(runner, request, response):
+            yield await asyncio.create_task(read_binding())
+            yield await asyncio.create_task(read_binding())
+
+        async def read_binding():
+            await asyncio.sleep(0)
+            return generation.tool_account.get()
+
+        async def consume(account):
+            response = LLMResponse(role="assistant")
+            if account is not None:
+                response._codex_image_account = account
+            stream = state["tool_scope"](run_tool, None, None, response)
+            output = [value async for value in stream]
+            self.assertIsNone(generation.tool_account.get())
+            return output
+
+        first = generation.ChatAccount("model", "first", "first-account")
+        second = generation.ChatAccount("model", "second", "second-account")
+        self.assertEqual(
+            await asyncio.gather(consume(first), consume(second), consume(None)),
+            [[first, first], [second, second], [None, None]],
+        )
 
     def provider(self, name, captured, *, fail=False):
         async def chat(**payload):

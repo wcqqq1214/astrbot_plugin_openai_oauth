@@ -21,6 +21,39 @@
       "Русский",
       "日本語"
     ],
-    "hint": "/usage、/effort 和 /openai_login 的回复语言。插件页面跟随 Dashboard 语言。保存后重载插件生效。"
+    "hint": "/usage、/effort、/openai_login 和 /draw 的回复语言。插件页面跟随 Dashboard 语言。保存后重载插件生效。"
+  },
+  "image_enabled": {
+    "description": "启用 GPT Image 生图",
+    "type": "bool",
+    "default": false,
+    "hint": "允许使用 /draw 和 LLM 生图工具。使用当前聊天的 OAuth 账号及订阅权益。"
+  },
+  "image_model": {
+    "description": "生图模型",
+    "type": "string",
+    "default": "GPT Image",
+    "options": [
+      "GPT Image"
+    ],
+    "hint": "实际使用的模型版本由 ChatGPT 后端决定。"
+  },
+  "image_account": {
+    "description": "生图账号来源 ID（可选）",
+    "type": "string",
+    "default": "",
+    "hint": "留空跟随聊天实际账号。填写来源 ID 后，仅在聊天实际使用该来源时允许生图。"
+  },
+  "image_size": {
+    "description": "生图请求尺寸",
+    "type": "string",
+    "default": "auto",
+    "options": [
+      "auto",
+      "1024x1024",
+      "1024x1536",
+      "1536x1024"
+    ],
+    "hint": "请求尺寸原样传给 Codex。实际像素尺寸由后端决定，插件会原样发送返回的图片。"
   }
 }

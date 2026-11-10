@@ -63,15 +63,24 @@ def check_entry_point(module) -> None:
         for item in star_handlers_registry
         if item.handler_module_path.startswith(prefix + ".")
     ]
+    expected = {
+        "usage",
+        "effort",
+        "openai_login",
+        "draw",
+        "codex_generate_image",
+        "prepare_image_tool",
+        "remember_image_account",
+    }
     check(
-        {item.handler_name for item in handlers} == {"usage", "effort", "openai_login"}
-        and len(handlers) == 3
+        {item.handler_name for item in handlers} == expected
+        and len(handlers) == len(expected)
         and all(
             item.handler_module_path == module.__name__
             and item.handler is getattr(module.OpenAI_OAuth_Plugin, item.handler_name)
             for item in handlers
         ),
-        "all commands belong to the current entry point without duplicates",
+        "commands, tool and hooks belong to the current entry point without duplicates",
     )
     check(
         sys.modules[prefix].ProviderOpenAICodex is module.ProviderOpenAICodex

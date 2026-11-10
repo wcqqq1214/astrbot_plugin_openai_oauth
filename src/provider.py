@@ -30,6 +30,7 @@ from . import (
     astrbot_image_bridge,
     codex_request,
     effort,
+    image_generation,
     image_input,
     messages,
     oauth,
@@ -224,6 +225,16 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
     @asynccontextmanager
     async def _source_client(self, snapshot: CredentialSnapshot):
         """Build a request client on the selected source's own transport."""
+        async with self.source_transport(snapshot) as (transport, headers):
+            yield self._request_client(
+                snapshot,
+                headers=headers,
+                http_client=transport,
+            )
+
+    @asynccontextmanager
+    async def source_transport(self, snapshot: CredentialSnapshot):
+        """Lease the selected source's transport and request headers."""
         coordinator = runtime.get_coordinator()
         source = coordinator.source(snapshot.source_id)
         settings = coordinator.source_settings(snapshot.source_id)
@@ -285,13 +296,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
             (identity, proxy),
             lambda: self._create_http_client({**self.provider_config, "proxy": proxy}),
         ) as transport:
-            # The SDK wrapper shares the pooled transport; closing it would not
-            # close the transport, so it is left to the garbage collector.
-            yield self._request_client(
-                snapshot,
-                headers=headers,
-                http_client=transport,
-            )
+            yield transport, headers
 
     def _convert_chat_messages_to_response_input(
         self, messages: list[dict]
@@ -669,6 +674,14 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                 ):
                     async for response in stream:
                         emitted_chunk = True
+                        if not response.is_chunk and response.role != "err":
+                            response._codex_image_account = (
+                                image_generation.ChatAccount(
+                                    self.provider_config.get("id", ""),
+                                    source_id,
+                                    image_generation.account_identity(snapshot),
+                                )
+                            )
                         yield response
                 return
             except Exception as exc:

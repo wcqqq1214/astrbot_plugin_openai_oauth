@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict, deque
+from contextlib import aclosing
 from copy import copy
 from functools import wraps
 from weakref import WeakKeyDictionary
@@ -169,30 +170,34 @@ def install(provider_type: str):
     from astrbot.core import astr_main_agent
     from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
 
+    from .image_generation import tool_account
+
     state = getattr(ToolLoopAgentRunner, _STATE_ATTR, None)
-    if state is None:
+    first_install = state is None
+    if first_install:
         state = {"active": False, "previews": WeakKeyDictionary()}
         setattr(ToolLoopAgentRunner, _STATE_ATTR, state)
 
-        def patch(target, name, handler):
-            original = getattr(target, name)
-            if asyncio.iscoroutinefunction(original):
+    def patch(target, name, handler):
+        original = getattr(target, name)
+        if asyncio.iscoroutinefunction(original):
 
-                @wraps(original)
-                async def dispatch(*args, **kwargs):
-                    if state["active"] or handler in {"prepare", "compress"}:
-                        return await state[handler](original, *args, **kwargs)
-                    return await original(*args, **kwargs)
-            else:
+            @wraps(original)
+            async def dispatch(*args, **kwargs):
+                if state["active"] or handler in {"prepare", "compress"}:
+                    return await state[handler](original, *args, **kwargs)
+                return await original(*args, **kwargs)
+        else:
 
-                @wraps(original)
-                def dispatch(*args, **kwargs):
-                    if state["active"] or handler == "sanitize":
-                        return state[handler](original, *args, **kwargs)
-                    return original(*args, **kwargs)
+            @wraps(original)
+            def dispatch(*args, **kwargs):
+                if state["active"] or handler == "sanitize":
+                    return state[handler](original, *args, **kwargs)
+                return original(*args, **kwargs)
 
-            setattr(target, name, dispatch)
+        setattr(target, name, dispatch)
 
+    if first_install:
         if hasattr(astr_main_agent, "_compress_image_for_provider"):
             patch(astr_main_agent, "_compress_image_for_provider", "compress")
         else:
@@ -202,6 +207,11 @@ def install(provider_type: str):
         patch(ToolLoopAgentRunner, "reset", "reset")
         patch(ProviderRequest, "assemble_context", "assemble")
         patch(ToolLoopAgentRunner, "_sanitize_contexts_for_provider", "sanitize")
+    if not state.get("draw_patched"):
+        patch(ToolLoopAgentRunner, "_handle_function_tools", "tool_scope")
+        if hasattr(ToolLoopAgentRunner, "_resolve_tool_exec"):
+            patch(ToolLoopAgentRunner, "_resolve_tool_exec", "tool_requery")
+        state["draw_patched"] = True
 
     def remember(preview, original, montage=False):
         if preview != original and (task := asyncio.current_task()) is not None:
@@ -237,6 +247,27 @@ def install(provider_type: str):
             and runner.provider.provider_config.get("type") == provider_type,
         )
 
+    async def tool_requery(original, runner, response, *args, **kwargs):
+        result = await original(runner, response, *args, **kwargs)
+        # The runner copies the new tool calls onto the original response.
+        response._codex_image_account = getattr(result[0], "_codex_image_account", None)
+        return result
+
+    async def tool_scope(original, runner, request, response, *args, **kwargs):
+        binding = getattr(response, "_codex_image_account", None)
+        async with aclosing(
+            original(runner, request, response, *args, **kwargs)
+        ) as stream:
+            while True:
+                token = tool_account.set(binding)
+                try:
+                    item = await anext(stream)
+                except StopAsyncIteration:
+                    return
+                finally:
+                    tool_account.reset(token)
+                yield item
+
     generation = object()
     state.update(
         active=True,
@@ -246,6 +277,8 @@ def install(provider_type: str):
         reset=reset,
         assemble=assemble,
         sanitize=sanitize,
+        tool_scope=tool_scope,
+        tool_requery=tool_requery,
     )
 
     def remove():
