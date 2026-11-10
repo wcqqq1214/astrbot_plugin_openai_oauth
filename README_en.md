@@ -97,11 +97,13 @@ The next request tries the preferred account again. If none are available, it fa
 
 ## GPT Image generation
 
-Enable GPT Image in the plugin settings. After chatting with OpenAI Subscribe in the current conversation, send `/draw a portrait poster of a cat holding an umbrella in the rain, with space at the top`. You can also describe the image in chat and the model can call the `codex_generate_image` tool.
+Enable GPT Image in the plugin settings, then describe the image you want in an OpenAI Subscribe chat. For example, say “Draw a portrait poster of a cat holding an umbrella in the rain, with space at the top.” The model can call the `codex_generate_image` tool to generate the image.
 
 Describe the orientation, aspect ratio, and composition in the prompt. The plugin uses automatic sizing, so Codex determines the actual pixel dimensions. The plugin sends the image as received.
 
-Image generation uses the chat account's OAuth credentials and subscription through the Codex Images backend. The model is displayed as **GPT Image**, and the ChatGPT backend selects the actual version. The tool follows the chat response that requested it, and `/draw` follows the last successful chat in the current conversation. After a plugin reload, chat again before using `/draw`.
+To skip follow-up questions from the model, use `/draw <prompt>` to submit the image request directly. The command uses the account that handled the most recent successful OpenAI Subscribe chat in the current conversation. After a plugin reload, chat again in the current conversation before using `/draw`.
+
+Image generation uses the chat account's OAuth credentials and subscription through the Codex Images backend. The chat tool uses the account that answered the current turn. The model is displayed as **GPT Image**, and the ChatGPT backend selects the actual version.
 
 Leave the image account source ID empty to follow chat, or enter a source ID to allow drawing only when that source actually handled the chat. If the account is unavailable or differs from the configured source, drawing reports the problem without switching accounts.
 
