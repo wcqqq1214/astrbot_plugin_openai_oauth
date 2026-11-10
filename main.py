@@ -103,7 +103,7 @@ class OpenAI_OAuth_Plugin(Star):
         """Generate and send an image when the user asks for one.
 
         Args:
-            prompt(string): A description of the image to generate.
+            prompt(string): Describe the image, including any requested orientation and composition.
         """
         invocation = image_generation.tool_invocation.get()
         error = await self._send_image(
@@ -142,9 +142,7 @@ class OpenAI_OAuth_Plugin(Star):
                 runner_timeout=runner_timeout,
             )
             async with asyncio.timeout(timeout):
-                image = await image_generation.generate(
-                    provider, account, prompt, self.config.get("image_size", "auto")
-                )
+                image = await image_generation.generate(provider, account, prompt)
                 await event.send(MessageChain(chain=[Image.fromBytes(image)]))
         except TimeoutError:
             return messages.text("image.timeout")

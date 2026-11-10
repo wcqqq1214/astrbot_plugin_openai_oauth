@@ -17,7 +17,6 @@ _CATALOG: dict[str, dict[str, str]] = {
     "zh-CN": {
         "image.disabled": "请先在插件设置中启用 GPT Image 生图。",
         "image.prompt": "用法：/draw <提示词>。提示词最多 32000 个字符。",
-        "image.size": "生图尺寸配置无效，请检查插件设置。",
         "image.no_account": "请先在当前对话中用 OpenAI Subscribe 成功聊天一次，再生成图片。",
         "image.account_restricted": "本轮聊天使用的账号与生图设置中的账号不同。",
         "image.account_changed": "聊天使用的 OAuth 账号已更改或不可用，请先重新聊天。",
@@ -84,7 +83,6 @@ _CATALOG: dict[str, dict[str, str]] = {
     "en-US": {
         "image.disabled": "Enable GPT Image in the plugin settings first.",
         "image.prompt": "Usage: /draw <prompt>. Use at most 32,000 characters.",
-        "image.size": "The configured image size is invalid. Check the plugin settings.",
         "image.no_account": "Complete a chat with OpenAI Subscribe in this conversation before generating an image.",
         "image.account_restricted": "The chat account does not match the account configured for image generation.",
         "image.account_changed": "The OAuth account used for chat has changed or is unavailable. Start another chat first.",
@@ -152,7 +150,6 @@ _CATALOG: dict[str, dict[str, str]] = {
     "ru-RU": {
         "image.disabled": "Включите GPT Image в настройках плагина.",
         "image.prompt": "Использование: /draw <описание>. Не более 32 000 символов.",
-        "image.size": "Проверьте размер изображения в настройках плагина.",
         "image.no_account": "Сначала отправьте сообщение OpenAI Subscribe в этом диалоге и дождитесь ответа.",
         "image.account_restricted": "Аккаунт чата отличается от аккаунта, указанного для генерации изображений.",
         "image.account_changed": "Аккаунт OAuth изменился или недоступен. Сначала отправьте новое сообщение в чат.",
@@ -220,7 +217,6 @@ _CATALOG: dict[str, dict[str, str]] = {
     "ja-JP": {
         "image.disabled": "プラグイン設定で GPT Image を有効にしてください。",
         "image.prompt": "使い方: /draw <プロンプト>。最大 32,000 文字です。",
-        "image.size": "プラグイン設定で画像サイズを確認してください。",
         "image.no_account": "この会話で OpenAI Subscribe と一度チャットしてから画像を生成してください。",
         "image.account_restricted": "チャットで使用したアカウントが画像生成の設定と一致しません。",
         "image.account_changed": "チャットの OAuth アカウントが変更されたか利用できません。先にチャットしてください。",

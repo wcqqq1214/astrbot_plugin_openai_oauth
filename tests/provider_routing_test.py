@@ -396,13 +396,19 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         png = sample_png()
         self.outcomes["other"] = [401, image_response(png), 403]
         star, event = await self.image_entrypoints()
-        await star.draw(event, "Draw a cat")
+        star.config["image_size"] = "1024x1536"
+        prompt = "Draw a cat in a portrait composition with space at the top"
+        await star.draw(event, prompt)
         component = event.send.await_args.args[0].chain[0]
         self.assertEqual(component.file, "base64://" + b64encode(png).decode())
         self.assertEqual(self.requested(), ["local", "other", "other", "other"])
         first, second = [request for _, request in self.requests[-2:]]
         self.assertEqual(str(first.url), f"{oauth.CODEX_BASE}/images/generations")
-        self.assertEqual(json.loads(first.content)["model"], "gpt-image-2")
+        for request in (first, second):
+            payload = json.loads(request.content)
+            self.assertEqual(payload["model"], "gpt-image-2")
+            self.assertEqual(payload["size"], "auto")
+            self.assertEqual(payload["prompt"], prompt)
         self.assertEqual(first.headers["accept"], "application/json")
         self.assertEqual(first.headers["chatgpt-account-id"], "b")
         self.assertEqual(second.headers["chatgpt-account-id"], "b")
@@ -410,9 +416,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
             first.headers["authorization"], second.headers["authorization"]
         )
         with self.assertRaisesRegex(image_generation.ImageError, "image.forbidden"):
-            await image_generation.generate(
-                self.provider, account, "Draw a cat", "auto"
-            )
+            await image_generation.generate(self.provider, account, prompt)
         self.assertEqual(
             self.requested(), ["local", "other", "other", "other", "other"]
         )
@@ -429,9 +433,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(
             image_generation.ImageError, "image.account_changed"
         ):
-            await image_generation.generate(
-                self.provider, account, "Draw a cat", "auto"
-            )
+            await image_generation.generate(self.provider, account, prompt)
         self.assertEqual(len(self.requests), 5)
 
     async def test_image_never_refreshes_replacement_login(self):
@@ -494,9 +496,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
                 ),
             ):
                 await asyncio.wait_for(
-                    image_generation.generate(
-                        self.provider, account, "Draw a cat", "auto"
-                    ),
+                    image_generation.generate(self.provider, account, "Draw a cat"),
                     timeout=10,
                 )
         finally:
@@ -548,10 +548,14 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
                 result = await star.codex_generate_image(event, "Draw a cat")
                 self.assertEqual(result, plugin.messages.text("image.failed"))
                 event.send.assert_not_awaited()
-            result = await star.codex_generate_image(event, "Draw a cat")
+            prompt = "Draw a cat in a wide landscape composition"
+            result = await star.codex_generate_image(event, prompt)
         finally:
             image_generation.tool_invocation.reset(token)
         self.assertEqual(result, plugin.messages.text("image.sent"))
+        payload = json.loads(self.requests[-1][1].content)
+        self.assertEqual(payload["size"], "auto")
+        self.assertEqual(payload["prompt"], prompt)
         self.assertEqual(
             event.send.await_args.args[0].chain[0].file,
             "base64://" + b64encode(png).decode(),

@@ -97,9 +97,9 @@ The next request tries the preferred account again. If none are available, it fa
 
 ## GPT Image generation
 
-Enable GPT Image in the plugin settings and select a requested image size (default `auto`).
-The plugin passes the requested size through to Codex. The backend determines the actual pixel dimensions, and the plugin sends the returned image as received.
-After chatting with OpenAI Subscribe in the current conversation, send `/draw a cat holding an umbrella in the rain`. You can also ask for an image in chat and the model can call the `codex_generate_image` tool.
+Enable GPT Image in the plugin settings. After chatting with OpenAI Subscribe in the current conversation, send `/draw a portrait poster of a cat holding an umbrella in the rain, with space at the top`. You can also describe the image in chat and the model can call the `codex_generate_image` tool.
+
+Describe the orientation, aspect ratio, and composition in the prompt. The plugin uses automatic sizing, so Codex determines the actual pixel dimensions. The plugin sends the image as received.
 
 Image generation uses the chat account's OAuth credentials and subscription through the Codex Images backend. The model is displayed as **GPT Image**, and the ChatGPT backend selects the actual version. The tool follows the chat response that requested it, and `/draw` follows the last successful chat in the current conversation. After a plugin reload, chat again before using `/draw`.
 

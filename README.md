@@ -93,9 +93,9 @@ AstrBot 的模型配置中始终只有一个 **OpenAI Subscribe** 来源，多�
 
 ## GPT Image 生图
 
-在插件设置中开启「启用 GPT Image 生图」，选择「生图请求尺寸」（默认 `auto`）。
-插件会将请求尺寸原样传给 Codex。实际像素尺寸由后端决定，插件会原样发送返回的图片。
-在当前对话用 OpenAI Subscribe 聊天一次后，发送 `/draw 一只在雨中撑伞的猫`，也可以在聊天中直接请模型画图，模型可调用 `codex_generate_image` 工具。
+在插件设置中开启「启用 GPT Image 生图」。在当前对话用 OpenAI Subscribe 聊天一次后，发送 `/draw 画一张竖版海报，一只猫在雨中撑伞，画面上方留白`。也可以在聊天中直接描述想画的内容，模型可调用 `codex_generate_image` 工具。
+
+横竖、画幅和构图直接写在提示词里。插件使用 Codex 的自动尺寸，实际像素尺寸由后端决定，返回的图片会原样发送。
 
 生图通过 Codex Images 后端复用聊天账号的 OAuth 和订阅权益。界面显示 **GPT Image**，实际模型版本由 ChatGPT 后端决定。工具跟随触发调用的聊天响应，`/draw` 跟随当前对话最近一次成功的聊天。插件重载后需要重新聊天一次，才能使用 `/draw`。
 

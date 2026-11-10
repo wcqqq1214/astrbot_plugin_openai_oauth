@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 
 IMAGE_MODEL = "gpt-image-2"
 TOOL_NAME = "codex_generate_image"
-SIZES = ("auto", "1024x1024", "1024x1536", "1536x1024")
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 MAX_IMAGE_PIXELS = 16 * 1024 * 1024
 MAX_TIMEOUT_SECONDS = 300
@@ -83,13 +82,11 @@ class ImageError(RuntimeError):
 
 
 async def generate(
-    provider: ProviderOpenAICodex, account: ChatAccount, prompt: str, size: str
+    provider: ProviderOpenAICodex, account: ChatAccount, prompt: str
 ) -> bytes:
     prompt = prompt.strip()
     if not prompt or len(prompt) > 32000:
         raise ImageError("image.prompt")
-    if size not in SIZES:
-        raise ImageError("image.size")
     coordinator = runtime.get_coordinator()
 
     def validate_account(snapshot: CredentialSnapshot) -> None:
@@ -104,7 +101,7 @@ async def generate(
     payload = {
         "model": IMAGE_MODEL,
         "prompt": prompt,
-        "size": size,
+        "size": "auto",
         "n": 1,
         "output_format": "png",
     }
