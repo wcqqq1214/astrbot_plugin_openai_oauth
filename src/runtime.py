@@ -35,6 +35,7 @@ _local_codex_store: LocalCodexStore | None = None
 _remove_source_guard: Any = None
 _remove_image_bridge: Any = None
 _credential_sealer: FernetCredentialSealer | None = None
+_startup_error: str | None = None
 
 
 def _credential_key_path() -> Path:
@@ -60,7 +61,17 @@ def _build_default_source_config() -> dict[str, Any]:
     }
 
 
+def ensure_compatible() -> None:
+    if _startup_error is not None:
+        raise source_editor.HookCompatibilityError(_startup_error)
+
+
 def get_coordinator() -> LocalCredentialCoordinator:
+    ensure_compatible()
+    return _resolve_coordinator()
+
+
+def _resolve_coordinator() -> LocalCredentialCoordinator:
     global _credential_coordinator
     cfg_mgr = _config_mgr
     if cfg_mgr is None:
@@ -100,34 +111,109 @@ def get_coordinator() -> LocalCredentialCoordinator:
     return coordinator
 
 
+def _metadata_fields() -> dict:
+    path = ("provider_group", "metadata", "provider", "items")
+    value = CONFIG_METADATA_2
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            raise source_editor.HookCompatibilityError(
+                "Incompatible critical metadata: CONFIG_METADATA_2.provider_group.metadata.provider.items"
+            )
+        value = value[key]
+    if not isinstance(value, dict):
+        raise source_editor.HookCompatibilityError(
+            "Incompatible critical metadata: provider.items must be a mapping"
+        )
+    return value
+
+
+def _block_startup(context, error) -> None:
+    global _startup_error, _remove_source_guard
+    _startup_error = str(error)
+    try:
+        _remove_source_guard = source_editor.block_writes(
+            context.astrbot_config_mgr.default_conf, PROVIDER_TYPE, PROVIDER_TYPE, error
+        )
+    except Exception as exc:  # noqa: BLE001 - startup still fails when the host boundary is absent
+        logger.error(
+            "OpenAI Subscribe could not install the source-write blocker: %s",
+            type(exc).__name__,
+        )
+    logger.error(
+        "OpenAI Subscribe startup blocked; configuration protection unavailable: %s",
+        error,
+    )
+
+
 def configure(context: Context, config: AstrBotConfig) -> None:
-    """Bind shared credentials to the current AstrBot configuration manager."""
-    global _config_mgr, _local_codex_store, _remove_source_guard, _credential_sealer
-    # Account records belong to the plugin view, not the generic source editor.
-    fields = CONFIG_METADATA_2["provider_group"]["metadata"]["provider"]["items"]
-    for key, field_type in (
-        ("oauth_gateway", "bool"),
-        ("oauth_accounts", "list"),
-        ("oauth_routing", "object"),
-    ):
-        fields[key] = {"type": field_type, "invisible": True}
-    _config_mgr = context.astrbot_config_mgr
-    _credential_sealer = FernetCredentialSealer(_credential_key_path())
-    messages.set_language(config.get("chat_language", messages.DEFAULT_LANGUAGE))
-    _local_codex_store = LocalCodexStore(str(config.get("codex_auth_path", "") or ""))
-    oauth.set_codex_home(_local_codex_store.path.parent)
-    coordinator = get_coordinator()
-    _remove_source_guard = source_editor.install(coordinator)
-    # Legacy migration only; explicit account modes replace this hidden setting.
-    coordinator.legacy_follow_local = config.get("follow_local_codex", True)
-    manager = getattr(context, "provider_manager", None)
-    if manager is not None:
+    """Check critical contracts before publishing account configuration hooks."""
+    global _config_mgr, _local_codex_store, _credential_sealer
+    global _remove_source_guard, _startup_error
+    failures = []
+    fields = None
+    try:
+        fields = _metadata_fields()
+    except source_editor.HookCompatibilityError as exc:
+        failures.append(str(exc))
+    try:
+        source_editor.check_hook()
+    except source_editor.HookCompatibilityError as exc:
+        failures.append(str(exc))
+    if failures:
+        error = source_editor.HookCompatibilityError(
+            "; ".join(failures)
+            + ". Provider source writes are blocked. Use a compatible AstrBot version and reload the plugin."
+        )
+        _block_startup(context, error)
+        raise error
 
-        def sync_sources(sources: list[dict[str, Any]]) -> None:
-            manager.provider_sources_config = sources
-            manager.providers_config = coordinator.config().get("provider", [])
+    definitions = {
+        "oauth_gateway": {"type": "bool", "invisible": True},
+        "oauth_accounts": {"type": "list", "invisible": True},
+        "oauth_routing": {"type": "object", "invisible": True},
+    }
+    missing = object()
+    previous = {key: fields.get(key, missing) for key in definitions}
+    try:
+        _config_mgr = context.astrbot_config_mgr
+        _credential_sealer = FernetCredentialSealer(_credential_key_path())
+        messages.set_language(config.get("chat_language", messages.DEFAULT_LANGUAGE))
+        _local_codex_store = LocalCodexStore(
+            str(config.get("codex_auth_path", "") or "")
+        )
+        oauth.set_codex_home(_local_codex_store.path.parent)
+        coordinator = _resolve_coordinator()
+        coordinator.check_write = ensure_compatible
+        fields.update(definitions)
+        _remove_source_guard = source_editor.install(
+            coordinator, check_available=ensure_compatible
+        )
+        # Legacy migration only; explicit account modes replace this hidden setting.
+        coordinator.legacy_follow_local = config.get("follow_local_codex", True)
+        manager = getattr(context, "provider_manager", None)
+        if manager is not None:
 
-        coordinator.providers.on_change = sync_sources
+            def sync_sources(sources: list[dict[str, Any]]) -> None:
+                manager.provider_sources_config = sources
+                manager.providers_config = coordinator.config().get("provider", [])
+
+            coordinator.providers.on_change = sync_sources
+    except Exception as exc:  # noqa: BLE001 - never continue with an unprotected account source
+        for key, value in previous.items():
+            if value is missing:
+                fields.pop(key, None)
+            else:
+                fields[key] = value
+        error = source_editor.HookCompatibilityError(
+            f"Critical configuration protection setup failed ({type(exc).__name__}). "
+            "Provider source writes are blocked. Check AstrBot compatibility and reload the plugin."
+        )
+        _block_startup(context, error)
+        raise error from None
+    _startup_error = None
+    logger.info(
+        "OpenAI Subscribe critical hooks ready: provider metadata fields, ProviderConfigService.upsert_provider_source"
+    )
 
 
 async def initialize(context: Context) -> None:
@@ -191,6 +277,6 @@ def terminate() -> None:
     if _remove_image_bridge is not None:
         _remove_image_bridge()
         _remove_image_bridge = None
-    if _remove_source_guard is not None:
+    if _remove_source_guard is not None and _startup_error is None:
         _remove_source_guard()
         _remove_source_guard = None

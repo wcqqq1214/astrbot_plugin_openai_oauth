@@ -350,6 +350,12 @@ class CredentialCoordinator:
         self._states: dict[str, CredentialStatus] = {}
         self._usage_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self.sealer: CredentialSealer | None = None
+        self.check_write: Callable[[], None] | None = None
+
+    def ensure_writable(self) -> None:
+        """Recheck host compatibility for operations retained across a reload."""
+        if self.check_write is not None:
+            self.check_write()
 
     @property
     def config_manager(self) -> Any:
@@ -455,6 +461,7 @@ class CredentialCoordinator:
         source: dict[str, Any],
         creds: dict[str, Any],
     ) -> CredentialSnapshot:
+        self.ensure_writable()
         source["key"] = dump_credentials(creds, self.sealer)
         committed = await self.config().save_config_async()
         persisted = self._snapshot_from_source(source_id, self.source(source_id))
@@ -533,6 +540,7 @@ class CredentialCoordinator:
                 self._states[resolved_source_id] = CredentialStatus("ready")
                 return snapshot
 
+            self.ensure_writable()
             source = self.source(resolved_source_id)
             self._states[resolved_source_id] = CredentialStatus("refreshing")
             try:

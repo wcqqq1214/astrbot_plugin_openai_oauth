@@ -25,6 +25,7 @@ from .credential_store import (
     ReauthenticationRequiredError,
 )
 from .oauth import CredentialExpiredError
+from .source_editor import HookCompatibilityError
 
 _WINDOW_KEYS = {18000: "window.5h", 604800: "window.7d", 2592000: "window.30d"}
 
@@ -150,6 +151,8 @@ async def fetch_usage(
 
 def failure_state(error: BaseException) -> str | None:
     """Map a quota lookup failure to a safe state shared by chat and WebUI."""
+    if isinstance(error, HookCompatibilityError):
+        return "incompatible"
     if isinstance(error, CredentialCooldownError):
         return "cooling"
     if isinstance(

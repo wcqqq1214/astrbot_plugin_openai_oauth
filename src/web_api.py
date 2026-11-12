@@ -22,6 +22,7 @@ from .oauth import (
     CODEX_DEVICE_VERIFY_URL,
     DeviceAuthError,
 )
+from .source_editor import HookCompatibilityError
 
 _MAX_LOGIN_SESSIONS = 8
 _MAX_LOGIN_SESSIONS_PER_USER = 2
@@ -34,6 +35,10 @@ def _login_request_error() -> str | None:
         return "session_identity_unavailable"
     if owner.startswith(API_KEY_USERNAME_PREFIX):
         return "api_key_not_allowed"
+    try:
+        runtime.ensure_compatible()
+    except HookCompatibilityError as exc:
+        return exc.code
     return None
 
 
@@ -44,7 +49,7 @@ def _login_error_response(code: str, status_code: int):
     """
     return json_response(
         {"status": "error", "message": code},
-        status_code=status_code,
+        status_code=503 if code == "incompatible_astrbot" else status_code,
         headers=_NO_STORE_HEADERS,
     )
 

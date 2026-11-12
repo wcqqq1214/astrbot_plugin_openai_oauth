@@ -58,6 +58,28 @@ The runner tests this checkout rather than the deployed plugin copy. Tests use
 isolated credentials to avoid reading or refreshing real accounts. Follow
 [AGENTS.md](../AGENTS.md) for repository conventions and local setup.
 
+## Critical AstrBot hooks
+
+Startup validates the provider metadata mapping and the asynchronous
+`ProviderConfigService.upsert_provider_source(service, source_id, config)` call
+contract before registering plugin metadata and account routes. Logs list the
+critical contracts that passed or failed. Image bridge hooks remain optional.
+
+A critical failure stops startup and blocks plugin account operations. When the
+save contract is recognizable, the retained blocker rejects only subscription
+source writes; when it is not recognizable, it rejects all source writes for the
+affected configuration instance. Other configuration instances retain their own
+save behavior. The blocker stays in place during failed-startup cleanup, and a
+successful reload on a compatible host replaces it with the normal account guard.
+Queued account-registry changes, credential refreshes and cooldown updates share
+a coordinator compatibility check at their write boundaries. Registry mutations
+roll back their in-memory changes if startup has failed; credential persistence
+checks before mutating the source. Refreshes also check before dispatch.
+The existing Plugin View returns `incompatible_astrbot` (HTTP 503) after a failed
+reload. If the host service itself cannot be imported or patched, startup still
+fails and logs that the blocker could not be installed; arbitrary replacement
+host interfaces cannot be guarded by this plugin.
+
 ## Releases
 
 CI runs the integration suite against the declared minimum AstrBot release and the

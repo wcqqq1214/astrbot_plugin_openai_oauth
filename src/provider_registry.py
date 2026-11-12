@@ -96,6 +96,11 @@ class ProviderRegistry:
             )
         return value.strip()
 
+    async def _save_config(self, conf: Any) -> Any:
+        # A queued operation may hold this registry across a failed plugin reload.
+        self.coordinator.ensure_writable()
+        return await conf.save_config_async()
+
     async def _save(self, previous: list[dict[str, Any]]) -> None:
         conf = self.coordinator.config()
         proposed = deepcopy(self.sources())
@@ -103,8 +108,8 @@ class ProviderRegistry:
         try:
             # A newer AstrBot snapshot can supersede this one; retry once.
             if (
-                await conf.save_config_async() is False
-                and await conf.save_config_async() is False
+                await self._save_config(conf) is False
+                and await self._save_config(conf) is False
             ):
                 raise CredentialPersistenceError(
                     "Provider configuration was not saved."
@@ -195,8 +200,8 @@ class ProviderRegistry:
         try:
             if (
                 changes
-                and await conf.save_config_async() is False
-                and await conf.save_config_async() is False
+                and await self._save_config(conf) is False
+                and await self._save_config(conf) is False
             ):
                 raise CredentialPersistenceError(
                     "Provider configuration was not saved."

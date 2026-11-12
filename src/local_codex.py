@@ -270,6 +270,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
         return status
 
     def ensure_inference_available(self, source_id: str) -> CredentialSnapshot:
+        self.ensure_writable()
         self.providers.ensure_enabled(source_id)
         snapshot = self.account_cooldown(self.read_snapshot(source_id))
         if snapshot.is_access_token_expired() and not snapshot.refresh_token:
@@ -393,6 +394,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
                     login is not None
                     and login.credentials["access_token"] == snapshot.access_token
                 ):
+                    self.ensure_writable()
                     self._states[source_id] = CredentialStatus("refreshing")
                     try:
                         refreshed = await self._refresh_credentials(
@@ -421,6 +423,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
                                 "Local Codex credential refresh failed. Retry the request."
                             ) from None
                     else:
+                        self.ensure_writable()
                         if (
                             self.local_store is not None
                             and self.local_store.write_refresh(login, refreshed)
@@ -463,6 +466,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
             )
         if expected_access_token and expected_access_token != snapshot.access_token:
             return snapshot
+        self.ensure_writable()
         self._local_cooldowns[snapshot.account_id] = (cooldown_until, reason)
         self._usage_cache.pop(source_id, None)
         return self.read_snapshot(source_id)
