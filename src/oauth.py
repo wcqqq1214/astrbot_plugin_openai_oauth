@@ -15,6 +15,8 @@ import os
 import platform
 import re
 import time
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +25,11 @@ from astrbot.core.utils.network_utils import create_proxy_client, is_connection_
 from httpx import HTTPStatusError
 from openai import APIConnectionError, APIError
 
-from .credential_store import token_account_id
+from .credential_store import (
+    CredentialRefreshError,
+    ReauthenticationRequiredError,
+    token_account_id,
+)
 
 CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
@@ -178,11 +184,17 @@ async def refresh_access_token(creds: dict, proxy: str | None = None) -> dict:
         )
         resp.raise_for_status()
         data = resp.json()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - sanitize token endpoint failures
         logger.error(
-            "OpenAI Codex token refresh request failed: %s", type(exc).__name__
+            "OpenAI Codex token refresh request failed: %s", safe_error_summary(exc)
         )
-        raise
+        if classify_codex_error(exc) == "credential":
+            raise ReauthenticationRequiredError(
+                "OpenAI credentials require reauthorization."
+            ) from None
+        raise CredentialRefreshError(
+            "OpenAI credential refresh failed. Retry the request."
+        ) from None
     finally:
         await client.aclose()
 
@@ -439,6 +451,43 @@ def classify_codex_error(error: BaseException) -> str:
     return "other"
 
 
+_SAFE_ERROR_CODES = frozenset(
+    {
+        "invalid_grant",
+        "invalid_token",
+        "rate_limit_exceeded",
+        "usage_limit_reached",
+        "server_error",
+        "internal_server_error",
+        "service_unavailable",
+        "overloaded",
+        "overloaded_error",
+    }
+)
+
+
+def safe_error_summary(error: BaseException) -> str:
+    """Log only a numeric HTTP status and allowlisted upstream error codes."""
+    status = _status_code(error)
+    code, _, _ = _error_details(error)
+    safe_code = code if code in _SAFE_ERROR_CODES else "unknown"
+    safe_status = status if status is not None and 100 <= status <= 599 else "unknown"
+    return f"{type(error).__name__} status={safe_status} code={safe_code}"
+
+
+def _poll_retry_delay(response: Any, fallback: float) -> float:
+    """Honor delta-seconds or HTTP-date Retry-After without accepting nonfinite values."""
+    value = getattr(response, "headers", {}).get("Retry-After", "")
+    try:
+        delay = float(value)
+    except (TypeError, ValueError):
+        try:
+            delay = (parsedate_to_datetime(value) - datetime.now(UTC)).total_seconds()
+        except (TypeError, ValueError, OverflowError):
+            return fallback
+    return max(fallback, delay) if math.isfinite(delay) else fallback
+
+
 async def request_device_user_code(proxy: str | None = None) -> tuple[str, str, int]:
     """Request a device code; returns ``(device_auth_id, user_code, interval)``.
 
@@ -486,26 +535,51 @@ async def poll_device_authorization(
     """
     client = create_proxy_client("OpenAI Codex", proxy)
     deadline = time.monotonic() + timeout_seconds
+    delay = max(float(interval), 0.01)
+    failures = 0
     try:
         while time.monotonic() < deadline:
-            await asyncio.sleep(interval)
+            await asyncio.sleep(min(delay, max(0, deadline - time.monotonic())))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             try:
-                resp = await client.post(
-                    CODEX_DEVICE_TOKEN_URL,
-                    json={"device_auth_id": device_auth_id, "user_code": user_code},
-                    headers={"Accept": "application/json"},
-                    timeout=30,
-                )
-            except Exception:  # noqa: BLE001 - a transient network error only delays polling
+                async with asyncio.timeout(remaining):
+                    resp = await client.post(
+                        CODEX_DEVICE_TOKEN_URL,
+                        json={"device_auth_id": device_auth_id, "user_code": user_code},
+                        headers={"Accept": "application/json"},
+                        timeout=min(30, remaining),
+                    )
+            except Exception as exc:  # noqa: BLE001 - classify network failures safely
+                if not is_connection_error(exc):
+                    raise DeviceAuthError(
+                        "Device login polling failed.", code="device_poll_failed"
+                    ) from None
+                failures += 1
+                delay = max(float(interval), min(2 ** min(failures, 6), 60))
                 logger.warning(
-                    "Codex device login poll failed on the network; retrying."
+                    "Codex device login poll failed; retrying: %s",
+                    safe_error_summary(exc),
                 )
                 continue
             if resp.status_code == 200:
                 data = resp.json()
                 return data["authorization_code"], data["code_verifier"]
             if resp.status_code in (403, 404):
+                failures = 0
+                delay = max(float(interval), 0.01)
                 continue  # Not authorized yet.
+            if resp.status_code == 429 or 500 <= resp.status_code <= 599:
+                failures += 1
+                delay = _poll_retry_delay(
+                    resp, max(float(interval), min(2 ** min(failures, 6), 60))
+                )
+                logger.warning(
+                    "Codex device login poll failed; retrying: status=%s",
+                    resp.status_code,
+                )
+                continue
             raise DeviceAuthError(
                 f"Device login polling failed: HTTP {resp.status_code}",
                 code="device_poll_failed",

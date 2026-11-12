@@ -41,6 +41,7 @@ from .codex_stream import CodexStreamMixin
 from .credential_store import (
     CredentialCooldownError,
     CredentialError,
+    CredentialRefreshError,
     CredentialSchemaError,
     CredentialSnapshot,
     CredentialsNotConfiguredError,
@@ -469,7 +470,9 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         except (CredentialError, CredentialExpiredError):
             return list(CODEX_FALLBACK_MODELS)
         except Exception as exc:  # noqa: BLE001 - catalog failure uses offline fallback
-            logger.error("OpenAI Codex model catalog failed: %s", type(exc).__name__)
+            logger.error(
+                "OpenAI Codex model catalog failed: %s", oauth.safe_error_summary(exc)
+            )
         return list(CODEX_FALLBACK_MODELS)
 
     async def _subscription_cooldown_error(
@@ -494,7 +497,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         except Exception as exc:  # noqa: BLE001 - a failed usage lookup is non-fatal
             logger.warning(
                 "OpenAI Codex quota lookup after rate limit failed: %s",
-                type(exc).__name__,
+                oauth.safe_error_summary(exc),
             )
         if cooldown_until is None:
             cooldown_until = provisional.cooldown_until or int(time.time()) + 300
@@ -592,6 +595,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                             raise
                         reasons = (
                             (ProviderDisabledError, "disabled"),
+                            (CredentialRefreshError, "temporary"),
                             (CredentialCooldownError, "cooling"),
                             (ReauthenticationRequiredError, "reauth_required"),
                             (CredentialsNotConfiguredError, "not_logged_in"),

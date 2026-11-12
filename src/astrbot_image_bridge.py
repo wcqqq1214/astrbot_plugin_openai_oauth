@@ -11,6 +11,7 @@ from importlib import import_module
 from importlib.util import find_spec
 from weakref import WeakKeyDictionary
 
+from astrbot import logger
 from astrbot.core.agent.message import ImageURLPart
 from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.utils.media_utils import resolve_media_ref_to_base64_data
@@ -167,6 +168,10 @@ def shape_messages(messages, *, codex: bool):
     return shaped
 
 
+class ImageBridgeCompatibilityError(RuntimeError):
+    """A required AstrBot image bridge hook is unavailable."""
+
+
 def install(provider_type: str):
     """Enable stable dispatchers without removing another plugin's wrappers."""
     from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
@@ -177,10 +182,55 @@ def install(provider_type: str):
     first_install = state is None
     if first_install:
         state = {"active": False, "previews": WeakKeyDictionary()}
-        setattr(ToolLoopAgentRunner, _STATE_ATTR, state)
 
-    def patch(target, name, handler):
-        original = getattr(target, name)
+    legacy_module = "astrbot.core.astr_main_agent"
+    astr_main_agent = import_module(legacy_module) if find_spec(legacy_module) else None
+    if hasattr(astr_main_agent, "_compress_image_for_provider"):
+        targets = [
+            (astr_main_agent, "_compress_image_for_provider", "compress", first_install)
+        ]
+    else:
+        from astrbot.core.utils import image_input
+
+        targets = [(image_input, "prepare_model_image", "prepare", first_install)]
+    targets.extend(
+        [
+            (ToolLoopAgentRunner, "reset", "reset", first_install),
+            (ProviderRequest, "assemble_context", "assemble", first_install),
+            (
+                ToolLoopAgentRunner,
+                "_sanitize_contexts_for_provider",
+                "sanitize",
+                first_install,
+            ),
+            (
+                ToolLoopAgentRunner,
+                "_handle_function_tools",
+                "tool_scope",
+                not state.get("draw_patched"),
+            ),
+        ]
+    )
+    if hasattr(ToolLoopAgentRunner, "_resolve_tool_exec"):
+        targets.append(
+            (
+                ToolLoopAgentRunner,
+                "_resolve_tool_exec",
+                "tool_requery",
+                not state.get("draw_patched"),
+            )
+        )
+    resolved = []
+    for target, name, handler, needed in targets:
+        original = getattr(target, name, None)
+        if not callable(original):
+            raise ImageBridgeCompatibilityError(
+                f"Unavailable image bridge hook: {name}"
+            )
+        if needed:
+            resolved.append((target, name, handler, original))
+
+    def dispatcher(original, handler):
         if asyncio.iscoroutinefunction(original):
 
             @wraps(original)
@@ -196,27 +246,7 @@ def install(provider_type: str):
                     return state[handler](original, *args, **kwargs)
                 return original(*args, **kwargs)
 
-        setattr(target, name, dispatch)
-
-    if first_install:
-        legacy_module = "astrbot.core.astr_main_agent"
-        astr_main_agent = (
-            import_module(legacy_module) if find_spec(legacy_module) else None
-        )
-        if hasattr(astr_main_agent, "_compress_image_for_provider"):
-            patch(astr_main_agent, "_compress_image_for_provider", "compress")
-        else:
-            from astrbot.core.utils import image_input
-
-            patch(image_input, "prepare_model_image", "prepare")
-        patch(ToolLoopAgentRunner, "reset", "reset")
-        patch(ProviderRequest, "assemble_context", "assemble")
-        patch(ToolLoopAgentRunner, "_sanitize_contexts_for_provider", "sanitize")
-    if not state.get("draw_patched"):
-        patch(ToolLoopAgentRunner, "_handle_function_tools", "tool_scope")
-        if hasattr(ToolLoopAgentRunner, "_resolve_tool_exec"):
-            patch(ToolLoopAgentRunner, "_resolve_tool_exec", "tool_requery")
-        state["draw_patched"] = True
+        return dispatch
 
     def remember(preview, original, montage=False):
         if preview != original and (task := asyncio.current_task()) is not None:
@@ -279,16 +309,41 @@ def install(provider_type: str):
                 yield item
 
     generation = object()
-    state.update(
-        active=True,
-        generation=generation,
-        prepare=prepare,
-        compress=compress,
-        reset=reset,
-        assemble=assemble,
-        sanitize=sanitize,
-        tool_scope=tool_scope,
-        tool_requery=tool_requery,
+    handlers = {
+        "active": True,
+        "draw_patched": True,
+        "generation": generation,
+        "prepare": prepare,
+        "compress": compress,
+        "reset": reset,
+        "assemble": assemble,
+        "sanitize": sanitize,
+        "tool_scope": tool_scope,
+        "tool_requery": tool_requery,
+    }
+
+    patches = [
+        (target, name, original, dispatcher(original, handler))
+        for target, name, handler, original in resolved
+    ]
+    if first_install:
+        state.update({**handlers, "active": False})
+    applied = []
+    try:
+        for target, name, original, dispatch in patches:
+            setattr(target, name, dispatch)
+            applied.append((target, name, original, dispatch))
+        if first_install:
+            setattr(ToolLoopAgentRunner, _STATE_ATTR, state)
+    except Exception:
+        for target, name, original, dispatch in reversed(applied):
+            if getattr(target, name, None) is dispatch:
+                setattr(target, name, original)
+        raise
+    state.update(handlers)
+    logger.info(
+        "OpenAI Subscribe image bridge enabled: %s",
+        ", ".join(name for _, name, _, _ in targets),
     )
 
     def remove():

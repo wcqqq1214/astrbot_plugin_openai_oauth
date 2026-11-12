@@ -134,7 +134,7 @@ async def _handle_device_start() -> Any:
         login.discard_session(session_id)
         logger.error(
             "OpenAI Codex device-code request failed: %s",
-            type(exc).__name__,
+            oauth.safe_error_summary(exc),
         )
         return _login_error_response("device_login_unavailable", 502)
     if (
@@ -353,7 +353,7 @@ async def _handle_account_usage() -> Any:
             )
         if state is not None:
             return json_response({"status": "invalid"}, headers=_NO_STORE_HEADERS)
-        logger.error("OpenAI Codex usage API failed: %s", type(exc).__name__)
+        logger.error("OpenAI Codex usage API failed: %s", oauth.safe_error_summary(exc))
         return _login_error_response("usage_failed", 502)
     return json_response(
         {"status": "success", "usage": usage, "account": account},

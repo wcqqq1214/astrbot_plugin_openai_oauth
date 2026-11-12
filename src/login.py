@@ -263,7 +263,9 @@ async def _run_device_login(session_id: str, proxy: str) -> None:
     except Exception as exc:  # noqa: BLE001 - report a generic error without credential data
         session.status = LoginStatus.ERROR
         session.error = "login_failed"
-        logger.error("OpenAI Codex device login failed: %s", type(exc).__name__)
+        logger.error(
+            "OpenAI Codex device login failed: %s", oauth.safe_error_summary(exc)
+        )
     finally:
         if _login_sessions.get(session_id) is session:
             schedule_session_expiry(session_id, _LOGIN_RESULT_TTL_SECONDS)
@@ -303,7 +305,9 @@ async def _run_command_device_login(
             )
         )
     except Exception as exc:  # noqa: BLE001 - never send provider or credential details
-        logger.error("OpenAI Codex admin device login failed: %s", type(exc).__name__)
+        logger.error(
+            "OpenAI Codex admin device login failed: %s", oauth.safe_error_summary(exc)
+        )
         await event.send(MessageChain().message(messages.text("login.save_failed")))
     else:
         await event.send(
@@ -379,7 +383,7 @@ async def handle_login(event: AstrMessageEvent, action: str | None = None) -> No
         except Exception as exc:  # noqa: BLE001 - keep network details out of chat
             logger.error(
                 "OpenAI Codex admin device-code request failed: %s",
-                type(exc).__name__,
+                oauth.safe_error_summary(exc),
             )
             await event.send(
                 MessageChain().message(messages.text("login.start_unavailable"))

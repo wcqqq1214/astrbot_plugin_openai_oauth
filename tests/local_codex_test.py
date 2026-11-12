@@ -267,7 +267,9 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_expired_token_does_not_silently_use_another_account(self):
         self.write(auth(expires=1))
-        self.refresh.side_effect = RuntimeError("secret token endpoint details")
+        self.refresh.side_effect = store.ReauthenticationRequiredError(
+            "secret token endpoint details"
+        )
         with self.assertRaises(store.ReauthenticationRequiredError) as caught:
             await self.coordinator.get_snapshot()
         self.assertNotIn("secret", str(caught.exception))

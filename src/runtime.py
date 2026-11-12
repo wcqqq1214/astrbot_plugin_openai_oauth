@@ -170,7 +170,18 @@ async def initialize(context: Context) -> None:
     finally:
         if selected_id in instances:
             manager.curr_provider_inst = instances[selected_id]
-    _remove_image_bridge = astrbot_image_bridge.install(PROVIDER_TYPE)
+    try:
+        _remove_image_bridge = astrbot_image_bridge.install(PROVIDER_TYPE)
+    except Exception as exc:  # noqa: BLE001 - optional image integration must not block chat
+        if _remove_image_bridge is not None:
+            _remove_image_bridge()
+            _remove_image_bridge = None
+        detail = (
+            str(exc)
+            if isinstance(exc, astrbot_image_bridge.ImageBridgeCompatibilityError)
+            else type(exc).__name__
+        )
+        logger.warning("OpenAI Subscribe image bridge disabled: %s", detail)
 
 
 def terminate() -> None:

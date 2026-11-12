@@ -18,6 +18,7 @@ from . import messages, oauth, runtime
 from .credential_store import (
     CredentialCooldownError,
     CredentialError,
+    CredentialRefreshError,
     CredentialSchemaError,
     CredentialSnapshot,
     CredentialsNotConfiguredError,
@@ -162,6 +163,8 @@ def failure_state(error: BaseException) -> str | None:
         return "reauth_required"
     if isinstance(error, CredentialSchemaError):
         return "unsupported"
+    if isinstance(error, CredentialRefreshError):
+        return None
     if isinstance(error, CredentialError):
         return "invalid"
     return None
@@ -209,7 +212,9 @@ async def build_usage_message(source_id: str = runtime.PROVIDER_TYPE) -> str:
             return _format_cooldown(exc.cooldown_until)
         if state is not None:
             return messages.text(f"usage.{state}")
-        logger.error("OpenAI Codex usage request failed: %s", type(exc).__name__)
+        logger.error(
+            "OpenAI Codex usage request failed: %s", oauth.safe_error_summary(exc)
+        )
         return messages.text("usage.failed")
 
     return format_usage(usage)

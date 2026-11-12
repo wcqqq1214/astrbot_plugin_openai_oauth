@@ -66,6 +66,12 @@ class ReauthenticationRequiredError(CredentialError):
     code = "reauth_required"
 
 
+class CredentialRefreshError(CredentialError):
+    """A refresh failed without proving that the credentials are invalid."""
+
+    code = "refresh_failed"
+
+
 class CredentialPersistenceError(CredentialError):
     """A refreshed credential could not be confirmed in persistent config."""
 
@@ -539,14 +545,21 @@ class CredentialCoordinator:
                     },
                     self.source_settings(resolved_source_id)["proxy"] or None,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - sanitize refresh callback failures
                 if not snapshot.is_access_token_expired() and not force_refresh:
                     self._states[resolved_source_id] = CredentialStatus("degraded")
                     return snapshot
-                self._states[resolved_source_id] = CredentialStatus("reauth_required")
-                raise ReauthenticationRequiredError(
-                    "OpenAI credentials require reauthorization."
-                ) from exc
+                if isinstance(exc, ReauthenticationRequiredError):
+                    self._states[resolved_source_id] = CredentialStatus(
+                        "reauth_required"
+                    )
+                    raise ReauthenticationRequiredError(
+                        "OpenAI credentials require reauthorization."
+                    ) from None
+                self._states[resolved_source_id] = CredentialStatus("degraded")
+                raise CredentialRefreshError(
+                    "OpenAI credential refresh failed. Retry the request."
+                ) from None
 
             latest = self.read_snapshot(resolved_source_id)
             if (

@@ -972,7 +972,9 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
     ):
         self.provider._source_id = "same"
         self.catalog_outcomes = [httpx.Response(400, json={"error": "invalid_grant"})]
-        self.refresh.side_effect = RuntimeError("refresh rejected")
+        self.refresh.side_effect = store.ReauthenticationRequiredError(
+            "refresh rejected"
+        )
         self.assertEqual(await self.provider.get_models(), oauth.CODEX_FALLBACK_MODELS)
         self.refresh.assert_awaited_once()
         self.assertEqual(len(self.catalog_requests), 1)
@@ -1105,9 +1107,26 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.requested()[-1], "other")
         self.assertEqual(self.refresh.await_count, 1)
 
+    async def test_temporary_forced_refresh_failure_recovers_on_next_chat(self):
+        await self.registry.edit("local", enabled=False)
+        successful_refresh = self.refresh.side_effect
+        self.refresh.side_effect = store.CredentialRefreshError("Retry the request.")
+        self.outcomes["same"] = [401]
+        await self.collect()
+        self.assertEqual(self.requested(), ["same", "other"])
+        self.assertEqual(self.coordinator.status("same").state, "degraded")
+
+        self.refresh.side_effect = successful_refresh
+        self.outcomes["same"] = [401]
+        await self.collect()
+        self.assertEqual(self.requested(), ["same", "other", "same", "same"])
+        self.assertEqual(self.coordinator.status("same").state, "ready")
+        self.assertEqual(self.refresh.await_count, 2)
+        self.assertTrue(self.transports_released())
+
     async def test_failed_forced_refresh_does_not_reuse_rejected_token(self):
         await self.registry.edit("local", enabled=False)
-        self.refresh.side_effect = RuntimeError("token rejected")
+        self.refresh.side_effect = store.ReauthenticationRequiredError("token rejected")
         self.outcomes["same"] = [401]
         await self.collect()
         self.assertEqual(self.requested(), ["same", "other"])

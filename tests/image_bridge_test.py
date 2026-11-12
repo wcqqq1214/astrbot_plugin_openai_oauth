@@ -16,6 +16,7 @@ from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest.mock import patch
 
 REPO_ROOT = os.path.abspath(
     os.environ.get("ASTRBOT_ROOT")
@@ -382,6 +383,111 @@ class ImageBridgeTests(unittest.IsolatedAsyncioTestCase):
                         b64decode(images[0]["url"].split(",", 1)[1]),
                         compliant.read_bytes(),
                     )
+
+
+class InstallationTests(unittest.TestCase):
+    def setUp(self):
+        if hasattr(astr_main_agent, "_compress_image_for_provider"):
+            image_target = (astr_main_agent, "_compress_image_for_provider")
+        else:
+            from astrbot.core.utils import image_input
+
+            image_target = (image_input, "prepare_model_image")
+        self.targets = [image_target, (ProviderRequest, "assemble_context")]
+        self.targets.extend(
+            (ToolLoopAgentRunner, name)
+            for name in (
+                "reset",
+                "_sanitize_contexts_for_provider",
+                "_handle_function_tools",
+                "_resolve_tool_exec",
+            )
+            if hasattr(ToolLoopAgentRunner, name)
+        )
+        saved_state = getattr(ToolLoopAgentRunner, bridge._STATE_ATTR, None)
+        if saved_state is not None:
+            delattr(ToolLoopAgentRunner, bridge._STATE_ATTR)
+            self.addCleanup(
+                setattr, ToolLoopAgentRunner, bridge._STATE_ATTR, saved_state
+            )
+        else:
+            self.addCleanup(self.clear_state)
+        self.originals = []
+        for target, name in self.targets:
+            saved = original = getattr(target, name)
+            while hasattr(original, "__wrapped__"):
+                original = original.__wrapped__
+            setattr(target, name, original)
+            self.addCleanup(setattr, target, name, saved)
+            self.originals.append((target, name, original))
+
+    def clear_state(self):
+        if hasattr(ToolLoopAgentRunner, bridge._STATE_ATTR):
+            delattr(ToolLoopAgentRunner, bridge._STATE_ATTR)
+
+    def assert_untouched(self):
+        self.assertFalse(hasattr(ToolLoopAgentRunner, bridge._STATE_ATTR))
+        for target, name, original in self.originals:
+            self.assertIs(getattr(target, name), original)
+
+    def test_missing_required_hook_does_not_patch_other_methods(self):
+        original = ToolLoopAgentRunner._handle_function_tools
+        delattr(ToolLoopAgentRunner, "_handle_function_tools")
+        try:
+            with self.assertRaisesRegex(
+                bridge.ImageBridgeCompatibilityError, "_handle_function_tools"
+            ):
+                bridge.install(CODEX)
+        finally:
+            ToolLoopAgentRunner._handle_function_tools = original
+        self.assert_untouched()
+        remove = bridge.install(CODEX)
+        self.assertTrue(getattr(ToolLoopAgentRunner, bridge._STATE_ATTR)["active"])
+        remove()
+
+    def test_noncallable_hook_is_rejected(self):
+        with (
+            patch.object(ProviderRequest, "assemble_context", None),
+            self.assertRaises(bridge.ImageBridgeCompatibilityError),
+        ):
+            bridge.install(CODEX)
+        self.assert_untouched()
+
+    def test_assignment_and_state_publication_failures_roll_back_and_retry(self):
+        for failing_name in ("assemble_context", bridge._STATE_ATTR):
+            with self.subTest(failing_name=failing_name):
+
+                def assign(target, name, value, failing_name=failing_name):
+                    if name == failing_name:
+                        raise RuntimeError("Injected installation failure")
+                    setattr(target, name, value)
+
+                with (
+                    patch.object(bridge, "setattr", side_effect=assign, create=True),
+                    self.assertRaises(RuntimeError),
+                ):
+                    bridge.install(CODEX)
+                self.assert_untouched()
+        remove = bridge.install(CODEX)
+        installed = ToolLoopAgentRunner.reset
+        next_remove = bridge.install(CODEX)
+        self.assertIs(ToolLoopAgentRunner.reset, installed)
+        remove()
+        self.assertTrue(getattr(ToolLoopAgentRunner, bridge._STATE_ATTR)["active"])
+        next_remove()
+        self.assertFalse(getattr(ToolLoopAgentRunner, bridge._STATE_ATTR)["active"])
+
+    def test_optional_tool_requery_hook_can_be_absent(self):
+        original = getattr(ToolLoopAgentRunner, "_resolve_tool_exec", None)
+        if original is not None:
+            delattr(ToolLoopAgentRunner, "_resolve_tool_exec")
+        try:
+            remove = bridge.install(CODEX)
+            self.assertTrue(getattr(ToolLoopAgentRunner, bridge._STATE_ATTR)["active"])
+            remove()
+        finally:
+            if original is not None:
+                ToolLoopAgentRunner._resolve_tool_exec = original
 
 
 if __name__ == "__main__":

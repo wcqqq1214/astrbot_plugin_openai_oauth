@@ -111,6 +111,35 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.completion_text, "ok")
         self.assertEqual(seen, ["Bearer " + self.creds["access_token"]])
 
+    async def test_missing_image_hook_does_not_block_text_chat(self):
+        from astrbot.core.agent.runners.tool_loop_agent_runner import (
+            ToolLoopAgentRunner,
+        )
+
+        with (
+            patch.object(ToolLoopAgentRunner, "_handle_function_tools", None),
+            patch.object(runtime.logger, "warning") as warning,
+        ):
+            await self.test_reload_replaces_retained_instances_and_existing_model_can_infer()
+        self.assertIsNone(runtime._remove_image_bridge)
+        self.assertIn("_handle_function_tools", str(warning.call_args))
+        await runtime.initialize(self.context)
+        self.assertIsNotNone(runtime._remove_image_bridge)
+
+    async def test_unexpected_image_install_error_is_safely_degraded(self):
+        with (
+            patch.object(
+                runtime.astrbot_image_bridge,
+                "install",
+                side_effect=RuntimeError("private error details"),
+            ),
+            patch.object(runtime.logger, "warning") as warning,
+        ):
+            await self.test_reload_replaces_retained_instances_and_existing_model_can_infer()
+        self.assertIsNone(runtime._remove_image_bridge)
+        self.assertIn("RuntimeError", str(warning.call_args))
+        self.assertNotIn("private error details", str(warning.call_args))
+
     async def test_startup_does_not_load_models_before_provider_manager(self):
         with patch.object(self.manager, "reload", new=AsyncMock()) as reload:
             await runtime.initialize(self.context)

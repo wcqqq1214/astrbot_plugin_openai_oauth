@@ -22,6 +22,7 @@ from .credential_store import (
     CredentialCoordinator,
     CredentialError,
     CredentialPersistenceError,
+    CredentialRefreshError,
     CredentialSnapshot,
     CredentialSourceError,
     CredentialStatus,
@@ -398,7 +399,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
                             login.credentials,
                             self.source_settings(source_id)["proxy"] or None,
                         )
-                    except Exception:  # noqa: BLE001 - never expose token endpoint errors
+                    except Exception as exc:  # noqa: BLE001 - never expose token endpoint errors
                         latest = self.read_snapshot(source_id)
                         if latest != snapshot:
                             pass
@@ -407,12 +408,17 @@ class LocalCredentialCoordinator(CredentialCoordinator):
                         ):
                             self._states[source_id] = CredentialStatus("degraded")
                             return snapshot
-                        else:
+                        elif isinstance(exc, ReauthenticationRequiredError):
                             self._states[source_id] = CredentialStatus(
                                 "reauth_required"
                             )
                             raise ReauthenticationRequiredError(
                                 "Sign in to local Codex again."
+                            ) from None
+                        else:
+                            self._states[source_id] = CredentialStatus("degraded")
+                            raise CredentialRefreshError(
+                                "Local Codex credential refresh failed. Retry the request."
                             ) from None
                     else:
                         if (
