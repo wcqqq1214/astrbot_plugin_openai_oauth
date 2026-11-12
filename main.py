@@ -26,6 +26,7 @@ from .src import (
 from .src.credential_store import (
     CredentialCooldownError,
     CredentialError,
+    CredentialRefreshError,
     ReauthenticationRequiredError,
 )
 from .src.provider import ProviderOpenAICodex
@@ -161,6 +162,8 @@ class OpenAI_OAuth_Plugin(Star):
             return messages.text("image.usage_limit")
         except ReauthenticationRequiredError:
             return messages.text("usage.reauth_required")
+        except CredentialRefreshError:
+            return messages.text("image.failed")
         except CredentialError:
             return messages.text("image.account_changed")
         except Exception as exc:  # noqa: BLE001 - do not disclose upstream or adapter details
