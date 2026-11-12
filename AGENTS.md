@@ -20,11 +20,13 @@ The plugin has its own uv-managed virtualenv (`.venv`, Python 3.12.13) that
 holds **only the plugin's own dependencies**. AstrBot — and all of AstrBot's
 framework dependencies — is *not* installed here; the plugin gets it from the
 AstrBot process at runtime. This plugin currently adds no runtime
-dependencies of its own (`httpx`, the `openai` SDK and `cryptography` come from
+dependencies of its own (`httpx`, the `openai` SDK, `cryptography` and Pillow come from
 AstrBot).
 
 - `uv sync` — install or refresh the plugin's dependencies.
 - `uv run ruff check .` / `uv run ruff format .` — lint and format.
+- `uv run python tests/run_unit_tests.py` — framework-free regressions.
+- `uv run mypy` — type-check the framework-free core modules.
 
 Anything that needs to `import astrbot` (e.g. integration checks) must run
 against the local AstrBot checkout's venv instead, so it uses the same

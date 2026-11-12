@@ -118,6 +118,7 @@ def configure(context: Context, config: AstrBotConfig) -> None:
     oauth.set_codex_home(_local_codex_store.path.parent)
     coordinator = get_coordinator()
     _remove_source_guard = source_editor.install(coordinator)
+    # Legacy migration only; explicit account modes replace this hidden setting.
     coordinator.legacy_follow_local = config.get("follow_local_codex", True)
     manager = getattr(context, "provider_manager", None)
     if manager is not None:

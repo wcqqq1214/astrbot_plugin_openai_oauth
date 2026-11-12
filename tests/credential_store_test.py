@@ -3,24 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
-import os
 import sys
+from pathlib import Path
 
-REPO_ROOT = os.path.abspath(
-    os.environ.get("ASTRBOT_ROOT")
-    or os.path.join(os.path.dirname(__file__), "..", "..", "AstrBot")
-)
-sys.path.insert(0, REPO_ROOT)
-os.chdir(REPO_ROOT)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-store = importlib.import_module(
-    "data.plugins.astrbot_plugin_openai_oauth.src.credential_store"
-)
-local_codex = importlib.import_module(
-    "data.plugins.astrbot_plugin_openai_oauth.src.local_codex"
-)
+from src import credential_store as store
+from src import local_codex
 
 FAILED: list[str] = []
 

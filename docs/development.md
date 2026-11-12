@@ -24,16 +24,28 @@ rules and [screenshot notes](../images/README.md) for image provenance.
 ## Checks
 
 The plugin's uv environment contains only its own development dependencies.
-AstrBot and its framework dependencies are provided by the host process.
+AstrBot and its framework dependencies (httpx, the OpenAI SDK, cryptography and
+Pillow) are provided by the host process. Runtime dependencies remain empty in
+both `requirements.txt` and `pyproject.toml`; mypy and Ruff are development tools.
 
 ```sh
 uv sync
 uv run ruff check .
 uv run ruff format --check .
+uv run python tests/run_unit_tests.py
+uv run mypy
 node tests/view_test.mjs
 ```
 
-Run `tests/run_tests.py` with the local AstrBot checkout's virtualenv Python:
+The fast runner needs no AstrBot checkout: it imports the internal `src` package
+directly, blocks AstrBot imports, and uses temporary credential paths. It covers
+credential coordination, local-file rotation, registry persistence, routing budgets,
+transport lifetimes, and the version reminder. The existing credential regressions
+run in both layers. mypy checks the five framework-free core modules with
+`check_untyped_defs`; framework imports are skipped, and this is not whole-plugin
+strict typing.
+
+Run the complete integration suite with the local AstrBot checkout's virtualenv Python:
 
 ```sh
 /path/to/AstrBot/.venv/bin/python tests/run_tests.py
@@ -51,6 +63,15 @@ isolated credentials to avoid reading or refreshing real accounts. Follow
 CI runs the integration suite against the declared minimum AstrBot release and the
 newest verified one, and a weekly run tests the latest AstrBot release. When a new
 AstrBot release passes, update the newest version in `.github/workflows/test.yml`.
+
+[Dependabot](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/auto-update-actions) checks pinned GitHub Actions and uv development dependencies weekly.
+The separate `codex-release` CI job runs weekly and on manual workflow dispatch.
+It compares the built-in version with the latest stable `openai/codex` release,
+adds a workflow summary, and fails on version drift so maintainers can see it in
+workflow notifications (subject to their GitHub notification settings). It never
+changes version or model constants. Review protocol compatibility, the offline
+model fallback and image model, then update only after verification. Fetch or
+metadata failures also fail the job rather than silently reporting up-to-date.
 
 Pushing `main` runs tests without publishing a release. To release:
 

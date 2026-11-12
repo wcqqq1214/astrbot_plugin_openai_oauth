@@ -103,7 +103,7 @@ Describe the orientation, aspect ratio, and composition in the prompt. The plugi
 
 To skip follow-up questions from the model, use `/draw <prompt>` to submit the image request directly. The command uses the account that handled the most recent successful OpenAI Subscribe chat in the current conversation. After a plugin reload, chat again in the current conversation before using `/draw`.
 
-Image generation uses the chat account's OAuth credentials and subscription through the Codex Images backend. The chat tool uses the account that answered the current turn. The model is displayed as **GPT Image**, and the ChatGPT backend selects the actual version.
+Image generation uses the chat account's OAuth credentials and subscription through the Codex Images backend. The chat tool uses the account that answered the current turn. The plugin uses a built-in image model identifier; availability depends on the ChatGPT backend.
 
 Leave the image account source ID empty to follow chat, or enter a source ID to allow drawing only when that source actually handled the chat. If the account is unavailable or differs from the configured source, drawing reports the problem without switching accounts.
 
@@ -161,6 +161,10 @@ the key in `data/plugin_data/astrbot_plugin_openai_oauth/credential.key` (set
 backup you restore; accounts without it, or after downgrading to a version without
 encryption, need to sign in again. Use HTTPS, a VPN, or an SSH tunnel for a public Dashboard. Use your own account
 and follow OpenAI’s terms of service.
+This is a third-party integration using Codex client identifiers to access ChatGPT
+backend endpoints, outside the public API’s compatibility guarantees. Upstream
+interface or account policy changes may interrupt features, invalidate authentication,
+or restrict access; the plugin cannot guarantee continued availability.
 
 ## Development and license
 

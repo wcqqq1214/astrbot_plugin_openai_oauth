@@ -6,7 +6,7 @@ readme = "README.md"
 license = { text = "AGPL-3.0" }
 requires-python = ">=3.12"
 # The plugin's own runtime dependencies. AstrBot (and its framework
-# dependencies, including httpx, the openai SDK and cryptography) is provided by the
+# dependencies, including httpx, the openai SDK, cryptography and Pillow) is provided by the
 # AstrBot process the plugin runs in.
 dependencies = []
 
@@ -15,9 +15,21 @@ package = false
 
 [dependency-groups]
 dev = [
+    "mypy>=1.15,<2",
     "ruff>=0.9,<1",
 ]
 
 [tool.ruff.lint.per-file-ignores]
 # Test files must set up sys.path/os.chdir before importing astrbot.
 "tests/*_test.py" = ["E402"]
+
+[tool.mypy]
+files = [
+    "src/credential_store.py",
+    "src/local_codex.py",
+    "src/provider_registry.py",
+    "src/provider_routing.py",
+    "src/transport_pool.py",
+]
+follow_imports = "skip"
+check_untyped_defs = true

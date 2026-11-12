@@ -29,15 +29,6 @@
     "default": false,
     "hint": "允许使用 /draw 和 LLM 生图工具。使用当前聊天的 OAuth 账号及订阅权益。"
   },
-  "image_model": {
-    "description": "生图模型",
-    "type": "string",
-    "default": "GPT Image",
-    "options": [
-      "GPT Image"
-    ],
-    "hint": "实际使用的模型版本由 ChatGPT 后端决定。"
-  },
   "image_account": {
     "description": "生图账号来源 ID（可选）",
     "type": "string",

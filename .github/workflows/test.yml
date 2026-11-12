@@ -36,6 +36,12 @@ jobs:
           uv run ruff format --check .
           uv run ruff check .
 
+      - name: Run framework-free tests
+        run: uv run python tests/run_unit_tests.py
+
+      - name: Type-check core modules
+        run: uv run mypy
+
       - name: Check version references
         run: python3.12 .github/scripts/release_check.py versions
 
@@ -94,3 +100,23 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/AstrBot/data/plugins"
           "$GITHUB_WORKSPACE/AstrBot/.venv/bin/python" \
             "$GITHUB_WORKSPACE/astrbot_plugin_openai_oauth/tests/run_tests.py"
+
+  codex-release:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Fetch latest stable Codex release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api repos/openai/codex/releases/latest > "$RUNNER_TEMP/codex-release.json"
+
+      - name: Check built-in Codex version
+        run: python3.12 .github/scripts/check_codex_release.py "$RUNNER_TEMP/codex-release.json"
