@@ -13,7 +13,16 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.message.components import Image
 from astrbot.core.star.filter.command import GreedyStr
 
-from .src import effort, image_generation, login, messages, runtime, usage, web_api
+from .src import (
+    effort,
+    image_generation,
+    login,
+    messages,
+    oauth,
+    runtime,
+    usage,
+    web_api,
+)
 from .src.credential_store import (
     CredentialCooldownError,
     CredentialError,
@@ -156,7 +165,8 @@ class OpenAI_OAuth_Plugin(Star):
             return messages.text("image.account_changed")
         except Exception as exc:  # noqa: BLE001 - do not disclose upstream or adapter details
             logger.warning(
-                "Codex image generation or delivery failed: %s", type(exc).__name__
+                "Codex image generation or delivery failed: %s",
+                oauth.safe_error_summary(exc),
             )
             return messages.text("image.failed")
         return None

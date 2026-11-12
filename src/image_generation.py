@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import httpx
+from astrbot import logger
 from PIL import Image
 
 from . import oauth, runtime
@@ -156,10 +157,15 @@ async def generate(
                         coordinator.mark_reauthentication(snapshot)
                         raise ImageError("usage.reauth_required")
                     if response.status_code == 403:
+                        logger.warning("Codex image request rejected: status=403")
                         raise ImageError("image.forbidden")
                     if response.status_code == 429:
                         raise ImageError(await _rate_limit_message(response))
                     if not response.is_success:
+                        logger.warning(
+                            "Codex image request failed: status=%s",
+                            response.status_code,
+                        )
                         raise ImageError("image.failed")
                     body = bytearray()
                     async for chunk in response.aiter_bytes():
@@ -170,6 +176,7 @@ async def generate(
     except httpx.TimeoutException as exc:
         raise ImageError("image.timeout") from exc
     except httpx.HTTPError as exc:
+        logger.warning("Codex image request failed: %s", oauth.safe_error_summary(exc))
         raise ImageError("image.failed") from exc
     raise ImageError("image.failed")
 

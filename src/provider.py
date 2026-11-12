@@ -425,12 +425,14 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                     or oauth.classify_codex_error(exc) != "temporary"
                 ):
                     raise
+                failure = oauth.safe_error_summary(exc)
             finally:
                 await stream.close()
 
             delay = min(2 ** min(attempts - 1, 5), REQUEST_RETRY_WAIT_MAX_S)
             logger.warning(
-                "OpenAI Codex stream failed before output; retrying (%s/%s) in %ss.",
+                "OpenAI Codex stream failed before output: %s; retrying (%s/%s) in %ss.",
+                failure,
                 attempts + 1,
                 max_attempts,
                 delay,
