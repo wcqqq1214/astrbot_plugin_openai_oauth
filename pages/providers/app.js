@@ -524,9 +524,10 @@ function providerRow(id) {
   const copy = element("span", "provider-copy");
   const title = element("span", "provider-title");
   const name = element("strong", "provider-name");
+  const defaultTag = element("span", "row-tag default");
   const disabledTag = element("span", "row-tag");
   const autoTag = element("span", "row-tag auto");
-  title.append(name, disabledTag, autoTag);
+  title.append(name, defaultTag, disabledTag, autoTag);
   const sub = element("span", "provider-sub");
   copy.append(title, sub);
   // Row summary: a status dot and the plan while healthy, the
@@ -550,7 +551,7 @@ function providerRow(id) {
   toggle.append(element("span", "switch-track"));
   toggle.addEventListener("click", () => void toggleEnabled(id));
   row.append(main, gear, toggle);
-  node = { panel, row, main, icon, name, disabledTag, autoTag, sub, meta, metaText, gear, toggle, iconMode: null };
+  node = { panel, row, main, icon, name, defaultTag, disabledTag, autoTag, sub, meta, metaText, gear, toggle, iconMode: null };
   rowNodes.set(id, node);
   return node;
 }
@@ -579,6 +580,9 @@ function renderProviders() {
       (enabled ? "" : " disabled");
     node.main.setAttribute("aria-expanded", String(panel.expanded));
     node.name.textContent = providerName(provider);
+    node.defaultTag.textContent = t.defaultAccountTitle;
+    node.defaultTag.hidden = accountRouting?.default_account_id !== provider.id;
+    node.defaultTag.setAttribute("title", t.defaultAccountActiveHelp);
     node.disabledTag.textContent = t.disabledTag;
     node.disabledTag.hidden = enabled;
     node.autoTag.textContent = t.autoTag;
@@ -937,6 +941,7 @@ async function setDefaultAccount() {
     const result = await bridge.apiPost("routing/update", {account_id: session.sourceId});
     if (result?.status !== "success" || !result.routing) throw new Error(t.saveUnknown);
     accountRouting = result.routing;
+    renderProviders();
   } catch (error) {
     session.error = messageText(error.message) || t.saveUnknown;
   } finally {

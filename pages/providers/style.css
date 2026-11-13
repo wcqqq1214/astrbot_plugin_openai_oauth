@@ -861,6 +861,7 @@ dialog::backdrop {
   line-height: 18px;
   white-space: nowrap;
 }
+.row-tag.default,
 .row-tag.auto {
   background: var(--primary-soft);
   color: var(--primary-strong);
