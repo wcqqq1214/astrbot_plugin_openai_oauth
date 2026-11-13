@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [v2.5.0] - 2026-11-14
+
+### Added
+
+- Show a default-account badge directly in the plugin account list, including when only one account is configured.
+- Select an account or follow the default from each model's native OpenAI Subscribe editor. Preserve existing model bindings and hide the selector when only one account is available.
+
+### Changed
+
+- Move default-account selection into the account settings gear menu for multi-account setups, replacing the separate account-selection section. Refine the account settings layout and feedback.
+
+### Fixed
+
+- Recover from OAuth refresh failures without treating temporary network or upstream failures as an expired login.
+- Validate critical AstrBot integration hooks before startup and block subscription configuration writes when those contracts are incompatible. Optional image hooks degrade safely.
+- Report transient credential refresh errors as image-generation failures and include upstream status in retry and image-failure logs.
+
 ## [v2.4.0] - 2026-11-11
 
 ### Added
