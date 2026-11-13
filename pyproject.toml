@@ -15,7 +15,7 @@ package = false
 
 [dependency-groups]
 dev = [
-    "mypy>=1.15,<2",
+    "mypy>=1.15,<3",
     "ruff>=0.9,<1",
 ]
 
