@@ -155,17 +155,24 @@ class ProviderRegistry:
             return self._pending_routing
         return (self.gateway() or {}).get(ROUTING_KEY, {})
 
+    def model_binding(self, model_id: str | None) -> str | None:
+        if self._pending_routing is not None:
+            return self._pending_routing.get("models", {}).get(model_id)
+        for model in self.coordinator.config().get("provider", []):
+            if model.get("id") == model_id and "oauth_account_id" in model:
+                return model["oauth_account_id"] or None
+        return self.routing().get("models", {}).get(model_id)
+
     def resolve_model(self, model_id: str | None, legacy_source: str) -> str:
         routing = self.routing()
         return (
-            routing.get("models", {}).get(model_id)
+            self.model_binding(model_id)
             or routing.get("default_account_id")
             or legacy_source
         )
 
     def routing_view(self) -> dict[str, Any]:
         c = self.coordinator
-        bindings = self.routing().get("models", {})
         account_ids = (
             {c.default_source_id}
             if self.gateway() is not None
@@ -176,7 +183,7 @@ class ProviderRegistry:
                 "default_account_id", c.default_source_id
             ),
             "models": [
-                {"id": m["id"], "account_id": bindings.get(m["id"])}
+                {"id": m["id"], "account_id": self.model_binding(m["id"])}
                 for m in c.config().get("provider", [])
                 if m.get("provider_source_id") in account_ids | {c.default_source_id}
                 or (
@@ -250,9 +257,23 @@ class ProviderRegistry:
                     routing["models"].pop(model_id, None)
                 else:
                     routing["models"][model_id] = account_id
-            self._pending_routing = deepcopy(self.routing())
+            pending = deepcopy(self.routing())
+            pending["models"] = {
+                m["id"]: m["account_id"] for m in self.routing_view()["models"]
+            }
+            self._pending_routing = pending
             try:
-                await self._commit_configuration({ROUTING_KEY: routing}, target=gateway)
+                models = deepcopy(self.coordinator.config().get("provider", []))
+                model_config = next(
+                    (m for m in models if m.get("id") == model_id), None
+                )
+                if model_config is not None and "oauth_account_id" in model_config:
+                    model_config["oauth_account_id"] = account_id or ""
+                    await self._commit_configuration({"provider": models})
+                else:
+                    await self._commit_configuration(
+                        {ROUTING_KEY: routing}, target=gateway
+                    )
             finally:
                 self._pending_routing = None
 
@@ -530,8 +551,7 @@ class ProviderRegistry:
                 routing = self.routing()
                 active_models = {m["id"] for m in self.routing_view()["models"]}
                 if routing.get("default_account_id") == source_id or any(
-                    account == source_id and model in active_models
-                    for model, account in routing.get("models", {}).items()
+                    self.model_binding(model) == source_id for model in active_models
                 ):
                     raise CredentialSourceError(
                         "Select another default account and update model account bindings first.",

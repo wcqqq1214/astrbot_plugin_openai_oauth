@@ -16,7 +16,8 @@
   --line: rgb(208 208 208 / 60%);
   --line-strong: #d0d0d0;
   --primary: #3c96ca;
-  --primary-strong: #2f86bd;
+  --primary-strong: #216b97;
+  --primary-fill: #246f9d;
   --primary-soft: color-mix(in srgb, var(--primary) 12%, transparent);
   --on-primary: #ffffff;
   --track: color-mix(in srgb, var(--primary) 16%, transparent);
@@ -155,11 +156,11 @@ summary:focus-visible {
   padding: 5px 10px;
 }
 .button.primary {
-  background: var(--primary);
+  background: var(--primary-fill);
   color: var(--on-primary);
 }
 .button.primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--primary) 88%, #000);
+  background: color-mix(in srgb, var(--primary-fill) 88%, #000);
 }
 .button.quiet {
   background: transparent;
@@ -1149,6 +1150,64 @@ dialog::backdrop {
 .settings-account-row .button {
   flex-shrink: 0;
 }
+/* The default account is an immediate action, separate from draft fields. */
+.settings-default {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: var(--hairline) solid var(--line);
+}
+.settings-default-copy {
+  flex: 1 1 180px;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.settings-default h3 {
+  line-height: 1.4;
+}
+.settings-body .field-hint,
+.settings-body .danger-copy span {
+  color: var(--secondary);
+}
+.settings-default .field-hint {
+  text-wrap: pretty;
+}
+.settings-default-action {
+  max-width: 100%;
+  flex: 0 1 auto;
+}
+.settings-default .button {
+  min-height: 40px;
+  max-width: 100%;
+  white-space: normal;
+  text-align: start;
+}
+.settings-default .button[aria-busy="true"] {
+  cursor: progress;
+}
+.settings-default-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  color: var(--secondary);
+  font-size: 13px;
+}
+.settings-default-status svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.settings-default-status:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
 /* Destructive actions live in their own tinted box, apart from Save. */
 .danger-zone {
   display: flex;
@@ -1212,7 +1271,7 @@ dialog::backdrop {
 }
 @media (max-width: 600px) {
   .account-center {
-    padding: 16px 14px 24px;
+    padding: 16px 16px 24px;
   }
   .page-heading {
     flex-wrap: wrap;
@@ -1311,9 +1370,3 @@ dialog::backdrop {
     letter-spacing: 3px;
   }
 }
-
-.account-routing { margin: 0 0 24px; padding: 18px 0; border-bottom: 1px solid var(--line); }
-.account-routing h2 { margin: 0 0 8px; font-size: 15px; }
-.account-route-field { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 12px; }
-.account-route-field > span { overflow-wrap: anywhere; }
-.account-route-field select { width: min(50%, 280px); flex: 0 0 auto; }

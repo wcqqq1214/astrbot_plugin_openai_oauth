@@ -7,6 +7,7 @@ from copy import deepcopy
 from functools import wraps
 from inspect import iscoroutinefunction, signature
 
+from . import model_editor
 from .credential_store import CredentialError, account_sources
 from .provider_registry import ACCOUNTS_KEY, ROUTING_KEY
 
@@ -159,8 +160,10 @@ def install(coordinator, *, check_available=None):
 
     setattr(guarded, _ORIGINAL, original)
     ProviderConfigService.upsert_provider_source = guarded
+    remove_model_editor = model_editor.install(coordinator)
 
     def remove():
+        remove_model_editor()
         if ProviderConfigService.upsert_provider_source is guarded:
             ProviderConfigService.upsert_provider_source = original
 

@@ -13,7 +13,13 @@ The dashboard's Plugin View client handles the surrounding extension proxy.
 
 AstrBot contains one source with ID/type `OpenAI Subscribe` and `oauth_gateway: true`.
 Its `oauth_accounts` array holds the independent account records. `oauth_routing`
-holds `default_account_id` and a `models` map from model ID to preferred account ID.
+holds `default_account_id` and a legacy `models` map from model ID to preferred account ID.
+AstrBot’s configured-model editor exposes `oauth_account_id` on subscription models:
+an empty string follows the default, while an account ID pins that model. When present,
+this model field takes precedence over the legacy map. The routing API reads both
+representations and keeps edited model fields synchronized on writes. The selector
+is hidden with fewer than two accounts. Default selection lives in each account’s
+Plugin View settings, also only with multiple accounts.
 These fields stay inside the source in `data/cmd_config.json`: AstrBot removes
 unknown top-level config keys on startup. The gateway's `key` remains empty;
 credentials are resolved from the selected account immediately before dispatch.

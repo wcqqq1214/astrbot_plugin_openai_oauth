@@ -28,12 +28,6 @@
       <p id="page-error" class="error" role="alert" hidden></p>
       <p id="save-error" class="error" role="alert" hidden></p>
 
-      <section id="account-routing" class="account-routing" aria-labelledby="account-routing-title" hidden>
-        <h2 id="account-routing-title"></h2>
-        <p id="account-routing-help" class="field-hint"></p>
-        <div id="account-routing-fields"></div>
-      </section>
-
       <!-- Each provider owns its independently expandable allowance panel. -->
       <div id="providers" class="provider-list" aria-label="Providers"></div>
 
@@ -130,6 +124,19 @@
           </div>
           <p id="settings-routing-help" class="field-hint"></p>
         </div>
+        <section id="settings-default-section" class="settings-default" aria-labelledby="settings-default-title" hidden>
+          <div class="settings-default-copy">
+            <h3 id="settings-default-title" class="field-label">默认账号</h3>
+            <p id="settings-default-help" class="field-hint"></p>
+          </div>
+          <div class="settings-default-action">
+            <span id="settings-default-status" class="settings-default-status" role="status" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4 10-10" /></svg>
+              <span id="settings-default-status-text"></span>
+            </span>
+            <button id="settings-default" class="button" type="button" aria-describedby="settings-default-help">设为默认账号</button>
+          </div>
+        </section>
         <!-- Account actions act immediately and never save the draft above. -->
         <section id="settings-account" class="settings-section" aria-labelledby="settings-account-label">
           <h3 id="settings-account-label" class="field-label">账号</h3>

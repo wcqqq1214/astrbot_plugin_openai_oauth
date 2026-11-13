@@ -43,7 +43,7 @@ In ChatGPT, open **Settings → Security and login** and turn on
 
 1. Open **Plugin Views → providers** on the plugin’s detail page. Click **Add account → Get device code**. The name is optional.
 2. Copy the authorization link into your browser, sign in to ChatGPT, and enter the code.
-3. After **Account saved**, choose the default account under **Account selection** in the plugin page. Then add models under **OpenAI Subscribe** in AstrBot.
+3. After **Account saved**, add models under **OpenAI Subscribe** in AstrBot.
 
 Each addition keeps its own login without replacing another account. You can cancel
 or get a new code if it expires. **Never share the code; enter it only on OpenAI’s authorization page.**
@@ -57,8 +57,8 @@ The source ID is fixed to `OpenAI Subscribe` and cannot be renamed. Refresh any 
 
 The plugin creates this source automatically, so it is not listed in **Add Provider**. To add models, select the existing **OpenAI Subscribe** source.
 
-- **Default account** is used by new models and models set to **Follow default account**.
-- **Account selection** can pin each model to an account or follow the default. Changes save immediately and apply to the next request. Migrated models retain their previous account.
+- **Default account**: with multiple accounts, open the account’s gear menu and click **Set as default account**. This saves immediately. The action is hidden for a single account.
+- **Model bindings**: in AstrBot, open **OpenAI Subscribe → configured model → Edit** and choose **Model account**, or **Follow default**. The selector is hidden for a single account. New models follow the default; existing models retain their bindings.
 
 - **Click an account row** to see its allowance. You can expand several at once. The page refreshes every 30 seconds while open; missing data doesn’t mean unlimited usage.
 - **Click the gear** to edit the name or routing mode, then save. Device-code accounts can also be reauthorized or removed here.
@@ -68,7 +68,7 @@ The plugin creates this source automatically, so it is not listed in **Add Provi
 
 *Accounts and allowances shown are examples. The page follows AstrBot’s language setting and supports Chinese, English, Russian, and Japanese.*
 
-Before removing an account, select another default and change its pinned models to another account or **Follow default account**. Local Codex is
+Before removing an account, change the default and clear its model bindings. Local Codex is
 managed on the host and can’t be deleted here. To change your chat model, use
 AstrBot’s model settings; opening an account row only shows its details.
 

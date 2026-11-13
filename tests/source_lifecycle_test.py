@@ -57,6 +57,47 @@ class SourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(save.stop)
         self.addCleanup(source_editor.install(self.coordinator))
 
+    async def test_native_model_account_editor(self):
+        await self.registry.migrate()
+        schema = self.service.get_provider_schema()
+        field = schema["config_schema"]["provider"]["items"]["oauth_account_id"]
+        self.assertFalse(field["invisible"])
+        self.assertEqual(field["options"][1:], [a["id"] for a in self.registry.owned()])
+        with patch.object(
+            self.registry, "owned", return_value=self.registry.owned()[:1]
+        ):
+            self.assertTrue(
+                self.service.get_provider_schema()["config_schema"]["provider"][
+                    "items"
+                ]["oauth_account_id"]["invisible"]
+            )
+        model = schema["providers"][0]
+        self.assertEqual(
+            model["oauth_account_id"], self.registry.model_binding(model["id"])
+        )
+        model["oauth_account_id"] = "missing-account"
+        with self.assertRaises(fixtures.store.CredentialSourceError):
+            await self.service.update_provider(model["id"], model)
+        model["oauth_account_id"] = ""
+        with (
+            patch.object(self.manager, "reload", new_callable=AsyncMock),
+            patch.object(self.conf, "save_config", create=True) as save,
+        ):
+            await self.service.update_provider(model["id"], model)
+        save.assert_called_once()
+        self.assertEqual(self.conf["provider"][0]["oauth_account_id"], "")
+        self.assertIsNone(self.registry.model_binding(model["id"]))
+        self.assertEqual(
+            self.registry.resolve_model(model["id"], "legacy"),
+            self.registry.routing()["default_account_id"],
+        )
+        await self.registry.update_routing(
+            self.registry.owned()[0]["id"], model_id=model["id"]
+        )
+        self.assertEqual(
+            self.conf["provider"][0]["oauth_account_id"], self.registry.owned()[0]["id"]
+        )
+
     def sync(self, sources):
         self.manager.provider_sources_config = sources
         self.manager.providers_config = self.conf["provider"]

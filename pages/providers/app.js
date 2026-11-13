@@ -555,69 +555,6 @@ function providerRow(id) {
   return node;
 }
 
-let accountRouting = null;
-let routingBusy = false;
-let routingRenderKey = "";
-
-function renderAccountRouting() {
-  const section = byId("account-routing");
-  section.hidden = !accountRouting;
-  if (!accountRouting) return;
-  byId("account-routing-title").textContent = t.accountRoutingTitle;
-  byId("account-routing-help").textContent = t.accountRoutingHelp;
-  const signature = JSON.stringify([accountRouting, routingBusy, language, providers.map(p => [p.id, providerName(p)])]);
-  if (signature === routingRenderKey) return;
-  routingRenderKey = signature;
-  const fields = byId("account-routing-fields");
-  fields.replaceChildren();
-  const addSelect = (labelText, accountId, modelId = null) => {
-    const label = element("label", "account-route-field");
-    const caption = element("span");
-    caption.textContent = labelText;
-    const select = element("select", "text-input");
-    select.disabled = routingBusy;
-    select.setAttribute("aria-label", labelText);
-    const addOption = (value, text) => {
-      const option = element("option");
-      option.value = value;
-      option.textContent = text;
-      select.append(option);
-    };
-    if (modelId !== null) addOption("", t.followDefault);
-    for (const provider of providers) addOption(provider.id, providerName(provider));
-    select.value = accountId || "";
-    select.addEventListener("change", () => void saveAccountRouting(select.value || null, modelId));
-    label.append(caption, select);
-    fields.append(label);
-  };
-  addSelect(t.defaultAccount, accountRouting.default_account_id);
-  for (const model of accountRouting.models || []) addSelect(model.id, model.account_id, model.id);
-}
-
-async function saveAccountRouting(accountId, modelId) {
-  if (routingBusy) return;
-  routingBusy = true;
-  renderAccountRouting();
-  showSaveError("");
-  let error = null;
-  try {
-    const body = {account_id: accountId};
-    if (modelId !== null) body.model_id = modelId;
-    const result = await bridge.apiPost("routing/update", body);
-    if (result?.status !== "success" || !result.routing) throw new Error(t.saveUnknown);
-    accountRouting = result.routing;
-  } catch (reason) {
-    error = reason;
-  } finally {
-    // Ignore older list requests that started before this write completed.
-    listedSeq = ++listRequestSeq;
-    routingBusy = false;
-    renderAccountRouting();
-  }
-  try { await loadProviders(); } catch (reason) { error ||= reason; }
-  if (error) showSaveError(() => t.saveFailed(t.accountRoutingTitle, messageText(error.message) || t.saveUnknown));
-}
-
 function renderProviders() {
   const order = [];
   for (const confirmed of providers) {
@@ -678,7 +615,6 @@ function renderProviders() {
   // The login result card reads the saved provider from this list.
   if (login.phase === "success") renderLogin();
   syncSettings();
-  renderAccountRouting();
 }
 
 async function selectProvider(id) {
@@ -762,6 +698,9 @@ async function queryProvider(id) {
   }
 }
 
+let accountRouting = null;
+let defaultAccountBusy = false;
+
 async function loadProviders() {
   const since = mutationSeq;
   const listed = ++listRequestSeq;
@@ -769,7 +708,7 @@ async function loadProviders() {
   if (listed < listedSeq) return;
   if (!Array.isArray(list?.providers)) throw new Error();
   providers = list.providers.map((p) => keepNewerEdits(p, since));
-  if (!routingBusy && list.routing) accountRouting = list.routing;
+  if (!defaultAccountBusy) accountRouting = list.routing || null;
   listedSeq = listed;
   showPageError("");
   renderProviders();
@@ -987,6 +926,33 @@ function settingsChanges(session = settings) {
   return changes;
 }
 
+async function setDefaultAccount() {
+  const session = settings;
+  if (!session || session.busy || defaultAccountBusy || providers.length < 2) return;
+  const restoreFocus = document.activeElement === byId("settings-default");
+  defaultAccountBusy = true;
+  session.error = "";
+  renderSettings();
+  try {
+    const result = await bridge.apiPost("routing/update", {account_id: session.sourceId});
+    if (result?.status !== "success" || !result.routing) throw new Error(t.saveUnknown);
+    accountRouting = result.routing;
+  } catch (error) {
+    session.error = messageText(error.message) || t.saveUnknown;
+  } finally {
+    listedSeq = ++listRequestSeq;
+    defaultAccountBusy = false;
+    renderSettings();
+    if (settings === session && restoreFocus &&
+        (document.activeElement === document.body || document.activeElement === byId("settings-default"))) {
+      const target = accountRouting?.default_account_id === session.sourceId
+        ? byId("settings-default-status") : byId("settings-default");
+      if (target === byId("settings-default-status")) target.setAttribute("tabindex", "-1");
+      target.focus();
+    }
+  }
+}
+
 function renderSettings() {
   const session = settings;
   if (!session) return;
@@ -1010,7 +976,18 @@ function renderSettings() {
       byId("settings-icon").innerHTML = providerIcons[iconMode];
     }
   }
-  const busy = Boolean(session.busy);
+  const busy = Boolean(session.busy) || defaultAccountBusy;
+  const defaultButton = byId("settings-default");
+  byId("settings-default-section").hidden = providers.length < 2 || !accountRouting;
+  const isDefault = accountRouting?.default_account_id === session.sourceId;
+  byId("settings-default-title").textContent = t.defaultAccountTitle;
+  byId("settings-default-help").textContent = isDefault ? t.defaultAccountActiveHelp : t.defaultAccountHelp;
+  byId("settings-default-status").hidden = !isDefault;
+  byId("settings-default-status-text").textContent = t.currentDefault;
+  defaultButton.hidden = isDefault;
+  defaultButton.textContent = defaultAccountBusy ? t.saving : t.setDefault;
+  defaultButton.setAttribute("aria-busy", String(defaultAccountBusy));
+  defaultButton.disabled = busy || isDefault || !provider;
   const nameMissing = !session.draft.name.trim();
   settingsNameInput.disabled = busy;
   settingsNameInput.setAttribute("aria-invalid", String(nameMissing));
@@ -1045,7 +1022,7 @@ function renderSettingsAccount(session, view) {
   const state = String(view.status || "unknown");
   byId("settings-account-text").textContent =
     view.email || t.states[state] || t.states.unknown;
-  const busy = Boolean(session.busy);
+  const busy = Boolean(session.busy) || defaultAccountBusy;
   byId("settings-reauth").disabled = busy;
   const armed = session.removeArmed;
   const remove = byId("settings-remove");
@@ -1075,7 +1052,7 @@ function endSettings(focusTarget = null) {
 // Cancel, the close button and Escape all discard the draft. A save in
 // flight cannot be undone, so the dialog stays until it settles.
 function closeSettings() {
-  if (!settings || settings.busy) return;
+  if (!settings || settings.busy || defaultAccountBusy) return;
   endSettings();
 }
 
@@ -1092,7 +1069,7 @@ function syncSettings() {
 }
 
 function setSettingsRouting(mode) {
-  if (!settings || settings.busy) return;
+  if (!settings || settings.busy || defaultAccountBusy) return;
   settings.draft.routing_mode = mode;
   renderSettings();
 }
@@ -1629,7 +1606,7 @@ byId("add-provider").addEventListener("click", () => openLogin());
 settingsRouting.fixed.addEventListener("click", () => setSettingsRouting("fixed"));
 settingsRouting.auto.addEventListener("click", () => setSettingsRouting("auto"));
 settingsNameInput.addEventListener("input", () => {
-  if (!settings || settings.busy) return;
+  if (!settings || settings.busy || defaultAccountBusy) return;
   settings.draft.name = String(settingsNameInput.value || "");
   renderSettings();
 });
@@ -1638,6 +1615,7 @@ settingsNameInput.addEventListener("keydown", (event) => {
   if (event.isComposing || event.keyCode === 229) return;
   if (event.key === "Enter") void saveSettings();
 });
+byId("settings-default").addEventListener("click", () => void setDefaultAccount());
 settingsSave.addEventListener("click", () => void saveSettings());
 settingsCancel.addEventListener("click", closeSettings);
 closeSettingsButton.addEventListener("click", closeSettings);
@@ -1656,7 +1634,7 @@ settingsDialog.addEventListener("close", () => {
   // Native close events are queued and can arrive after a new session opens
   // or after a suspended session resumes from device login.
   if (settingsDialog.open || !settings || settings.suspended) return;
-  if (settings.busy) settingsDialog.showModal();
+  if (settings.busy || defaultAccountBusy) settingsDialog.showModal();
   else endSettings();
 });
 async function closeLogin() {

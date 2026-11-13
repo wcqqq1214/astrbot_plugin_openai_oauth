@@ -1470,7 +1470,7 @@ bridge.apiPost = async (endpoint, body) => {
   } finally { --liveRequests; }
 };
 const freshPage = () => vm.runInNewContext(
-  `(async () => {${source}\n await queryUsage(); return {queryUsage, selectProvider, loadProviders, rowNodes, saveAccountRouting, strings, resolveLanguage, formatAbsolute, formatRelative, windowLabel, openSettings, openLogin, failLogin};})()`,
+  `(async () => {${source}\n await queryUsage(); return {queryUsage, selectProvider, loadProviders, rowNodes, strings, resolveLanguage, formatAbsolute, formatRelative, windowLabel, openSettings, openLogin, failLogin};})()`,
   {window, document, navigator, console, URL},
 );
 const multi = await freshPage();
@@ -1658,48 +1658,41 @@ assert.equal(reloaded.resolveLanguage("fr-FR"), "en");
 assert.equal(reloaded.resolveLanguage("__proto__"), "en");
 console.log("Four-language regressions passed: complete dictionaries, startup/context locales, dates/windows, default/custom names, dialogs/errors, ARIA labels and AstrBot plugin metadata.");
 
-// Default and per-model account selection use the authenticated routing API.
-const routeAccounts = [{...account, id: "local", name: "Local Codex"}, {...device, id: "work", name: "Work"}];
-let routeState = {default_account_id: "local", models: [{id: "model-one", account_id: "local"}]};
-const routeWrites = [];
-let routeFailure = false;
-let routeHold = null;
+// Default selection belongs to the account settings and saves independently.
+let defaultState = {default_account_id: "local", models: []};
+let defaultAccounts = [{...account, id: "local"}, {...device, id: "work"}];
+let failDefault = false;
 bridge.apiPost = async (endpoint, body) => {
-  if (endpoint === "providers/list") return {providers: routeAccounts, routing: structuredClone(routeState)};
-  if (endpoint === "account/usage") return {status: "success", account: routeAccounts.find(p => p.id === body.source_id), usage: {windows: []}};
+  if (endpoint === "providers/list") return {providers: defaultAccounts, routing: structuredClone(defaultState)};
+  if (endpoint === "account/usage") return {status: "success", account: defaultAccounts.find(p => p.id === body.source_id), usage: {windows: []}};
   if (endpoint === "routing/update") {
-    routeWrites.push({...body});
-    if (routeHold) await routeHold.promise;
-    if (routeFailure) throw new Error("write rejected");
-    if (body.model_id) routeState.models.find(m => m.id === body.model_id).account_id = body.account_id;
-    else routeState.default_account_id = body.account_id;
-    return {status: "success", routing: structuredClone(routeState)};
+    if (failDefault) throw new Error("default rejected");
+    defaultState.default_account_id = body.account_id;
+    return {status: "success", routing: structuredClone(defaultState)};
   }
   throw new Error(`Unexpected endpoint ${endpoint}`);
 };
-initialLocale = "zh-CN";
-const routePage = await freshPage();
-assert.equal(shown("account-routing"), true);
-const selectors = () => ids.get("account-routing-fields").children.map(label => label.children[1]);
-assert.equal(selectors().length, 2);
-assert.equal(selectors()[0].value, "local");
-assert.equal(selectors()[1].children[0].textContent, "跟随默认账号");
-routeHold = deferred();
-const routeSave = routePage.saveAccountRouting("work", null);
-assert.ok(selectors().every(select => select.disabled));
-await routePage.saveAccountRouting("local", null);
-assert.equal(routeWrites.length, 1, "routing writes are serialized");
-routeHold.resolve();
-await routeSave;
-routeHold = null;
-assert.equal(selectors()[0].value, "work");
-assert.equal(selectors()[1].value, "local", "existing model keeps its preference");
-await routePage.saveAccountRouting(null, "model-one");
-assert.equal(selectors()[1].value, "");
-assert.deepEqual(routeWrites[1], {account_id: null, model_id: "model-one"});
-routeFailure = true;
-await routePage.saveAccountRouting("local", null);
-assert.equal(selectors()[0].value, "work", "failed writes reload authoritative selection");
-assert.match(read("save-error"), /write rejected/);
-assert.ok(selectors().every(select => !select.disabled));
-console.log("Single-source account selection passed: defaults, model preferences, serialization and failed-save reconciliation.");
+ids.get("settings-dialog").open = false;
+ids.get("login-dialog").open = false;
+const defaultPage = await freshPage();
+defaultPage.openSettings("work");
+assert.equal(shown("settings-default-section"), true);
+assert.equal(ids.get("settings-default").disabled, false);
+failDefault = true;
+await click(ids.get("settings-default"));
+assert.match(read("settings-error"), /default rejected/);
+assert.equal(defaultState.default_account_id, "local");
+failDefault = false;
+ids.get("settings-default").focus();
+await click(ids.get("settings-default"));
+assert.equal(defaultState.default_account_id, "work");
+assert.equal(ids.get("settings-default").disabled, true);
+assert.equal(shown("settings-default"), false);
+assert.equal(shown("settings-default-status"), true);
+assert.equal(document.activeElement, ids.get("settings-default-status"));
+assert.ok(read("settings-default-status-text"));
+assert.equal(ids.get("settings-default").getAttribute("aria-busy"), "false");
+defaultAccounts = [defaultAccounts[1]];
+await defaultPage.loadProviders();
+assert.equal(shown("settings-default-section"), false);
+console.log("Default account settings passed: multi-account action, failure recovery and single-account hiding.");
