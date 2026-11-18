@@ -10,4 +10,4 @@
 /images export-ignore
 /tests export-ignore
 /pyproject.toml export-ignore
-/uv.lock export-ignore
+/uv.lock export-ignore -diff

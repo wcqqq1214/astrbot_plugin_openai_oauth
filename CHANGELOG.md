@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [v2.5.1] - 2026-11-18
+
+### Changed
+
+- Bump codex-rs-cli version to 0.170.0
+- Default fallback bumped to latest gpt-6 series
+
 ## [v2.5.0] - 2026-11-14
 
 ### Added

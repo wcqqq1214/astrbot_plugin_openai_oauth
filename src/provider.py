@@ -162,7 +162,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         super().__init__(provider_config, provider_settings)
         self.api_keys = [self._bootstrap_access_token]
         self.chosen_api_key = self._bootstrap_access_token
-        self.set_model(provider_config.get("model", "gpt-5.4-mini"))
+        self.set_model(provider_config.get("model") or CODEX_FALLBACK_MODELS[0])
 
     def get_keys(self) -> list[str]:
         return [self._bootstrap_access_token]

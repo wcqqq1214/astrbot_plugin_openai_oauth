@@ -51,15 +51,10 @@ CODEX_DEVICE_LOGIN_TIMEOUT = 15 * 60
 # Models reachable through a ChatGPT subscription. The live catalog comes from
 # GET /codex/models; this list is the offline fallback for the WebUI dropdown.
 CODEX_FALLBACK_MODELS = [
-    "gpt-5.6-sol",
-    "gpt-5.6-terra",
-    "gpt-5.6-luna",
-    "gpt-5.5",
-    "gpt-5.5-pro",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.3-codex",
-    "gpt-5.3-codex-spark",
+    "gpt-6.2-astra",
+    "gpt-6.2-sol",
+    "gpt-6.1-terra",
+    "gpt-6-luna",
 ]
 
 # Cloudflare whitelists first-party clients by the originator header; the real
@@ -69,7 +64,7 @@ DEFAULT_ORIGINATOR = "codex_cli_rs"
 # The backend gates its newest models on the Codex version a client names, in
 # both its User-Agent and the model catalog query: an older or placeholder
 # version can get 404 "Model not found" for a model the catalog lists.
-CODEX_CLIENT_VERSION = "0.162.0"
+CODEX_CLIENT_VERSION = "0.170.0"
 _USER_AGENT_MARKER = "astrbot-plugin-openai-oauth"
 _VERSION_PATTERN = re.compile(r"\d+(?:\.\d+)+")
 _VERSION_CACHE_SECONDS = 600
