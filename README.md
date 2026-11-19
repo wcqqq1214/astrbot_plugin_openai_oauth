@@ -15,22 +15,19 @@
   <a href="README_en.md">English</a>
 </p>
 
-用你的 ChatGPT 账号在 AstrBot 里聊天，无需另填 API Key。用的是账号的 Codex 额度，
-不是 OpenAI API 余额。需要 **AstrBot 4.27.1+** 和一个能使用 Codex 的 ChatGPT 账号。
+直接在 AstrBot 里用你的 ChatGPT 账号对话，无需另填 API Key。消耗的是订阅自带的 Codex 额度，与 OpenAI API 余额无关。使用前需要 **AstrBot 4.27.1+** 和一个支持 Codex 的 ChatGPT 账号。
 
 ## 先登录，再选模型
 
-### 已经在本机登录 Codex
+### 方式一：直接使用本机已登录的 Codex
 
-如果 Codex 和 AstrBot 在同一台机器上，插件会自动跟随 Codex 的登录。
-在 AstrBot 模型配置中选择 **OpenAI Subscribe**，添加模型即可。以后在 Codex 切换账号，
-下一次请求就会跟随。
+如果 Codex CLI 和 AstrBot 在同一台机器上，插件会自动读取本机登录状态。到 AstrBot 模型配置里选择 **OpenAI Subscribe** 来源添加模型即可；后续在本机切换 Codex 账号，下一次请求就会切到新账号。
 
-没识别到登录？请看下方“常见问题”，或直接用设备码登录。
+没识别到？请看下方[常见问题](#常见问题)，或直接改用设备码登录。
 
-### 用设备码登录，也可以添加更多账号
+### 方式二：用设备码登录（支持多个账号）
 
-先到 ChatGPT 的 **设置 → 账户安全与登录**，开启 **为 Codex 启用设备代码授权**。
+先前往 ChatGPT **设置 → 账户安全与登录**，开启 **为 Codex 启用设备代码授权**：
 
 <details>
 <summary>查看开关位置</summary>
@@ -39,88 +36,70 @@
 
 </details>
 
-1. 打开插件详情页的 **Plugin Views → providers**，点 **新增账号 → 获取设备码**。名称可不填。
-2. 复制授权链接，在浏览器中打开，登录 ChatGPT 并输入设备码。
-3. 看到“账号已保存”后，到 AstrBot 模型配置中选择 **OpenAI Subscribe** 添加模型。
+1. 打开插件详情页的 **Plugin Views → providers**，点 **新增账号 → 获取设备码**（名称可留空，默认使用账号邮箱）。
+2. 复制授权链接在浏览器中打开，登录 ChatGPT 后输入设备码完成授权。
+3. 看到「账号已保存」后，到 AstrBot 模型配置中选择 **OpenAI Subscribe** 添加模型即可。
 
-每次新增都是独立账号，不会覆盖已有登录。设备码过期可以重新获取；不想继续时点取消。
-**设备码不要发给别人，只在 OpenAI 的授权页面输入。**
+每次新增都会作为独立账号保存，不会覆盖原有登录。**请勿将设备码发给他人，仅在 OpenAI 官方授权页中输入。**
 
-## 查看额度、管理账号
+## 管理账号与查看额度
 
-AstrBot 的模型配置中始终只有一个 **OpenAI Subscribe** 来源，多账号统一在
-**Plugin Views → providers** 页面管理：
+插件会自动创建固定 ID 为 `OpenAI Subscribe` 的来源，添加模型时直接选它即可（该来源不会出现在「新增 Provider」列表里，也不支持重命名）。
 
-该来源 ID 固定为 `OpenAI Subscribe`，不能重命名。升级前打开的旧账号来源编辑页需要刷新后再操作。
+所有账号都在 **Plugin Views → providers** 页面管理：
 
-来源由插件自动创建，不会出现在“新增 Provider”的选项中，无需手动新增。添加模型时，选择已有的 **OpenAI Subscribe** 来源即可。
-
-- **默认账号**：只有一个账号时隐藏设置；有多个账号时，在账号齿轮菜单中点“设为默认账号”，立即生效。
-- **模型绑定**：到 AstrBot 的 **OpenAI Subscribe → 已配置模型 → 编辑** 中选择“模型账号”，可指定账号或“跟随默认账号”。单账号时隐藏选项；新模型默认跟随默认账号，旧模型保留原绑定。
-
-- **点账号行**查看额度，可以同时展开多个账号。页面打开时每 30 秒刷新，缺少额度数据不代表无限额。
-- **点齿轮**修改名称和路由，改好后点保存。设备码登录的账号也可在这里重新授权或移除。
-- **右侧开关**决定是否继续使用这个账号。关闭不会删除登录，也不会中断正在进行的请求。
+- **查看额度**：点击任意账号行即可展开额度，支持同时展开多个，页面打开时每 30 秒自动刷新（未返回额度窗口不代表无限额）。
+- **编辑与停用**：点右侧齿轮可改名、切换路由，或对设备码账号重新授权、移除；最右侧开关控制是否接收新请求，关闭后不会清除登录，也不会打断正在回复的对话。
+- **默认账号与模型绑定**：有多个账号时，可在齿轮菜单中**设为默认账号**（立即生效）；也可以在 AstrBot 的 **OpenAI Subscribe → 已配置模型 → 编辑 → 模型账号** 中将单个模型绑定给指定账号，或保持「跟随默认账号」（新模型默认跟随，已有模型保留原绑定）。
 
 ![多账号额度页面](https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/images/providers-overview-zh.webp)
 
-*截图中的账号和额度均为示例。页面支持中文、英语、俄语和日语，跟随 AstrBot 的语言设置。*
+*截图中的账号和额度仅为示例。页面跟随 AstrBot 语言设置，支持中文、英语、俄语和日语。*
 
-移除账号前，请先切换默认账号并解除模型绑定。本地 Codex 账号在主机上管理，不能在这里删除。
-要切换聊天模型，请到 AstrBot 的模型设置中操作；点开账号只是在查看它。
+移除账号前需先更换默认账号并解除模型绑定；本地 Codex 账号只能在主机本地管理，不能在页面删除。
 
-### 一个账号用不了时，自动试下一个
+### 账号不可用时自动切换
 
-点账号旁的齿轮，选择路由模式并保存：
+在账号齿轮菜单中将路由模式改为 **自动回退** 并保存：
 
-| 模式 | 怎么用 |
+| 模式 | 说明 |
 | --- | --- |
-| 固定账号（默认） | 只用这个账号，不可用时就报错。 |
-| 自动回退 | 优先用这个账号，失败时按列表顺序尝试其他已启用、可用的账号。 |
+| 固定账号（默认） | 只使用绑定的账号，不可用时直接报错。 |
+| 自动回退 | 优先使用当前账号；不可用时按列表顺序尝试其他已启用的可用账号。 |
 
-自动回退只换账号，不换模型。额度用完、登录失效或临时网络故障时可以尝试其他账号；
-参数填错等问题仍会直接报错。开始输出内容或调用工具后，不再切换重来。
-下次请求仍优先尝试原来的账号，所有账号都不可用时会报错。
+回退仅切换账号（不换模型），且只在额度用尽、登录失效或临时网络故障时触发，参数错误等问题会直接报错。一旦开始输出内容或调用工具，当前请求便不再切换；下次请求仍优先尝试原绑定账号。
 
 <details>
 <summary>查看设置弹窗</summary>
 
 ![在账号设置中选择自动回退](https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/images/provider-settings-zh.webp)
 
-*示例中已选“自动回退”，点击保存后才生效。*
+*示例中已选择「自动回退」，点击保存后生效。*
 
 </details>
 
 ## GPT Image 生图
 
-在插件设置中开启「启用 GPT Image 生图」，然后在 OpenAI Subscribe 聊天中直接描述想画的内容，例如「画一张竖版海报，一只猫在雨中撑伞，画面上方留白」。模型可以调用 `codex_generate_image` 工具生成图片。
+在插件设置开启 **启用 GPT Image 生图** 后，在 OpenAI Subscribe 对话中直接描述想画的内容（如：「画一张竖版海报，一只猫在雨中撑伞，画面上方留白」），模型会自动调用 `codex_generate_image` 出图。画面方向、比例和构图直接写在提示词里即可，尺寸默认由 Codex 自动决定，生成后原图发回。
 
-横竖、画幅和构图直接写在提示词里。插件使用 Codex 的自动尺寸，实际像素尺寸由后端决定，返回的图片会原样发送。
+想跳过模型对话直接生图，可以发送 `/draw <提示词>`。命令复用当前对话最近一次通过 OpenAI Subscribe 成功聊天的账号；插件重载后，需先在当前对话聊一句再用 `/draw`。
 
-想跳过模型追问时，可以用 `/draw <提示词>` 直接提交生图请求。命令使用当前对话最近一次成功的 OpenAI Subscribe 聊天所用的账号。插件重载后，先在当前对话聊天一次再用 `/draw`。
+插件设置中的 **生图账号来源 ID** 默认留空（跟随聊天实际使用的账号）；若填写了指定来源 ID，则只允许该账号回复的对话触发生图。生图不会跨账号回退。
 
-生图通过 Codex Images 后端复用聊天账号的 OAuth 和订阅权益。聊天工具使用本轮实际回复的账号。插件使用内置的图像模型标识，实际可用性取决于 ChatGPT 后端。
+## 常用命令与思考强度
 
-账号来源 ID 留空即可跟随聊天。填写后，只允许该账号实际回复的聊天触发生图。账号不匹配或不可用时会返回提示，生图不会跨账号回退。
-
-## 常用命令和思考强度
-
-`/openai_login` 和 `/effort` 需要管理员权限。命令回复默认为中文，可在插件设置的 `chat_language`
-改为英文、俄文或日文。
+`/openai_login` 和 `/effort` 需要管理员权限。命令回复默认为中文，可在插件设置的 `chat_language` 中改为英文、俄文或日文。
 
 | 命令 | 用途 |
 | --- | --- |
-| `/usage` | 查看当前模型绑定账号的额度，不一定是上次回退后实际使用的账号。 |
-| `/openai_login` | 私聊机器人，用设备码添加账号，账号以 ChatGPT 邮箱命名。 |
+| `/usage` | 查看当前模型绑定账号的额度（即使上一轮触发过回退，仍显示绑定账号本身）。 |
+| `/openai_login` | 在与机器人的私聊中发起设备码登录，默认以 ChatGPT 邮箱命名。 |
 | `/openai_login cancel` | 取消当前私聊中等待授权的登录。 |
-| `/effort` | 查看当前会话的思考强度。 |
+| `/effort` | 查看当前会话的思考强度，并列出当前模型支持的档位。 |
 | `/effort high` | 调整当前会话的思考强度，下次请求生效。 |
 | `/effort default` | 恢复模型默认设置。 |
 
-思考强度可以不设。可选值为 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，
-实际以当前模型支持的为准；`/effort` 会列出当前模型可用的值。
-要给模型设置默认值，在模型配置的 **自定义请求体参数 → Reasoning Effort** 中填写并保存。
-会话命令只影响当前会话，不会修改其他会话或模型默认值。
+思考强度可选 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`（具体以当前模型为准）。要给模型设置固定默认值，可在模型配置的 **自定义请求体参数 → Reasoning Effort** 中填写并保存；`/effort` 只影响当前会话。
 
 <details>
 <summary>查看模型默认值的设置位置</summary>
@@ -131,29 +110,26 @@ AstrBot 的模型配置中始终只有一个 **OpenAI Subscribe** 来源，多�
 
 ## 常见问题
 
-**没读到本地 Codex 登录？** 默认读取 `$CODEX_HOME/auth.json`，未设置时读 `~/.codex/auth.json`。
-可以在插件设置的 `codex_auth_path` 填完整路径，保存后重载插件。AstrBot 需要读取文件和写入所在目录的权限，
-以便自动更新登录。只在浏览器或系统钥匙串中登录的情况，请改用设备码。
+**没检测到本地 Codex 登录？**
+插件默认读取 `$CODEX_HOME/auth.json`，未设置时读取 `~/.codex/auth.json`。也可在插件设置的 `codex_auth_path` 填入完整路径，保存后重载插件。请确保 AstrBot 对该文件有读权限、对所在目录有写权限以便自动刷新令牌。如果此前只在浏览器或系统钥匙串中登录而没有 `auth.json`，请改用设备码登录。
 
-**AstrBot 在 Docker 或服务器上？** 它不能直接读取你电脑的登录。
-Docker 需要挂载整个 Codex 凭据目录，并填写容器内的路径，不要只挂载单个文件；也可以用设备码登录。
+**AstrBot 在 Docker 或远程服务器上？**
+容器或远程主机无法直接读取本地电脑的登录。在 Docker 中复用本地凭据时，请挂载整个 Codex 凭据目录并在 `codex_auth_path` 填写容器内路径（不要只挂载单个 `auth.json`，否则原子写入刷新会失败），或者直接用设备码登录。
 
-**需要代理？** 在 **OpenAI Subscribe** 来源的 `proxy` 中填写，或给 AstrBot 进程／容器设置
-`HTTP_PROXY` 和 `HTTPS_PROXY`。已有账号原先单独配置的代理会保留并优先使用。
-如果报 `unsupported_country_region_territory`，说明 OpenAI 不接受当前网络出口或账号条件，插件无法绕过。
+**需要配置代理？**
+可在 **OpenAI Subscribe** 来源的 `proxy` 中填写代理，或为 AstrBot 进程／容器设置 `HTTP_PROXY` 和 `HTTPS_PROXY`（旧版单账号配置过的代理会保留并优先使用）。若报 `unsupported_country_region_territory`，说明 OpenAI 不接受当前网络出口地区或账号条件，插件无法绕过。
 
-**从旧版升级？** 插件会将旧的多个来源合并为一个 **OpenAI Subscribe** 入口，保留模型 ID、原账号偏好和登录信息。本地登录和设备登录仍是独立账号，无需手动迁移。
+**从旧版升级需要手动迁移吗？**
+不需要。旧版多个来源会自动合并到 **OpenAI Subscribe** 下，保留原有模型 ID、账号偏好和登录信息。
 
-请保管好登录文件及备份：本地登录使用 Codex 的 `auth.json`；设备码登录信息加密后保存在
-AstrBot 的 `data/cmd_config.json`，密钥在 `data/plugin_data/astrbot_plugin_openai_oauth/credential.key`
-（可用环境变量 `OPENAI_OAUTH_CREDENTIAL_KEY_FILE` 指定其他位置）。迁移或恢复备份时请连同密钥一起保留，
-缺少密钥的账号需要重新登录；退回不支持加密的旧版插件后也需要重新登录。
-公网访问 Dashboard 请使用 HTTPS、VPN 或 SSH 隧道。
-请使用自己的账号，并遵守 OpenAI 的服务条款。
-本插件是第三方集成，使用 Codex 客户端标识访问 ChatGPT 后端接口；该接口不属于公开 API 的稳定兼容性承诺。
-上游接口或账号策略变化可能导致功能中断、认证失效或使用受限，插件无法保证持续可用。
+## 安全与说明
+
+- **凭据存储与备份**：本地登录读取 Codex 的 `auth.json`；设备码凭据加密存储在 `data/cmd_config.json`，密钥位于 `data/plugin_data/astrbot_plugin_openai_oauth/credential.key`（可用 `OPENAI_OAUTH_CREDENTIAL_KEY_FILE` 指定其他路径）。迁移或恢复备份时请连同密钥保留，缺少密钥或降级至无加密旧版后需重新登录。
+- **Dashboard 访问安全**：公网访问 AstrBot Dashboard 请使用 HTTPS、VPN 或 SSH 隧道。
+- **使用条款与免责**：请仅使用本人账号并遵守 OpenAI 服务条款。本插件为第三方集成，通过 Codex 客户端标识访问 ChatGPT 后端接口，不在公开 API 稳定性保障范围内；上游接口或账号策略变更可能导致功能中断或失效。
 
 ## 开发与许可证
 
-开发、测试和发布方式见[开发说明](https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/blob/main/docs/development.md)，详细路由规则见[接口说明](https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/blob/main/docs/provider-routing-api.md)。
+测试与发布流程见[开发说明](https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/blob/main/docs/development.md)，路由规则与 WebUI 接口见[接口说明](https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/blob/main/docs/provider-routing-api.md)。
+
 本项目采用 [AGPL-3.0](LICENSE) 许可证。

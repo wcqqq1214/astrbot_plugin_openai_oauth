@@ -1,53 +1,50 @@
 # Provider controls and routing API
 
-Frontend handoff for the Plugin View. All paths below are relative to the
-existing authenticated plugin API base. Use the same authenticated POST helper
-as the current `providers/list` / `providers/update` calls. Never call them with
-OAuth credentials. Responses use `Cache-Control: no-store`.
+Reference for the single-source config layout, WebUI API endpoints, enable/disable behavior, and automatic fallback routing in `astrbot_plugin_openai_oauth`.
 
-Registered paths are `/astrbot_plugin_openai_oauth/providers/list`,
-`/astrbot_plugin_openai_oauth/providers/update`, and the existing account routes.
-The dashboard's Plugin View client handles the surrounding extension proxy.
+All endpoints are mounted under `/astrbot_plugin_openai_oauth/` using AstrBot's authenticated, same-origin dashboard bridge (API-key sessions are rejected). They never accept or return raw OAuth credentials, and all responses set `Cache-Control: no-store`.
+
+Endpoints:
+
+- `POST /astrbot_plugin_openai_oauth/providers/list`
+- `POST /astrbot_plugin_openai_oauth/providers/update`
+- `POST /astrbot_plugin_openai_oauth/providers/delete`
+- `POST /astrbot_plugin_openai_oauth/routing/update`
+- `POST /astrbot_plugin_openai_oauth/account/status`
+- `POST /astrbot_plugin_openai_oauth/account/usage`
+- `POST /astrbot_plugin_openai_oauth/device/start`
+- `POST /astrbot_plugin_openai_oauth/device/poll`
+- `POST /astrbot_plugin_openai_oauth/device/cancel`
 
 ## Single AstrBot source and account selection
 
-AstrBot contains one source with ID/type `OpenAI Subscribe` and `oauth_gateway: true`.
-Its `oauth_accounts` array holds the independent account records. `oauth_routing`
-holds `default_account_id` and a legacy `models` map from model ID to preferred account ID.
-AstrBot’s configured-model editor exposes `oauth_account_id` on subscription models:
-an empty string follows the default, while an account ID pins that model. When present,
-this model field takes precedence over the legacy map. The routing API reads both
-representations and keeps edited model fields synchronized on writes. The selector
-is hidden with fewer than two accounts. Default selection lives in each account’s
-Plugin View settings, also only with multiple accounts.
-These fields stay inside the source in `data/cmd_config.json`: AstrBot removes
-unknown top-level config keys on startup. The gateway's `key` remains empty;
-credentials are resolved from the selected account immediately before dispatch.
-Each device-login account's `key` is sealed (`enc:v1:` Fernet token) with a key in
-the plugin data directory; plaintext records from earlier versions are sealed once
-on startup.
+### Storage and sealing
 
-Migration preserves model IDs, rewrites their `provider_source_id` to the gateway,
-and stores their former account in the preference map. Existing profile selections
-therefore remain valid. Other providers are untouched. Repeating migration is a
-no-op; configuration-save failure rolls back the proposed migration.
+AstrBot stores a single provider source whose ID and type are both `OpenAI Subscribe`, marked with `oauth_gateway: true`. Account state lives inside that source in `data/cmd_config.json` (since AstrBot strips unknown top-level keys on startup):
 
-During first-time consolidation, a model's direct `provider_source_id` identifies
-its original source. Migration copies inherited `timeout` and `custom_extra_body`
-from that source, preserving explicit model overrides.
+- `oauth_accounts`: independent account records (`Local Codex` and `device_oauth` accounts).
+- `oauth_routing`: holds `default_account_id` and a legacy `models` map (`model_id -> account_id`).
+- Gateway `key` stays empty; per-request credentials resolve from the chosen account immediately before dispatch.
 
-Already consolidated gateways have no immutable record of each model's original
-source. Current account bindings can change and also include newly created models,
-so they are never used to recover inference settings. These upgrades preserve saved
-model and gateway settings, including absent keys, defaults and empty objects.
-Missing values require a verified original configuration before restoration.
-Any `oauth_routing.inference_settings_migrated` marker left by an earlier version
-is retained for compatibility but does not authorize recovery. Previously saved
-values are not automatically reverted because they may reflect later user edits.
+Subscription models also expose `oauth_account_id` in AstrBot's model editor (`""` follows default; an account ID pins the model). When present, `oauth_account_id` overrides `oauth_routing.models`; the routing API reads both and keeps `oauth_account_id` synchronized on writes. Both the model-editor selector and default-account action are hidden when fewer than two accounts exist.
 
-`providers/list` returns `{ "providers": [...], "routing": {...} }`. The historical
-`providers` and `source_id` API names now refer to accounts, not separate AstrBot
-sources. Neither list nor routing responses contain credentials. Routing shape:
+Each device account's `key` is sealed at rest as an `enc:v1:` Fernet token using `credential.key` in the plugin data directory (or `OPENAI_OAUTH_CREDENTIAL_KEY_FILE`). Plaintext credentials from older versions are sealed once at startup.
+
+### Migration and source guard
+
+On first consolidation, legacy `OpenAI Subscribe` sources merge into the gateway: model IDs stay intact, `provider_source_id` rewrites to `OpenAI Subscribe`, former account IDs become preferences, and inherited `timeout` / `custom_extra_body` values are copied onto models unless already overridden. Migration is idempotent and rolls back on save failure. Once consolidated, later upgrades leave saved model and gateway settings untouched (current bindings are mutable and do not trigger inference-setting backfills; any legacy `oauth_routing.inference_settings_migrated` marker is ignored).
+
+Plugin initialization or reload also reloads existing subscription model instances via AstrBot's provider manager so stale credential readers do not survive migration.
+
+The plugin guards `ProviderConfigService.upsert_provider_source` for `OpenAI Subscribe`:
+
+- Preserves `oauth_gateway`, `oauth_accounts`, `oauth_routing`, and empty `key` across full-snapshot Dashboard saves while accepting editable fields (e.g. `proxy`), serialized against account edits and in-flight token refreshes.
+- Rejects renaming `OpenAI Subscribe`, changing its adapter type, saving stale pre-migration tabs, or adding extra subscription sources. Migration repairs references to gateways renamed by earlier versions.
+- Replaces cleanly without stacking on reload and unhooks on unload; non-subscription sources pass through untouched.
+
+### Routing API
+
+`POST providers/list` returns `{ "providers": [...], "routing": {...} }` (keeping historical `providers` / `source_id` names for accounts):
 
 ```json
 {
@@ -56,59 +53,27 @@ sources. Neither list nor routing responses contain credentials. Routing shape:
 }
 ```
 
-`POST routing/update` changes the default with `{"account_id": "account-id"}`.
-To pin one model, send `{"model_id": "my-model", "account_id": "account-id"}`;
-`account_id: null` for a model means follow the default. A null default is rejected.
-Success returns `{ "status": "success", "routing": {...} }`. Invalid IDs, unknown
-fields and incorrect types return HTTP 400 without changing the configuration.
-Every error response is `{ "status": "error", "message": "<code>" }` with a stable
-code such as `invalid_request` or `account_in_use`; the Plugin View translates the
-codes listed under `errors` in `pages/providers/strings.js`.
-The same authenticated, same-origin plugin bridge is required for this endpoint.
+`POST routing/update`:
 
-Account selection is read on every request, including by already loaded provider
-instances. Selection changes do not enable accounts or alter their fixed/auto
-policy. The new selection takes effect only after persistence succeeds. Account
-removal is blocked while it is the default or explicitly selected by a current
-model; choose replacements in the plugin page first. Local Codex cannot be removed.
-New model IDs without a preference follow the default. Model IDs and account IDs
-remain stable internal identifiers and are not used as extra source labels.
+- Set default: `{"account_id": "<account-id>"}` (`null` is rejected).
+- Pin model: `{"model_id": "<model-id>", "account_id": "<account-id>"}`.
+- Follow default: `{"model_id": "<model-id>", "account_id": null}`.
 
-Plugin initialization also reloads existing subscription model instances through
-AstrBot's provider manager. Purging plugin modules alone does not replace model
-instances retained by AstrBot, so their old credential readers must not survive
-the storage migration. Initial startup leaves model loading to AstrBot as usual.
+Success returns HTTP 200 `{ "status": "success", "routing": {...} }`. Invalid payloads return HTTP 400 without changing config. Error responses always use `{ "status": "error", "message": "<code>" }` (translated by `pages/providers/strings.js`).
 
-The plugin guards AstrBot's `ProviderConfigService.upsert_provider_source` for its
-own gateway. The generic editor submits complete snapshots even for invisible
-fields; the guard preserves the current account records and routing while saving
-editable settings. It serializes with account edits and in-flight token refreshes.
-Other sources pass through unchanged. The guard is replaced without stacking on
-reload and removed when the plugin terminates.
-The gateway ID is fixed to `OpenAI Subscribe`; attempts to rename it or change
-its adapter type are rejected before saving. Stale editors for migrated account
-sources and attempts to add additional subscription sources are rejected too.
-Migration repairs model references to gateways renamed by earlier versions.
+Selection changes take effect immediately on persistence without reloading AstrBot and are read dynamically on every request, without enabling disabled accounts or changing routing modes. An account cannot be deleted while set as default or bound to a model (`Local Codex` can never be deleted).
 
 ## Enable / disable
 
-`POST providers/list` keeps its `{ "providers": [...] }` envelope. Each provider
-now includes `enabled: boolean`. `POST account/status` includes the same field.
-It is independent of `status` (ready, cooling, not_logged_in, reauth_required,
-refreshing, degraded, invalid). Render the switch from `enabled`, not `status`.
+Account objects returned by `providers/list`, `providers/update`, and `account/status` include `enabled: boolean`, independent of health `status` (`ready`, `cooling`, `not_logged_in`, `reauth_required`, `refreshing`, `degraded`, `invalid`).
 
-`POST providers/update` accepts a partial update:
+`POST providers/update` accepts partial updates (`source_id` plus at least one of `name`, `enabled`, `routing_mode`):
 
 ```json
 {"source_id": "OpenAI Subscribe", "enabled": false}
 ```
 
-`name` may also be supplied, alone or together with `enabled`. The ID is required;
-at least one editable field is required. `enabled` must be an actual JSON boolean;
-null, numbers, strings and unknown fields return HTTP 400. Names retain the
-existing 1–80 non-whitespace character requirement.
-
-Success (HTTP 200):
+`enabled` must be a JSON boolean (`null`, numbers, strings, and unknown keys return HTTP 400); `name` requires 1–80 non-whitespace characters. HTTP 200 response:
 
 ```json
 {
@@ -125,116 +90,50 @@ Success (HTTP 200):
 }
 ```
 
-The provider object also includes existing account metadata when available.
-Use the returned object as authoritative. Disable the switch while saving; on
-failure retain the previous state and display the existing error response.
-After an unknown network outcome, refetch the list. Sending the same desired
-value twice is safe; this is not a toggle operation.
+Key rules:
 
-- Local Codex may be disabled but remains first and cannot be deleted.
-- Disabling preserves credentials, model bindings, login/usage access and cooldown.
-- In-flight attempts finish; new attempts (including retries) check enabled again.
-- Re-enabling does not clear cooldown or repair authentication.
-- All providers may be disabled. The backend never enables one implicitly.
-- Missing legacy `enable` values migrate to true; explicit false is preserved.
-- Persistence failure rolls back the update; dispatch sees the previous policy
-  while the save is pending. No provider-manager restart is needed for the switch.
-- A source switch is independent of AstrBot's model-level enable setting. It does
-  not enable a disabled model or rewrite its binding.
+- Disabling keeps credentials, bindings, settings/reauth access, and cooldowns intact (`Local Codex` stays first and cannot be deleted; re-enabling does not clear cooldowns or reauth state).
+- In-flight attempts finish; new attempts (including retries) re-check `enabled`.
+- All accounts may be disabled (none are implicitly re-enabled), and legacy records missing `enable` default to `true`.
+- Persistence failures roll back (dispatch stays on the committed policy while saving), changes apply immediately without restarting the provider manager, and duplicate `enabled` writes are idempotent.
+- Independent of AstrBot's per-model enable switch.
 
 ## Opt-in automatic fallback
 
-Every account object returned by `providers/list`, `providers/update`, and
-`account/status` now includes `routing_mode: "fixed" | "auto"`. The setting belongs
-to the **preferred source** and applies to models bound to that source. Selecting
-a row in the UI remains a management action; it does not select the inference
-provider. Changing another candidate's routing mode does not recursively route.
-
-Use the same partial-update endpoint, either alone or with the enable/name fields:
-
-```json
-{"source_id": "OpenAI Subscribe", "routing_mode": "auto"}
-```
-
-```json
-{"source_id": "OpenAI Subscribe", "enabled": true, "routing_mode": "fixed"}
-```
-
-Only `fixed` and `auto` are accepted; null, booleans and all other values return
-HTTP 400 without changing any field. The success envelope is unchanged. Existing
-and newly created providers default to `fixed`; migration preserves explicit
-settings. Stored keys are `enable` and `oauth_routing_mode` in each account record; the frontend should use the API names above.
+Each account exposes `routing_mode: "fixed" | "auto"` (persisted internally as `oauth_routing_mode`, defaulting to `"fixed"`). The mode belongs to the model's preferred account and does not chain recursively across candidates. Update it via `POST providers/update` (`{"source_id": "...", "routing_mode": "auto"}`).
 
 | Mode | Dispatch |
 | --- | --- |
-| `fixed` | Use only the model's bound source. Disabled/unavailable sources fail clearly. |
-| `auto` | Try the bound source first, then other sources in `providers/list` order (local first, remaining sources in saved order). |
+| `fixed` | Uses only the bound account (or default if unbound); fails explicitly if unavailable. |
+| `auto` | Tries the bound account first, then remaining enabled, available accounts in `providers/list` order (`Local Codex` first, then saved order). |
 
-The candidate order is sampled at request start. Enable and health are checked
-again immediately before every HTTP inference attempt. The default account applies only to models without an explicit preference. There
-is no round-robin, sticky session or nested fallback. A successful fallback
-does not change the preferred source: a later request retries that preference
-when it is eligible again. The next tool-loop invocation is a new request.
+Candidate order is resolved at request start, and `enabled` + health are re-checked before every HTTP attempt. There is no round-robin, sticky session, or nested fallback: the next request (including the next tool-loop turn) starts with the preferred account again.
 
-### Failure behavior
+### Failure handling
 
-| Condition | Backend action |
+| Condition | Backend behavior |
 | --- | --- |
-| Disabled, no login, reauthorization needed, invalid credentials, quota cooling | Skip in auto mode; explicit failure in fixed mode. |
-| Same account already attempted | Skip its duplicate entry for this request. Use account ID, or token identity when no account ID exists. |
-| Subscription quota exhausted | Mark cooldown, then try another account. Cooldown is shared across sources with that account, even if one is disabled. |
-| Authentication rejected | Refresh once, then try again within the remaining budget. On rejection/failure, mark reauthorization required and try another account. |
-| Network / temporary service failure | Bounded same-source retries, then another account. |
-| Ordinary rate limit | Try another account; do not mark subscription quota exhausted. |
-| Invalid request, unsupported model, other unclassified error | Fail; do not silently change the model or rotate accounts. |
-| Any output already emitted, including reasoning/tool output | Never replay. The public stream emits a final `role="err"` response so AstrBot's streaming fallback cannot repeat the request. |
-| Cancellation | Propagate cancellation; no fallback. |
+| Disabled, logged out, reauth required, invalid credentials, or cooling | Skipped in `auto` mode; fails immediately in `fixed` mode. |
+| Duplicate account in this request | Skipped (matched by `account_id`, or token identity if absent). |
+| Subscription quota exhausted | Marks shared cooldown on that account, then tries next account. |
+| Auth rejected (401) | Refreshes once within budget; on second failure/rejection, marks `reauth_required` and tries next account. |
+| Network / temporary upstream error | Bounded same-account retries, then tries next account. |
+| Ordinary rate limit (non-quota 429) | Tries next account without marking quota cooldown. |
+| Invalid request, unsupported model, unclassified error | Fails immediately; never changes model or rotates accounts. |
+| Any output already emitted (including reasoning/tool output) | Never replays; emits final `role="err"` item so AstrBot's outer fallback will not re-run. |
+| Cancelled | Propagates cancellation with no fallback. |
 
-The request body/model remains the same across accounts. Each chosen source uses
-its own credentials, account header, proxy, originator, user agent and HTTP
-transport; a source's transport is kept for later requests (connection reuse) and
-replaced when its account or proxy changes, so cookies never cross accounts. Fallback
-does not inherit the preferred source's custom headers. Explicit model headers
-are retained on the preferred account; inherited headers are re-read from the
-chosen account so switching does not reuse the previous account’s headers. The
-shared source headers apply to all accounts, except authentication/identity headers,
-which are constructed from the current credential snapshot.
+### Transport, headers, and budgets
 
-Auto mode shares `request_max_retries` across **all inference HTTP attempts**
-(AstrBot default: 5). Each temporary-retry batch uses at most 2 attempts; credential
-refresh does not reset the shared budget. Credential and quota control-plane
-calls are outside that attempt counter but inside a shared 120-second startup
-deadline. Once a source opens its response stream the startup deadline is removed,
-so a model may reason for longer before its first delta, and the normal transport
-timeout applies. If that source still fails before output, the next source gets a
-fresh 120-second window. Fixed mode retains its existing retry policy.
+Fallback keeps the same model and body while isolating per-account credentials, `chatgpt-account-id`, `proxy`, `originator`, `User-Agent`, and pooled HTTP transports (replaced when account or proxy changes so cookies never cross accounts). Preferred-account custom headers do not carry into fallback accounts: inherited headers re-read for the chosen account, gateway headers apply across accounts, and auth/identity headers come from the active snapshot.
 
-When auto mode exhausts candidates, `RoutingExhaustedError` reports source IDs and
-safe reason codes (`disabled`, `cooling`, `reauth_required`, `not_logged_in`,
-`invalid_credentials`, `duplicate_account`, `temporary`, `rate_limit`, `attempt_limit`). It also
-distinguishes `attempt_limit` / `startup_timeout` from general `unavailable`.
-These are inference errors, not a new WebUI endpoint. Raw tokens and upstream
-error bodies are not included in this aggregate error.
+In `auto` mode, `request_max_retries` (AstrBot default `5`) caps **all inference HTTP attempts** across the request (max 2 attempts per temporary-retry batch; token refreshes do not reset it). Control-plane calls sit outside that counter under a 120s startup deadline, which clears once a response stream opens (allowing long reasoning before the first delta); if a stream fails pre-output, the next candidate gets a fresh 120s window. `fixed` mode keeps its normal per-source retry policy.
 
-The plugin does not edit AstrBot's separately configured model fallback list.
-That outer list may still run after a pre-output plugin failure; its own budgets
-are managed by AstrBot. `/usage` continues to show the model's bound source, not a
-globally remembered last account. Current local Codex cooldown and reauthorization
-markers remain runtime state; device-source cooldown is persisted with credentials.
+When `auto` mode exhausts candidates, `RoutingExhaustedError` reports source IDs and safe reason codes (`disabled`, `cooling`, `reauth_required`, `not_logged_in`, `invalid_credentials`, `duplicate_account`, `temporary`, `rate_limit`, `attempt_limit`), separating `attempt_limit` / `startup_timeout` from `unavailable` without leaking tokens or upstream bodies.
 
-## Frontend handoff checklist
+AstrBot's separate model fallback list is untouched and may still run after a pre-output failure. `/usage` always queries the model's bound account. `Local Codex` cooldown/reauth flags stay in memory; device-account cooldowns persist with credentials.
 
-- Render an enable switch from `enabled` and a separate fixed/auto choice from
-  `routing_mode`. Display `status` separately, including when disabled.
-- For automatic fallback, show the preference-first ordering above; no reorder
-  endpoint or per-request active-provider badge is exposed in this iteration.
-- Keep settings editable while disabled; reauthorization must not enable a source.
-- Serialize writes for one provider, apply the returned provider object, and
-  refetch after ambiguous network failures. Do not send an entire stale account
-  object back; only send the fields the user changed.
-- Existing rename-only clients continue to work. No new dependencies are needed. Reload the updated plugin once to run migration;
-  subsequent account selection changes do not require a reload.
+## Client & testing notes
 
-Verification uses `tests/provider_routing_test.py` with real SDK parsing and fake
-HTTP transports, plus the existing integration regression suite. No real account
-inference or login is required by the tests.
+- Lock controls while saving, treat the returned `provider` object as authoritative, and refetch `providers/list` after an ambiguous network failure.
+- Verified offline by `tests/provider_routing_test.py` (real OpenAI SDK parsing against fake HTTP transports) inside `tests/run_tests.py`.

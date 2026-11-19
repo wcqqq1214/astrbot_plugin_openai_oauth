@@ -1,32 +1,24 @@
 # Development
 
-## Layout
+## Project layout
 
-`main.py` contains the AstrBot entry point, lifecycle hooks, and command registration.
-The implementation lives in the internal `src/` package, loaded by AstrBot through
-relative imports:
+`main.py` holds the AstrBot entry point, lifecycle hooks, and command registration. The implementation lives in `src/`:
 
-- `runtime.py`: shared configuration and credential coordination.
-- `provider.py`: the AstrBot provider: credentials, retries, and source routing.
-- `codex_request.py`, `codex_stream.py`, and `transport_pool.py`: Codex request
-  shaping, Responses stream parsing, and per-account HTTP transports.
-- `oauth.py` and `login.py`: OAuth protocol, login sessions, and task cleanup.
-- `web_api.py`: WebUI endpoints.
-- `usage.py` and `effort.py`: allowance queries and conversation reasoning settings.
-- `credential_store.py`, `credential_seal.py`, `local_codex.py`,
-  `provider_registry.py`, and `provider_routing.py`: credentials, encryption at
-  rest, account sources, and routing rules.
+- `runtime.py`: shared configuration and credential coordinator setup.
+- `provider.py`: AstrBot provider adapter, retry handling, and account routing.
+- `codex_request.py`, `codex_stream.py`, `transport_pool.py`: request shaping, Responses stream parsing, and per-account HTTP transport pooling.
+- `oauth.py`, `login.py`: OAuth constants/requests, device-login sessions, and task cleanup.
+- `web_api.py`: authenticated WebUI endpoints.
+- `usage.py`, `effort.py`, `messages.py`: allowance queries, per-session reasoning overrides, and localized chat replies.
+- `image_generation.py`, `image_input.py`, `astrbot_image_bridge.py`: GPT Image generation, input image resizing, and optional AstrBot image hooks.
+- `credential_store.py`, `credential_seal.py`, `local_codex.py`, `provider_registry.py`, `provider_routing.py`: credential coordination, Fernet sealing, local Codex sync, account registry/migration, and routing budgets.
+- `source_editor.py`, `model_editor.py`: AstrBot source-write guard and model-account selector hooks.
 
-WebUI assets live in `pages/providers/`; translations are in `strings.js`. Plugin metadata and configuration descriptions
-stay at the repository root. See [routing API](provider-routing-api.md) for dispatch
-rules and [screenshot notes](../images/README.md) for image provenance.
+WebUI assets live under `pages/providers/` (translations in `strings.js`). See [the routing & API guide](provider-routing-api.md) for endpoint and dispatch details, and [screenshot notes](../images/README.md) for README capture setup.
 
-## Checks
+## Local checks
 
-The plugin's uv environment contains only its own development dependencies.
-AstrBot and its framework dependencies (httpx, the OpenAI SDK, cryptography and
-Pillow) are provided by the host process. Runtime dependencies remain empty in
-both `requirements.txt` and `pyproject.toml`; mypy and Ruff are development tools.
+The plugin's `uv` environment contains development dependencies only; AstrBot provides runtime libraries (`httpx`, the OpenAI SDK, `cryptography`, and Pillow) at runtime, so `requirements.txt` and `pyproject.toml` keep runtime dependencies empty.
 
 ```sh
 uv sync
@@ -37,75 +29,40 @@ uv run mypy
 node tests/view_test.mjs
 ```
 
-The fast runner needs no AstrBot checkout: it imports the internal `src` package
-directly, blocks AstrBot imports, and uses temporary credential paths. It covers
-credential coordination, local-file rotation, registry persistence, routing budgets,
-transport lifetimes, and the version reminder. The existing credential regressions
-run in both layers. mypy checks the five framework-free core modules with
-`check_untyped_defs`; framework imports are skipped, and this is not whole-plugin
-strict typing.
+- `tests/run_unit_tests.py` runs without an AstrBot checkout (blocks `astrbot` imports, isolates temporary credential paths) and executes `tests/credential_store_test.py` plus `tests/unit/`.
+- `uv run mypy` checks the five framework-free core modules listed in `pyproject.toml` with `check_untyped_defs = true` and `follow_imports = "skip"`.
+- `node tests/view_test.mjs` runs Plugin View frontend regressions.
 
-Run the complete integration suite with the local AstrBot checkout's virtualenv Python:
+Run the full integration suite with a local AstrBot checkout's virtualenv:
 
 ```sh
 /path/to/AstrBot/.venv/bin/python tests/run_tests.py
 ```
 
-The tests expect the AstrBot checkout next to this repository (`../AstrBot`).
-Set `ASTRBOT_ROOT=/path/to/AstrBot` to use a checkout elsewhere.
+By default, this looks for `../AstrBot`; set `ASTRBOT_ROOT=/path/to/AstrBot` otherwise. Tests use isolated fixtures rather than real user accounts or an installed plugin copy. Follow [AGENTS.md](../AGENTS.md) for repo conventions.
 
-The runner tests this checkout rather than the deployed plugin copy. Tests use
-isolated credentials to avoid reading or refreshing real accounts. Follow
-[AGENTS.md](../AGENTS.md) for repository conventions and local setup.
+## AstrBot compatibility guard
 
-## Critical AstrBot hooks
+Before registering metadata or WebUI routes, startup validates `CONFIG_METADATA_2` provider fields and the async `ProviderConfigService.upsert_provider_source(service, source_id, config)` signature (`src/source_editor.py`). Image bridge hooks (`src/astrbot_image_bridge.py`) are optional and degrade safely.
 
-Startup validates the provider metadata mapping and the asynchronous
-`ProviderConfigService.upsert_provider_source(service, source_id, config)` call
-contract before registering plugin metadata and account routes. Logs list the
-critical contracts that passed or failed. Image bridge hooks remain optional.
+- **On critical failure**: startup aborts, account operations return HTTP 503 `incompatible_astrbot`, and a fail-closed blocker replaces `upsert_provider_source` for that config instance (blocking only subscription writes if the signature is still recognizable, or all writes on that config instance otherwise). A subsequent reload on a compatible AstrBot version restores the normal guard; if `ProviderConfigService` cannot be imported or patched, startup still fails and logs that protection is unavailable.
+- **At runtime write boundaries**: if startup failed, queued registry mutations roll back in-memory changes, and credential persistence and token refreshes abort before modifying the source or dispatching.
 
-A critical failure stops startup and blocks plugin account operations. When the
-save contract is recognizable, the retained blocker rejects only subscription
-source writes; when it is not recognizable, it rejects all source writes for the
-affected configuration instance. Other configuration instances retain their own
-save behavior. The blocker stays in place during failed-startup cleanup, and a
-successful reload on a compatible host replaces it with the normal account guard.
-Queued account-registry changes, credential refreshes and cooldown updates share
-a coordinator compatibility check at their write boundaries. Registry mutations
-roll back their in-memory changes if startup has failed; credential persistence
-checks before mutating the source. Refreshes also check before dispatch.
-The existing Plugin View returns `incompatible_astrbot` (HTTP 503) after a failed
-reload. If the host service itself cannot be imported or patched, startup still
-fails and logs that the blocker could not be installed; arbitrary replacement
-host interfaces cannot be guarded by this plugin.
+## CI and releases
 
-## Releases
+### Continuous integration
 
-CI runs the integration suite against the declared minimum AstrBot release and the
-newest verified one, and a weekly run tests the latest AstrBot release. When a new
-AstrBot release passes, update the newest version in `.github/workflows/test.yml`.
+- PRs and pushes to `main` run lint, unit tests, mypy, Plugin View tests, version consistency checks, and the integration suite against the declared minimum and newest verified AstrBot releases (`.github/workflows/test.yml`; update the newest version there when a newer AstrBot release passes).
+- A weekly schedule tests AstrBot `latest` and runs `codex-release` (also runnable manually) to detect drift against the latest stable `openai/codex` release. Drift or fetch errors fail the job to alert maintainers without altering constants; verify protocol compatibility, offline model fallbacks, and the image model before bumping the built-in version.
+- Dependabot checks pinned GitHub Actions and `uv` dev dependencies weekly.
 
-[Dependabot](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/auto-update-actions) checks pinned GitHub Actions and uv development dependencies weekly.
-The separate `codex-release` CI job runs weekly and on manual workflow dispatch.
-It compares the built-in version with the latest stable `openai/codex` release,
-adds a workflow summary, and fails on version drift so maintainers can see it in
-workflow notifications (subject to their GitHub notification settings). It never
-changes version or model constants. Review protocol compatibility, the offline
-model fallback and image model, then update only after verification. Fetch or
-metadata failures also fail the job rather than silently reporting up-to-date.
+### Publishing a release
 
-Pushing `main` runs tests without publishing a release. To release:
+Pushing to `main` runs tests without publishing. To cut a release:
 
-1. Update the version in `metadata.yaml`, `pyproject.toml`, the `main.py` registration,
-   and both README badges. Run `uv lock` and add the release notes to `CHANGELOG.md`.
-   `python3 .github/scripts/release_check.py versions` confirms every reference
-   agrees; CI and the release workflow run the same check.
-2. Keep the plugin descriptions in `.astrbot-plugin/i18n/` aligned with `metadata.yaml`.
-3. Run the checks above and the integration suite, then confirm CI passes on the
-   exact commit to release.
-4. Create and push the matching `vX.Y.Z` tag.
+1. Bump the version in `metadata.yaml`, `pyproject.toml`, `main.py`, and both README badges, then run `uv lock`.
+2. Add a `## [vX.Y.Z]` section to `CHANGELOG.md` and keep `.astrbot-plugin/i18n/` aligned with `metadata.yaml` if descriptions changed.
+3. Verify `python3 .github/scripts/release_check.py versions`, local checks, and CI on the target commit.
+4. Create and push the `vX.Y.Z` tag (local tags do not trigger releases).
 
-The release workflow checks that the tag matches the plugin version and that
-`CHANGELOG.md` has a section for it, then packages the runtime files (see
-`.gitattributes`) and publishes them with that section as the release notes. A local-only tag does not trigger a release.
+The release workflow validates the tag and `CHANGELOG.md` entry, packages runtime files per `.gitattributes`, and publishes the GitHub release using that changelog section.
