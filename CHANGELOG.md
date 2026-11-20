@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [v2.5.1] - 2026-11-21
+
+### Fixed
+
+- Raise the built-in Codex client version to 0.171.0 so eligible subscribers can fetch GPT-6.2 Astra and Sol in server and Docker deployments.
+- Check npm for the latest stable Codex client version in the background and use it when it is newer than the built-in version and the local catalog version.
+- Document device-code login and local Codex credential mounting for Docker deployments.
+
 ## [v2.5.0] - 2026-11-14
 
 ### Added
