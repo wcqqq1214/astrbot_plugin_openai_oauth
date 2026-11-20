@@ -69,12 +69,14 @@ DEFAULT_ORIGINATOR = "codex_cli_rs"
 # The backend gates its newest models on the Codex version a client names, in
 # both its User-Agent and the model catalog query: an older or placeholder
 # version can get 404 "Model not found" for a model the catalog lists.
-CODEX_CLIENT_VERSION = "0.162.0"
+CODEX_CLIENT_VERSION = "0.171.0"
+_CODEX_NPM_LATEST = "https://registry.npmjs.org/@openai/codex/latest"
 _USER_AGENT_MARKER = "astrbot-plugin-openai-oauth"
 _VERSION_PATTERN = re.compile(r"\d+(?:\.\d+)+")
 _VERSION_CACHE_SECONDS = 600
 _codex_home: Path | None = None
 _version_cache: tuple[float, Path | None, str] | None = None
+_published_version = CODEX_CLIENT_VERSION
 
 
 def _platform_label() -> str:
@@ -103,13 +105,27 @@ def set_codex_home(path: str | os.PathLike[str] | None) -> None:
     _version_cache = None
 
 
-def codex_client_version() -> str:
-    """Name the newest of the built-in Codex version and local Codex's catalog.
+async def refresh_published_version(proxy: str | None = None) -> None:
+    """Read the stable npm release using a separate, unauthenticated client."""
+    global _published_version
+    try:
+        async with create_proxy_client("Codex npm registry", proxy) as client:
+            response = await client.get(_CODEX_NPM_LATEST, timeout=8)
+            response.raise_for_status()
+            data = response.json()
+        version = data.get("version") if isinstance(data, dict) else None
+        if not isinstance(version, str) or not re.fullmatch(
+            r"(?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,5})",
+            version,
+        ):
+            raise ValueError("Invalid stable Codex version")
+        _published_version = version
+    except Exception as exc:  # noqa: BLE001 - discovery is optional
+        logger.debug("Codex npm version check failed: %s", type(exc).__name__)
 
-    Codex CLI records the version it last fetched the catalog with in
-    ``models_cache.json``. After a Codex update brings new models, that version
-    is newer than the built-in one and unlocks them.
-    """
+
+def _local_client_version() -> str:
+    """Cache the greater of the built-in version and local catalog version."""
     global _version_cache
     now = time.monotonic()
     if (
@@ -132,6 +148,10 @@ def codex_client_version() -> str:
         pass
     _version_cache = (now, _codex_home, version)
     return version
+
+
+def codex_client_version() -> str:
+    return max(_local_client_version(), _published_version, key=_version_key)
 
 
 def default_user_agent() -> str:
@@ -324,9 +344,10 @@ async def fetch_models(
     account_id: str = "",
     proxy: str | None = None,
     originator: str = DEFAULT_ORIGINATOR,
-    user_agent: str = DEFAULT_USER_AGENT,
+    user_agent: str = "",
 ) -> list[str]:
     """Fetch and normalize the live Codex model catalog."""
+    user_agent = resolve_user_agent(user_agent)
     headers = {
         "Authorization": f"Bearer {access_token}",
         "originator": originator,
@@ -618,7 +639,7 @@ async def fetch_rate_limits(
     access_token: str,
     account_id: str = "",
     proxy: str | None = None,
-    user_agent: str = DEFAULT_USER_AGENT,
+    user_agent: str = "",
 ) -> dict:
     """Query the ChatGPT subscription allowance (GET /wham/usage).
 
@@ -628,6 +649,7 @@ async def fetch_rate_limits(
     ``secondary_window`` with ``used_percent``; the older ``rate_limits.codex[]``
     shape with ``usage_in_seconds``/``limit_in_seconds`` is still accepted.
     """
+    user_agent = resolve_user_agent(user_agent)
     headers = {
         "Authorization": f"Bearer {access_token}",
         "User-Agent": user_agent,

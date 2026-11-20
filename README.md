@@ -114,7 +114,9 @@
 插件默认读取 `$CODEX_HOME/auth.json`，未设置时读取 `~/.codex/auth.json`。也可在插件设置的 `codex_auth_path` 填入完整路径，保存后重载插件。请确保 AstrBot 对该文件有读权限、对所在目录有写权限以便自动刷新令牌。如果此前只在浏览器或系统钥匙串中登录而没有 `auth.json`，请改用设备码登录。
 
 **AstrBot 在 Docker 或远程服务器上？**
-容器或远程主机无法直接读取本地电脑的登录。在 Docker 中复用本地凭据时，请挂载整个 Codex 凭据目录并在 `codex_auth_path` 填写容器内路径（不要只挂载单个 `auth.json`，否则原子写入刷新会失败），或者直接用设备码登录。
+推荐用插件的设备码登录。服务器无需安装 Node.js、npm 或 Codex CLI。插件启动时会在后台查询 npm 上的 Codex CLI 稳定版本，之后每 6 小时检查一次。请求模型目录和对话时，默认取内置版本、本地 Codex 缓存版本和已查到的 npm 稳定版本中的最高值。npm 暂时不可达时，已有版本仍可使用。
+
+如果服务器已经运行 Codex CLI，也可以复用它的登录。Docker 部署请挂载整个 Codex 凭据目录，并在 `codex_auth_path` 填写容器内的 `auth.json` 路径。插件刷新凭据时需要在同一目录原子替换该文件。
 
 **需要配置代理？**
 可在 **OpenAI Subscribe** 来源的 `proxy` 中填写代理，或为 AstrBot 进程／容器设置 `HTTP_PROXY` 和 `HTTPS_PROXY`（旧版单账号配置过的代理会保留并优先使用）。若报 `unsupported_country_region_territory`，说明 OpenAI 不接受当前网络出口地区或账号条件，插件无法绕过。

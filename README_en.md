@@ -114,7 +114,9 @@ Reasoning effort is optional (`none`, `minimal`, `low`, `medium`, `high`, `xhigh
 The plugin reads `$CODEX_HOME/auth.json`, or `~/.codex/auth.json` if unset. Set a full file path in `codex_auth_path` and reload the plugin to override it. AstrBot needs read access to the file and write access to its parent directory for automatic token refreshes. Browser-only or keychain-only logins without an `auth.json` file need device-code sign-in instead.
 
 **Running AstrBot in Docker or on a remote server?**
-Containers and remote hosts can't read logins stored on your personal computer. To share a local login with Docker, mount the entire credentials directory and set `codex_auth_path` to the container path (don't mount a single `auth.json` file, or atomic refresh writes will fail), or sign in with a device code in the plugin page.
+Use the plugin's device-code login. The server does not need Node.js, npm or the Codex CLI. At startup and every six hours, the plugin checks npm for the stable Codex CLI version in the background. By default, model discovery and chat use the highest of the built-in version, the local Codex catalog version and the stable version retrieved from npm. If npm is unreachable, requests continue with the versions already available.
+
+If the server already runs the Codex CLI, you can also reuse its login. For Docker, mount the entire Codex credentials directory and set `codex_auth_path` to the path of `auth.json` inside the container. The plugin needs the directory to replace that file atomically when refreshing credentials.
 
 **Need a proxy?**
 Set `proxy` on the **OpenAI Subscribe** source, or pass `HTTP_PROXY` and `HTTPS_PROXY` to the AstrBot process/container (per-account proxies migrated from older versions are preserved and take precedence). `unsupported_country_region_territory` means OpenAI is rejecting your exit IP region or account eligibility, which the plugin cannot bypass.

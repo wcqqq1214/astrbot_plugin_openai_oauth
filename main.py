@@ -48,6 +48,7 @@ class OpenAI_OAuth_Plugin(Star):
     ) -> None:
         super().__init__(context)
         self.config = config if config is not None else AstrBotConfig()
+        self._version_task: asyncio.Task[None] | None = None
         self._image_accounts: OrderedDict[
             tuple[str, str | None], image_generation.ChatAccount
         ] = OrderedDict()
@@ -57,6 +58,14 @@ class OpenAI_OAuth_Plugin(Star):
     async def initialize(self) -> None:
         """Expose the default model source without requiring a device login."""
         await runtime.initialize(self.context)
+        if self._version_task is None:
+            self._version_task = asyncio.create_task(self._refresh_codex_version())
+
+    async def _refresh_codex_version(self) -> None:
+        while True:
+            gateway = runtime.get_coordinator().providers.gateway() or {}
+            await oauth.refresh_published_version(gateway.get("proxy") or None)
+            await asyncio.sleep(6 * 60 * 60)
 
     @filter.command("usage")
     async def usage(self, event: AstrMessageEvent) -> None:
@@ -195,6 +204,10 @@ class OpenAI_OAuth_Plugin(Star):
         await login.handle_login(event, action)
 
     async def terminate(self) -> None:
-        """Cancel outstanding device-login work during plugin unload."""
+        """Stop background discovery and device login during plugin unload."""
+        if self._version_task is not None:
+            self._version_task.cancel()
+            await asyncio.gather(self._version_task, return_exceptions=True)
+            self._version_task = None
         await login.terminate()
         runtime.terminate()

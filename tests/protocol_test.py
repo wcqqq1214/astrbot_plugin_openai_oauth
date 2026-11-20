@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import os
 import sys
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+
+import httpx
 
 REPO_ROOT = os.path.abspath(
     os.environ.get("ASTRBOT_ROOT")
@@ -115,9 +121,6 @@ def test_models() -> None:
 
 def test_client_identity() -> None:
     print("\n=== Codex client identity ===")
-    import json
-    import tempfile
-    from pathlib import Path
 
     legacy = "codex_cli_rs/0.0.0 (astrbot-plugin-openai-oauth)"
     with tempfile.TemporaryDirectory() as home:
@@ -162,11 +165,71 @@ def test_client_identity() -> None:
             oauth.set_codex_home(None)
 
 
+async def test_published_version() -> None:
+    registry_reply = {"version": "98.20.0"}
+    registry_status = 200
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        if request.url.host == "registry.npmjs.org":
+            return httpx.Response(registry_status, json=registry_reply)
+        return httpx.Response(200, json={"models": [{"slug": "listed-model"}]})
+
+    def client(_label, _proxy):
+        return httpx.AsyncClient(transport=httpx.MockTransport(respond))
+
+    with (
+        tempfile.TemporaryDirectory() as home,
+        patch.object(oauth, "_published_version", oauth.CODEX_CLIENT_VERSION),
+        patch.object(oauth, "create_proxy_client", side_effect=client),
+    ):
+        oauth.set_codex_home(home)
+        try:
+            check(
+                oauth.codex_client_version() == oauth.CODEX_CLIENT_VERSION,
+                "cold start uses the built-in floor",
+            )
+            await oauth.refresh_published_version()
+            req = requests[-1]
+            check(
+                str(req.url) == "https://registry.npmjs.org/@openai/codex/latest"
+                and "authorization" not in req.headers
+                and "chatgpt-account-id" not in req.headers,
+                "version lookup only reads public npm metadata",
+            )
+            await oauth.fetch_models("test-token")
+            req = requests[-1]
+            check(
+                req.url.params["client_version"] == req.headers["version"] == "98.20.0"
+                and req.headers["User-Agent"].startswith("codex_cli_rs/98.20.0 "),
+                "a fresh npm version reaches the query and headers while the local cache is warm",
+            )
+            for registry_status, registry_reply in [
+                (503, {}),
+                (200, {"version": "9.1.0-beta.1"}),
+                (200, {"version": 12}),
+                (200, []),
+            ]:
+                await oauth.refresh_published_version()
+                check(
+                    oauth.codex_client_version() == "98.20.0",
+                    "unusable registry data preserves the last stable version",
+                )
+            Path(home, "models_cache.json").write_text(
+                json.dumps({"client_version": "98.100.0"})
+            )
+            oauth.set_codex_home(home)
+            check(
+                oauth.codex_client_version() == "98.100.0",
+                "a newer local version beats the npm version numerically",
+            )
+        finally:
+            oauth.set_codex_home(None)
+
+
 def test_model_reasoning_levels() -> None:
     print("\n=== Model reasoning levels ===")
-    import json
-    import tempfile
-    from pathlib import Path
 
     catalog = {
         "models": [
@@ -367,6 +430,7 @@ def test_error_classification() -> None:
 if __name__ == "__main__":
     test_models()
     test_client_identity()
+    asyncio.run(test_published_version())
     test_model_reasoning_levels()
     test_chat_languages()
     test_usage_schemas()

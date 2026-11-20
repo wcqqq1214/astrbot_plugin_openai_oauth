@@ -431,11 +431,18 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_plugin_defaults_and_status_disclose_only_origin(self):
         self.write(auth())
+        checking = asyncio.Event()
+
+        async def check_version(_proxy):
+            checking.set()
+            await asyncio.Event().wait()
+
         with (
             patch.dict(os.environ, {"CODEX_HOME": self.tmp.name}),
             patch.object(runtime, "_config_mgr", None),
             patch.object(runtime, "_local_codex_store", None),
             patch.object(runtime, "_credential_coordinator", None),
+            patch.object(oauth, "refresh_published_version", side_effect=check_version),
         ):
             context = SimpleNamespace(
                 astrbot_config_mgr=SimpleNamespace(default_conf=self.conf),
@@ -443,6 +450,10 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
             )
             instance = plugin.OpenAI_OAuth_Plugin(context, config={})
             await instance.initialize()
+            version_task = instance._version_task
+            self.addCleanup(lambda: self.assertTrue(version_task.cancelled()))
+            self.addAsyncCleanup(instance.terminate)
+            await asyncio.wait_for(checking.wait(), timeout=2)
             coordinator = runtime.get_coordinator()
             self.assertEqual((await coordinator.get_snapshot()).account_id, "one")
             provider = plugin.ProviderOpenAICodex(dict(self.source), {})

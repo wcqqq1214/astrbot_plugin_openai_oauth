@@ -834,7 +834,9 @@ def test_entry_point_terminates_login_tasks() -> None:
             await plugin.OpenAI_OAuth_Plugin.openai_login(None, event)
             command_task = login._command_login_tasks[event.unified_msg_origin]
             await asyncio.sleep(0)
-            await plugin.OpenAI_OAuth_Plugin.terminate(None)
+            await plugin.OpenAI_OAuth_Plugin.terminate(
+                SimpleNamespace(_version_task=None)
+            )
             await asyncio.gather(web_task, command_task, return_exceptions=True)
             check(web_task.cancelled(), "unload cancels the pending WebUI login")
             check(command_task.cancelled(), "unload cancels the pending command login")
