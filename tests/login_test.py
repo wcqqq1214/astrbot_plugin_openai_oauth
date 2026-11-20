@@ -703,7 +703,7 @@ def test_effort_command() -> None:
     )
 
     selected_event = _Event()
-    selected_event.extras["selected_provider"] = "OpenAI Subscribe/gpt-5.6-luna"
+    selected_event.extras["selected_provider"] = "OpenAI Subscribe/gpt-6-luna"
     selected_context = _Context(
         _Provider("openai"),
         _Provider(runtime.PROVIDER_TYPE),
@@ -725,7 +725,7 @@ def test_effort_command() -> None:
 
     asyncio.run(run_selected_provider())
     check(
-        selected_context.selected_provider_ids == ["OpenAI Subscribe/gpt-5.6-luna"],
+        selected_context.selected_provider_ids == ["OpenAI Subscribe/gpt-6-luna"],
         "/effort honors the WebChat selected provider",
     )
     check(

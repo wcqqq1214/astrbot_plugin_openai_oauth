@@ -201,8 +201,11 @@ def test_hot_reload_and_offline_models() -> None:
     old_manager = runtime._config_mgr
     runtime._config_mgr = None
     try:
-        provider = ProviderOpenAICodex(make_config({"refresh_token": "rt-only"}), {})
+        config = make_config({"refresh_token": "rt-only"})
+        del config["model"]
+        provider = ProviderOpenAICodex(config, {})
         models = asyncio.run(provider.get_models())
+        check(provider.get_model() in models, "default model is available offline")
     finally:
         runtime._config_mgr = old_manager
     check(
@@ -219,7 +222,7 @@ def test_source_model_listing_preserves_credentials() -> None:
     original = deepcopy(source)
     conf = _FakeConfig(provider_sources=[source])
     manager = _FakeConfigManager(conf)
-    live_models = ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]
+    live_models = ["test-live-only-model"]
     fetch = mock.AsyncMock(return_value=live_models)
 
     async def run() -> None:
