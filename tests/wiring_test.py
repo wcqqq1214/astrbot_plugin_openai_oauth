@@ -30,6 +30,7 @@ oauth = importlib.import_module(f"{module.__package__}.src.oauth")
 provider_module = importlib.import_module(f"{module.__package__}.src.provider")
 from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.star import Context
+from astrbot.core.agent.hooks import BaseAgentRunHooks
 from astrbot.core.message.components import Image as ImageComponent
 from astrbot.core.platform.astrbot_message import AstrBotMessage, MessageMember
 from astrbot.core.platform.message_type import MessageType
@@ -95,7 +96,7 @@ def make_source(creds: dict) -> dict:
         "key": json.dumps(creds),
         "proxy": "",
         "originator": oauth.DEFAULT_ORIGINATOR,
-        "user_agent": oauth.DEFAULT_USER_AGENT,
+        "user_agent": oauth.default_user_agent(),
         "enable": True,
     }
 
@@ -108,15 +109,15 @@ def make_config(creds: dict, **overrides) -> dict:
         "model": "gpt-5.4-mini",
         "proxy": "",
         "originator": oauth.DEFAULT_ORIGINATOR,
-        "user_agent": oauth.DEFAULT_USER_AGENT,
+        "user_agent": oauth.default_user_agent(),
     }
     config.update(overrides)
     return config
 
 
-def test_provider_initialization_and_request_client() -> None:
+async def test_provider_initialization_and_request_client() -> None:
     print("=== Provider initialization and request isolation ===")
-    provider = ProviderOpenAICodex(make_config(credentials()), {})
+    provider, _ = _provider_with_source(credentials())
     check(
         provider.provider_config["api_base"] == oauth.CODEX_BASE,
         "api_base points at the Codex backend",
@@ -150,16 +151,16 @@ def test_provider_initialization_and_request_client() -> None:
         cooldown_until=None,
         cooldown_reason=None,
     )
-    request_client = provider._request_client(snapshot)
-    request_headers = request_client.default_headers or {}
-    check(
-        request_client.api_key == snapshot.access_token,
-        "derived request client has the snapshot token",
-    )
-    check(
-        request_headers.get("chatgpt-account-id") == snapshot.account_id,
-        "derived request client has the snapshot account header",
-    )
+    async with provider._source_client(snapshot) as request_client:
+        request_headers = request_client.default_headers or {}
+        check(
+            request_client.api_key == snapshot.access_token,
+            "derived request client has the snapshot token",
+        )
+        check(
+            request_headers.get("chatgpt-account-id") == snapshot.account_id,
+            "derived request client has the snapshot account header",
+        )
     check(
         provider.client.api_key == root_token,
         "derived client leaves root token unchanged",
@@ -178,6 +179,7 @@ def test_provider_initialization_and_request_client() -> None:
         provider.client.api_key == root_token,
         "set_key does not mutate root client",
     )
+    await provider.terminate()
 
 
 def test_hot_reload_and_offline_models() -> None:
@@ -248,7 +250,7 @@ def test_source_model_listing_preserves_credentials() -> None:
                 ACCOUNT_ID,
                 "",
                 oauth.DEFAULT_ORIGINATOR,
-                oauth.DEFAULT_USER_AGENT,
+                oauth.default_user_agent(),
             )
         ]
         * 2,
@@ -401,14 +403,18 @@ def test_group_chat_image_resize() -> None:
         context = mock.MagicMock(spec=Context)
         context.get_config.return_value = {}
         context.subagent_orchestrator = None
-        context.conversation_manager = mock.MagicMock()
-        context.conversation_manager.get_curr_conversation_id = mock.AsyncMock(
-            return_value="conv"
+        conversation = SimpleNamespace(
+            cid="conv", history=json.dumps(history), persona_id=None, token_usage=0
         )
-        context.conversation_manager.get_conversation = mock.AsyncMock(
-            return_value=SimpleNamespace(
-                cid="conv", history=json.dumps(history), persona_id=None
-            )
+        context.conversation_manager = SimpleNamespace(
+            get_curr_conversation_id=mock.AsyncMock(return_value=conversation.cid),
+            get_conversation=mock.AsyncMock(return_value=conversation),
+            db=SimpleNamespace(
+                get_conversation_by_id=mock.AsyncMock(
+                    return_value=SimpleNamespace(content=history)
+                )
+            ),
+            to_legacy_conversation=mock.Mock(return_value=conversation),
         )
         dispatched = []
 
@@ -466,7 +472,9 @@ def test_group_chat_image_resize() -> None:
                     image.format == "JPEG" and image.size == (1280, 320),
                     "shared history retains AstrBot's preview for other providers",
                 )
-            async for _ in result.agent_runner._iter_llm_responses():
+            # No plugin manager is running to bind and dispatch response hooks.
+            result.agent_runner.agent_hooks = BaseAgentRunHooks()
+            async for _ in result.agent_runner.step():
                 pass
 
         parts = [
@@ -952,7 +960,7 @@ def test_usage_limit_enters_cooldown() -> None:
 def main() -> int:
     old_manager = runtime._config_mgr
     try:
-        test_provider_initialization_and_request_client()
+        asyncio.run(test_provider_initialization_and_request_client())
         test_hot_reload_and_offline_models()
         test_source_model_listing_preserves_credentials()
         test_input_image_resize()

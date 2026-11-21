@@ -266,12 +266,12 @@ async def _edit_provider(*, delete: bool) -> Any:
     if message := _login_request_error():
         return _login_error_response(message, 403)
     try:
-        source_id = await _requested_source_id()
-        body = await request.json(default={}) or {}
-        if "source_id" not in body:
-            raise CredentialSourceError(
-                "Provider ID is required.", code="invalid_request"
-            )
+        body = await request.json(default={})
+        if not isinstance(body, dict):
+            raise CredentialSourceError("Invalid request body.", code="invalid_request")
+        source_id = body.get("source_id")
+        if not isinstance(source_id, str) or not source_id:
+            raise CredentialSourceError("Invalid provider ID.", code="invalid_request")
         if set(body) - {"source_id", "name", "enabled", "routing_mode"}:
             raise CredentialSourceError(
                 "Unknown provider update field.", code="invalid_request"

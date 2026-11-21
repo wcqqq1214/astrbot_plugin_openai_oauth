@@ -263,7 +263,6 @@ function renderAccountStatus(panel, result) {
   const state = String(panel.account.status || "unknown");
   panel.accountStatus.textContent = t.states[state] || t.states.unknown;
   panel.accountStatus.setAttribute("title", t.details[state] || t.details.unknown);
-  panel.accountStatus.className = "badge" + statusClass(state);
 
   panel.elements["source-name"].textContent = providerName(panel.account);
   updateNotice(panel);

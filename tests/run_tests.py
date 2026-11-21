@@ -33,7 +33,9 @@ def main() -> int:
         runpy.run_path(str(test), run_name="__main__")
         return 0
     cases = sys.argv[1:] or [
-        p.name for p in sorted((PLUGIN_ROOT / "tests").glob("*_test.py"))
+        p.name
+        for p in sorted((PLUGIN_ROOT / "tests").glob("*_test.py"))
+        if p.name != "credential_store_test.py"  # Covered by run_unit_tests.py.
     ]
     failed = []
     with tempfile.TemporaryDirectory(prefix="astrbot-test-codex-") as auth_home:

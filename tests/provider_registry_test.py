@@ -200,6 +200,19 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(store.ProviderDisabledError):
             self.registry.ensure_enabled("OpenAI Subscribe")
 
+    async def test_account_edits_require_an_explicit_source_id(self):
+        await self.registry.migrate()
+        before = deepcopy(self.conf)
+        for handler, body in (
+            (web_api._handle_provider_update, {"enabled": False}),
+            (web_api._handle_provider_delete, {}),
+        ):
+            with self.subTest(handler=handler.__name__), request_context(body):
+                response = await handler()
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(payload(response)["message"], "invalid_request")
+                self.assertEqual(self.conf, before)
+
     async def test_enabled_migration_and_strict_validation(self):
         self.conf["provider_sources"][0]["enable"] = False
         await self.registry.migrate()

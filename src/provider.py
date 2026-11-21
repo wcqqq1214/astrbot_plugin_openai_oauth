@@ -137,8 +137,8 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                 None,
             )
         self._source_id = str(source_id or runtime.PROVIDER_TYPE)
-        self._originator = str(provider_config.get("originator", DEFAULT_ORIGINATOR))
-        self._user_agent = oauth.resolve_user_agent(provider_config.get("user_agent"))
+        originator = str(provider_config.get("originator", DEFAULT_ORIGINATOR))
+        user_agent = oauth.resolve_user_agent(provider_config.get("user_agent"))
         raw_headers = provider_config.get("custom_headers")
         self._static_headers = (
             {
@@ -152,9 +152,9 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         for header_name in list(self._static_headers):
             if header_name.lower() == "chatgpt-account-id":
                 self._static_headers.pop(header_name)
-        self._static_headers.setdefault("originator", self._originator)
+        self._static_headers.setdefault("originator", originator)
         self._static_headers.setdefault("OpenAI-Beta", "responses=experimental")
-        self._static_headers.setdefault("User-Agent", self._user_agent)
+        self._static_headers.setdefault("User-Agent", user_agent)
         provider_config["api_base"] = CODEX_BASE
         provider_config["key"] = "openai-oauth-request-scoped"
         provider_config["custom_headers"] = dict(self._static_headers)
@@ -205,31 +205,15 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         self.api_keys = [self._bootstrap_access_token]
         self.chosen_api_key = self._bootstrap_access_token
 
-    def _request_client(
-        self,
-        snapshot: CredentialSnapshot,
-        *,
-        headers: dict[str, str] | None = None,
-        http_client: Any = None,
-    ) -> Any:
-        headers = dict(self._static_headers if headers is None else headers)
-        if snapshot.account_id:
-            headers["chatgpt-account-id"] = snapshot.account_id
-        return self.client.with_options(
-            # The plugin owns retries, cooldowns and the cross-provider budget.
-            max_retries=0,
-            api_key=snapshot.access_token,
-            set_default_headers=headers,
-            **({"http_client": http_client} if http_client is not None else {}),
-        )
-
     @asynccontextmanager
     async def _source_client(self, snapshot: CredentialSnapshot):
         """Build a request client on the selected source's own transport."""
         async with self.source_transport(snapshot) as (transport, headers):
-            yield self._request_client(
-                snapshot,
-                headers=headers,
+            yield self.client.with_options(
+                # The plugin owns retries, cooldowns and the cross-provider budget.
+                max_retries=0,
+                api_key=snapshot.access_token,
+                set_default_headers=headers,
                 http_client=transport,
             )
 

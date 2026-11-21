@@ -162,11 +162,6 @@ def default_user_agent() -> str:
     )
 
 
-DEFAULT_USER_AGENT = (
-    f"codex_cli_rs/{CODEX_CLIENT_VERSION} ({_platform_label()}) {_USER_AGENT_MARKER}"
-)
-
-
 def resolve_user_agent(configured: Any) -> str:
     """Use a custom User-Agent as is; plugin defaults track the Codex version."""
     value = configured.strip() if isinstance(configured, str) else ""
@@ -747,11 +742,6 @@ def _parse_usage_payload(data: Any) -> dict:
     }
 
 
-def extract_account_id(access_token: str) -> str:
-    """Read the ChatGPT account ID from an access token (a JWT)."""
-    return token_account_id(access_token)
-
-
 def build_credentials(
     access_token: str,
     refresh_token: str,
@@ -763,5 +753,5 @@ def build_credentials(
         "access_token": access_token,
         "refresh_token": refresh_token,
         "expires": int(time.time()) + int(expires_in),
-        "account_id": extract_account_id(access_token),
+        "account_id": token_account_id(access_token),
     }

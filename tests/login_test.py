@@ -116,7 +116,7 @@ def source(*, key: str = "", proxy: str = "") -> dict:
         "key": key,
         "proxy": proxy,
         "originator": oauth.DEFAULT_ORIGINATOR,
-        "user_agent": oauth.DEFAULT_USER_AGENT,
+        "user_agent": oauth.default_user_agent(),
         "enable": True,
     }
 

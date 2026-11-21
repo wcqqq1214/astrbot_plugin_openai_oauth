@@ -25,7 +25,9 @@ REPO_ROOT = os.path.abspath(
 sys.path.insert(0, REPO_ROOT)
 os.chdir(REPO_ROOT)
 
+from astrbot.core.agent.hooks import BaseAgentRunHooks
 from astrbot.core.agent.message import Message
+from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
 from astrbot.core.provider.entities import LLMResponse, ProviderRequest
 from PIL import Image
@@ -145,6 +147,7 @@ class ImageBridgeTests(unittest.IsolatedAsyncioTestCase):
 
         return SimpleNamespace(
             provider_config={"id": name, "type": name, "modalities": ["image"]},
+            get_model=lambda: name,
             text_chat=chat,
             text_chat_stream=stream,
         )
@@ -154,9 +157,9 @@ class ImageBridgeTests(unittest.IsolatedAsyncioTestCase):
         await runner.reset(
             provider=provider,
             request=request,
-            run_context=SimpleNamespace(),
+            run_context=ContextWrapper(context=None),
             tool_executor=None,
-            agent_hooks=None,
+            agent_hooks=BaseAgentRunHooks(),
             fallback_providers=list(fallbacks),
             streaming=streaming,
         )
@@ -180,7 +183,7 @@ class ImageBridgeTests(unittest.IsolatedAsyncioTestCase):
                             for message in runner.run_context.messages
                         ]
                     )
-                    async for _ in runner._iter_llm_responses_with_fallback():
+                    async for _ in runner.step():
                         pass
                     self.assertEqual([name for name, _ in captured], [first, second])
                     for name, messages in captured:
@@ -192,13 +195,9 @@ class ImageBridgeTests(unittest.IsolatedAsyncioTestCase):
                             else ("JPEG", (1280, 320)),
                         )
                         self.assertNotIn("astrbot-openai-oauth:", str(image.get("id")))
-                    self.assertEqual(
-                        before,
-                        [
-                            message.model_dump()
-                            for message in runner.run_context.messages
-                        ],
-                    )
+                    history = runner.run_context.messages
+                    self.assertEqual(history[-1].role, "assistant")
+                    self.assertEqual([m.model_dump() for m in history[:-1]], before)
 
     async def test_pending_previews_survive_module_reload(self):
         cache = {}
@@ -212,7 +211,7 @@ class ImageBridgeTests(unittest.IsolatedAsyncioTestCase):
             await self.prepare(request, cache)
         captured = []
         runner = await self.runner(request, self.provider(CODEX, captured))
-        async for _ in runner._iter_llm_responses():
+        async for _ in runner.step():
             pass
         self.assertEqual(
             dimensions(image_parts(captured[0][1])[0]), ("PNG", (2048, 512))
@@ -233,7 +232,7 @@ class ImageBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.remove()
         captured = []
         runner = await self.runner(request, self.provider(CODEX, captured))
-        async for _ in runner._iter_llm_responses():
+        async for _ in runner.step():
             pass
         self.assertEqual(
             dimensions(image_parts(captured[0][1])[0]), ("JPEG", (1280, 320))
@@ -243,7 +242,7 @@ class ImageBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(ToolLoopAgentRunner.reset, third_party)
         request = await self.prepare()
         runner = await self.runner(request, self.provider(CODEX, captured))
-        async for _ in runner._iter_llm_responses():
+        async for _ in runner.step():
             pass
         self.assertEqual(len(calls), 2)
         self.assertEqual(
@@ -299,7 +298,7 @@ class ImageBridgeTests(unittest.IsolatedAsyncioTestCase):
         ]
         captured = []
         runner = await self.runner(request, self.provider(CODEX, captured))
-        async for _ in runner._iter_llm_responses():
+        async for _ in runner.step():
             pass
         image = image_parts(captured[0][1])[0]
         self.assertEqual(image["id"], "user-image-id")

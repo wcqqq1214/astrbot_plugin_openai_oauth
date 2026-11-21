@@ -391,25 +391,13 @@ class CredentialCoordinator:
     def _usage_lock(self, source_id: str) -> asyncio.Lock:
         return self._usage_locks.setdefault(source_id, asyncio.Lock())
 
-    def source(self, source_id: str, *, create: bool = False) -> dict[str, Any]:
-        conf = self.config()
-        source = find_source(conf, source_id, self.provider_type)
-        if source is not None:
-            return source
-        if not create or source_id != self.default_source_id:
+    def source(self, source_id: str) -> dict[str, Any]:
+        source = find_source(self.config(), source_id, self.provider_type)
+        if source is None:
             raise CredentialSourceError(
                 "The configured OpenAI provider source was not found.",
                 code="provider_not_found",
             )
-        source = self.default_source_factory()
-        if source.get("id") != source_id or source.get("type") != self.provider_type:
-            raise CredentialSourceError(
-                "The default OpenAI provider source is invalid."
-            )
-        sources = conf.setdefault("provider_sources", [])
-        if not isinstance(sources, list):
-            raise CredentialSourceError("The provider source configuration is invalid.")
-        sources.append(source)
         return source
 
     def _snapshot_from_source(
@@ -468,11 +456,11 @@ class CredentialCoordinator:
         expected = self._snapshot_from_source(
             source_id, {"key": normalize_credentials(creds)}
         )
-        if committed is False and not credentials_match(persisted, expected):
-            raise CredentialPersistenceError(
-                "The refreshed OpenAI credential could not be saved safely."
-            )
         if not credentials_match(persisted, expected):
+            if committed is False:
+                raise CredentialPersistenceError(
+                    "The refreshed OpenAI credential could not be saved safely."
+                )
             raise CredentialPersistenceError(
                 "The refreshed OpenAI credential could not be confirmed after saving."
             )
