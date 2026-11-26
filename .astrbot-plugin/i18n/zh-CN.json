@@ -18,10 +18,6 @@
     "chat_language": {
       "description": "聊天回复语言",
       "hint": "/usage、/effort 和 /openai_login 的回复语言。插件页面跟随 Dashboard 语言。保存后重载插件生效。"
-    },
-    "native_web_search": {
-      "description": "原生网络搜索",
-      "hint": "允许模型使用 Codex 原生网络搜索并在回答末尾附加来源链接。"
     }
   }
 }

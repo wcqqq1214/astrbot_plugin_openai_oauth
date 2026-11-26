@@ -155,6 +155,26 @@ class ProviderRegistry:
             return self._pending_routing
         return (self.gateway() or {}).get(ROUTING_KEY, {})
 
+    def native_web_search(self) -> bool:
+        return self.routing().get("native_web_search") is True
+
+    async def update_native_web_search(self, enabled: bool) -> bool:
+        if type(enabled) is not bool:
+            raise CredentialSourceError(
+                "native_web_search must be a boolean.", code="invalid_request"
+            )
+        async with self.lock:
+            gateway = self.gateway()
+            if gateway is None:
+                raise CredentialSourceError(
+                    "Account migration has not completed.",
+                    code="migration_pending",
+                )
+            routing = deepcopy(self.routing())
+            routing["native_web_search"] = enabled
+            await self._commit_configuration({ROUTING_KEY: routing}, target=gateway)
+            return enabled
+
     def model_binding(self, model_id: str | None) -> str | None:
         if self._pending_routing is not None:
             return self._pending_routing.get("models", {}).get(model_id)

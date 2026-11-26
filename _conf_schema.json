@@ -34,11 +34,5 @@
     "type": "string",
     "default": "",
     "hint": "留空跟随聊天实际账号。填写来源 ID 后，仅在聊天实际使用该来源时允许生图。"
-  },
-  "native_web_search": {
-    "description": "原生网络搜索",
-    "type": "bool",
-    "default": false,
-    "hint": "允许模型使用 Codex 原生网络搜索并在回答末尾附加来源链接。"
   }
 }

@@ -224,7 +224,13 @@ async def _handle_providers_list() -> Any:
             coordinator.account_view(s["id"]) for s in coordinator.providers.owned()
         ]
         return json_response(
-            {"providers": providers, "routing": coordinator.providers.routing_view()},
+            {
+                "providers": providers,
+                "routing": coordinator.providers.routing_view(),
+                "settings": {
+                    "native_web_search": coordinator.providers.native_web_search()
+                },
+            },
             headers=_NO_STORE_HEADERS,
         )
     except CredentialError:
@@ -256,6 +262,26 @@ async def _handle_routing_update() -> Any:
         await registry.update_routing(account_id, model_id=model_id)
         return json_response(
             {"status": "success", "routing": registry.routing_view()},
+            headers=_NO_STORE_HEADERS,
+        )
+    except CredentialError as exc:
+        return _login_error_response(exc.code, 400)
+
+
+async def _handle_settings_update() -> Any:
+    if message := _login_request_error():
+        return _login_error_response(message, 403)
+    try:
+        body = await request.json(default={})
+        if not isinstance(body, dict) or set(body) != {"native_web_search"}:
+            raise CredentialSourceError(
+                "Invalid settings update.", code="invalid_request"
+            )
+        enabled = await runtime.get_coordinator().providers.update_native_web_search(
+            body["native_web_search"]
+        )
+        return json_response(
+            {"status": "success", "settings": {"native_web_search": enabled}},
             headers=_NO_STORE_HEADERS,
         )
     except CredentialError as exc:
@@ -371,6 +397,7 @@ def register_routes(context: Context) -> None:
     for route, handler in (
         ("providers/list", _handle_providers_list),
         ("routing/update", _handle_routing_update),
+        ("settings/update", _handle_settings_update),
         ("providers/update", _handle_provider_update),
         ("providers/delete", _handle_provider_delete),
     ):

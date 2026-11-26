@@ -88,7 +88,7 @@ Leave `image_account` blank to follow whichever account answered the chat, or se
 
 ## Native web search
 
-Turn on **Native web search** (`native_web_search`) in the plugin settings (off by default). When enabled, requests include Codex's native `web_search` tool (`external_web_access: true`) without requiring an extra API key or third-party search service, and it coexists with AstrBot function tools.
+Turn on **Native web search** under **Plugin Views → providers → Native web search** (off by default). When enabled, requests include Codex's native `web_search` tool (`external_web_access: true`) without requiring an extra API key or third-party search service, and it coexists with AstrBot function tools.
 
 When the model searches the web and returns citations, the plugin appends a deduplicated list of source links to the end of the reply; replies without search citations are left unchanged.
 

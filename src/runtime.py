@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +30,6 @@ _COORDINATOR_ATTR = "_astrbot_openai_oauth_credential_coordinator"
 
 # Bound by the entry point; all consumers resolve credentials through this module.
 _config_mgr: Any = None
-_plugin_config: Any = None
 _credential_coordinator: LocalCredentialCoordinator | None = None
 _local_codex_store: LocalCodexStore | None = None
 _remove_source_guard: Any = None
@@ -69,10 +67,10 @@ def ensure_compatible() -> None:
 
 
 def native_web_search_enabled() -> bool:
-    return (
-        isinstance(_plugin_config, Mapping)
-        and _plugin_config.get("native_web_search") is True
-    )
+    try:
+        return get_coordinator().providers.native_web_search()
+    except CredentialError:
+        return False
 
 
 def get_coordinator() -> LocalCredentialCoordinator:
@@ -156,7 +154,7 @@ def _block_startup(context, error) -> None:
 
 def configure(context: Context, config: AstrBotConfig) -> None:
     """Check critical contracts before publishing account configuration hooks."""
-    global _config_mgr, _plugin_config, _local_codex_store, _credential_sealer
+    global _config_mgr, _local_codex_store, _credential_sealer
     global _remove_source_guard, _startup_error
     failures = []
     fields = None
@@ -185,7 +183,6 @@ def configure(context: Context, config: AstrBotConfig) -> None:
     previous = {key: fields.get(key, missing) for key in definitions}
     try:
         _config_mgr = context.astrbot_config_mgr
-        _plugin_config = config
         _credential_sealer = FernetCredentialSealer(_credential_key_path())
         messages.set_language(config.get("chat_language", messages.DEFAULT_LANGUAGE))
         _local_codex_store = LocalCodexStore(
@@ -283,8 +280,7 @@ async def initialize(context: Context) -> None:
 
 def terminate() -> None:
     """Remove AstrBot integration hooks when the plugin is unloaded."""
-    global _plugin_config, _remove_source_guard, _remove_image_bridge
-    _plugin_config = None
+    global _remove_source_guard, _remove_image_bridge
     if _remove_image_bridge is not None:
         _remove_image_bridge()
         _remove_image_bridge = None

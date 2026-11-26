@@ -822,6 +822,31 @@ dialog::backdrop {
 .provider-row.disabled .provider-name {
   color: var(--secondary);
 }
+.setting-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px 0 12px 16px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--surface-ring);
+}
+.setting-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.setting-title {
+  font-size: 14px;
+  font-weight: var(--bold);
+}
+.setting-hint {
+  font-size: 12.5px;
+  color: var(--muted);
+}
 
 /* ---------- Switch and segmented choice ---------- */
 .switch {
@@ -1281,6 +1306,9 @@ dialog::backdrop {
   .switch {
     width: 46px;
     margin-right: 4px;
+  }
+  .setting-card {
+    padding-left: 12px;
   }
   .settings-heading {
     padding-left: 16px;

@@ -30,8 +30,12 @@ from astrbot.core.platform.platform_metadata import PlatformMetadata
 from astrbot.core.provider.entities import ProviderRequest
 from openai import AsyncOpenAI
 
+package = lifecycle_fixtures.runtime.__package__.rsplit(".", 1)[0]
 provider_module = lifecycle_fixtures.provider_module
 runtime = lifecycle_fixtures.runtime
+web_api = lifecycle_fixtures.fixtures.web_api
+request_context = lifecycle_fixtures.fixtures.request_context
+api_payload = lifecycle_fixtures.fixtures.payload
 
 WEB_SEARCH_TOOL = {"type": "web_search", "external_web_access": True}
 DEFAULT_SUCCESS = [
@@ -122,13 +126,11 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
                 sdk_calls.append((direct_kwargs, extra_body))
                 return await real_create(**kwargs)
 
-            plugin_cfg = (
-                {"native_web_search": provider._test_native_web_search}  # type: ignore[attr-defined]
-                if getattr(provider, "_test_native_web_search", None) is not None
-                else {}
-            )
+            native_search = bool(getattr(provider, "_test_native_web_search", False))
             client.responses.create = spy_create  # type: ignore[method-assign]
-            with mock.patch.object(runtime, "_plugin_config", plugin_cfg):
+            with mock.patch.object(
+                runtime, "native_web_search_enabled", return_value=native_search
+            ):
                 async for item in provider._query_stream(
                     client,
                     payload
@@ -215,7 +217,7 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
             p._stream_with_current_credentials = capture_stream
             with (
                 mock.patch.object(
-                    runtime, "_plugin_config", {"native_web_search": enabled}
+                    runtime, "native_web_search_enabled", return_value=enabled
                 ),
                 mock.patch.object(
                     provider_module.effort,
@@ -582,19 +584,9 @@ class WebSearchConfigIntegrationTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = lifecycle_fixtures.SourceLifecycleTests.asyncTearDown
     sync = lifecycle_fixtures.SourceLifecycleTests.sync
 
-    async def test_plugin_panel_toggle_controls_requests_without_provider_schema(self):
+    async def test_plugin_view_toggle_persists_and_controls_requests(self):
         schema_data = json.loads((PLUGIN_ROOT / "_conf_schema.json").read_text("utf-8"))
-        web_search_schema = schema_data["native_web_search"]
-        self.assertEqual(web_search_schema["type"], "bool")
-        self.assertFalse(web_search_schema["default"])
-        for locale in ("zh-CN", "en-US", "ja-JP", "ru-RU"):
-            i18n = json.loads(
-                (PLUGIN_ROOT / ".astrbot-plugin" / "i18n" / f"{locale}.json").read_text(
-                    "utf-8"
-                )
-            )
-            self.assertTrue(i18n["config"]["native_web_search"]["description"])
-            self.assertTrue(i18n["config"]["native_web_search"]["hint"])
+        self.assertNotIn("native_web_search", schema_data)
 
         await self.registry.migrate()
         provider_schema = self.service.get_provider_schema()
@@ -608,25 +600,20 @@ class WebSearchConfigIntegrationTests(unittest.IsolatedAsyncioTestCase):
         loaded = self.manager.inst_map[saved_model["id"]]
         self.assertIsInstance(loaded, provider_module.ProviderOpenAICodex)
 
-        plugin_config = {"native_web_search": False}
-        metadata = json.loads(json.dumps(runtime.CONFIG_METADATA_2))
-        self.addCleanup(runtime.terminate)
         with (
-            mock.patch.object(runtime, "CONFIG_METADATA_2", metadata),
-            mock.patch.object(
-                runtime,
-                "get_astrbot_plugin_data_path",
-                return_value=str(PLUGIN_ROOT / "data"),
-            ),
+            mock.patch.object(runtime, "_config_mgr", self.coordinator.config_manager),
+            mock.patch.object(runtime, "_credential_coordinator", self.coordinator),
+            mock.patch.object(runtime, "_startup_error", None),
         ):
-            runtime.configure(
-                SimpleNamespace(
-                    astrbot_config_mgr=self.coordinator.config_manager,
-                    provider_manager=self.manager,
-                ),
-                plugin_config,
-            )
+            with request_context():
+                listed = api_payload(await web_api._handle_providers_list())
+            self.assertEqual(listed["settings"], {"native_web_search": False})
             self.assertFalse(runtime.native_web_search_enabled())
+
+            for bad_body in ({}, {"native_web_search": "yes"}, {"other": True}):
+                with request_context(bad_body):
+                    bad = await web_api._handle_settings_update()
+                self.assertEqual(bad.status_code, 400)
 
             seen_bodies: list[dict] = []
 
@@ -690,8 +677,17 @@ class WebSearchConfigIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await loaded.text_chat(prompt="Disabled check")
             self.assertNotIn("tools", seen_bodies[0])
 
-            plugin_config["native_web_search"] = True
+            with request_context({"native_web_search": True}):
+                updated = api_payload(await web_api._handle_settings_update())
+            self.assertEqual(updated["settings"], {"native_web_search": True})
             self.assertTrue(runtime.native_web_search_enabled())
+
+            # Survives a stale source snapshot save in AstrBot's provider source editor.
+            stale = dict(self.registry.gateway())
+            stale.pop("oauth_routing", None)
+            await self.service.upsert_provider_source("OpenAI Subscribe", stale)
+            self.assertTrue(runtime.native_web_search_enabled())
+
             reply = await loaded.text_chat(prompt="What is latest?")
             self.assertEqual(seen_bodies[1]["tools"], [WEB_SEARCH_TOOL])
             self.assertEqual(seen_bodies[1]["tool_choice"], "auto")

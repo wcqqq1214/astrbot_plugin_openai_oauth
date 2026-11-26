@@ -1703,3 +1703,41 @@ await defaultPage.loadProviders();
 assert.equal(shown("settings-default-section"), false);
 assert.equal(defaultPage.rowNodes.get("work").defaultTag.hidden, false);
 console.log("Default account settings passed: multi-account action, failure recovery and single-account hiding.");
+
+// Native web search toggle lives on the Plugin View page.
+let webSearchState = false;
+let failWebSearch = false;
+bridge.apiPost = async (endpoint, body) => {
+  if (endpoint === "providers/list") {
+    return {
+      providers: defaultAccounts,
+      routing: structuredClone(defaultState),
+      settings: { native_web_search: webSearchState },
+    };
+  }
+  if (endpoint === "account/usage") {
+    return { status: "success", account: defaultAccounts[0], usage: { windows: [] } };
+  }
+  if (endpoint === "settings/update") {
+    if (failWebSearch) throw new Error("save_failed");
+    webSearchState = body.native_web_search;
+    return { status: "success", settings: { native_web_search: webSearchState } };
+  }
+  throw new Error(`Unexpected endpoint ${endpoint}`);
+};
+const searchPage = await freshPage();
+const webSearchBtn = ids.get("web-search-toggle");
+assert.equal(webSearchBtn.getAttribute("aria-checked"), "false");
+assert.ok(read("web-search-title"));
+assert.ok(read("web-search-hint"));
+failWebSearch = true;
+await click(webSearchBtn);
+assert.equal(webSearchBtn.getAttribute("aria-checked"), "false");
+assert.equal(webSearchState, false);
+assert.equal(ids.get("save-error").hidden, false);
+failWebSearch = false;
+await click(webSearchBtn);
+assert.equal(webSearchBtn.getAttribute("aria-checked"), "true");
+assert.equal(webSearchState, true);
+assert.equal(ids.get("save-error").hidden, true);
+console.log("Plugin View native web search switch passed: state sync, failure recovery and save.");

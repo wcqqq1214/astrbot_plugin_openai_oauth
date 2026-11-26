@@ -186,6 +186,7 @@ class LoginBoundaryTests(unittest.TestCase):
             [
                 "/astrbot_plugin_openai_oauth/providers/list",
                 "/astrbot_plugin_openai_oauth/routing/update",
+                "/astrbot_plugin_openai_oauth/settings/update",
                 "/astrbot_plugin_openai_oauth/providers/update",
                 "/astrbot_plugin_openai_oauth/providers/delete",
                 "/astrbot_plugin_openai_oauth/device/start",

@@ -31,6 +31,7 @@ const settingsNameInput = byId("settings-name");
 const settingsSave = byId("settings-save");
 const settingsCancel = byId("settings-cancel");
 const closeSettingsButton = byId("close-settings");
+const webSearchToggle = byId("web-search-toggle");
 const settingsRouting = {
   fixed: byId("settings-routing-fixed"),
   auto: byId("settings-routing-auto"),
@@ -90,6 +91,9 @@ let cancelling = false;
 let lastUpdated = null;
 let pageErrorMessage = "";
 let saveErrorMessage = "";
+let webSearchEnabled = false;
+let webSearchPending = null;
+let webSearchBusy = false;
 
 // Keep UI-generated messages translatable while preserving server details.
 // The server reports its own errors as stable codes, translated here.
@@ -169,8 +173,11 @@ function applyLocale(locale) {
     "device-hint": t.deviceHint,
     "copy-url": t.copyUrl,
     "copy-code": t.copyCode,
+    "web-search-title": t.webSearchTitle,
+    "web-search-hint": t.webSearchHint,
   }))
     byId(id).textContent = value;
+  renderWebSearch();
   closeButton.setAttribute("aria-label", t.close);
   verifyUrl.setAttribute("aria-label", t.verifyLink);
   closeSettingsButton.setAttribute("aria-label", t.close);
@@ -704,6 +711,46 @@ async function queryProvider(id) {
 let accountRouting = null;
 let defaultAccountBusy = false;
 
+function renderWebSearch() {
+  const checked = webSearchPending !== null ? webSearchPending : webSearchEnabled;
+  webSearchToggle.setAttribute("aria-checked", String(checked));
+  webSearchToggle.setAttribute("aria-busy", String(webSearchBusy));
+  webSearchToggle.setAttribute("title", webSearchBusy ? t.saving : t.webSearchTitle);
+  webSearchToggle.disabled = webSearchBusy;
+}
+
+async function toggleWebSearch() {
+  if (webSearchBusy) return;
+  const next = !webSearchEnabled;
+  webSearchBusy = true;
+  webSearchPending = next;
+  showSaveError("");
+  renderWebSearch();
+  let reconcile = false;
+  try {
+    const result = await bridge.apiPost("settings/update", { native_web_search: next });
+    if (
+      result?.status === "success" &&
+      typeof result?.settings?.native_web_search === "boolean"
+    ) {
+      webSearchEnabled = result.settings.native_web_search;
+    } else {
+      reconcile = true;
+      showSaveError(() => t.saveUnknown);
+    }
+  } catch (reason) {
+    reconcile = true;
+    showSaveError(() =>
+      t.saveFailed(t.webSearchTitle, messageText(reason?.message) || t.saveUnknown),
+    );
+  } finally {
+    webSearchBusy = false;
+    webSearchPending = null;
+    renderWebSearch();
+  }
+  if (reconcile) await reloadProviders();
+}
+
 async function loadProviders() {
   const since = mutationSeq;
   const listed = ++listRequestSeq;
@@ -712,6 +759,10 @@ async function loadProviders() {
   if (!Array.isArray(list?.providers)) throw new Error();
   providers = list.providers.map((p) => keepNewerEdits(p, since));
   if (!defaultAccountBusy) accountRouting = list.routing || null;
+  if (!webSearchBusy && typeof list?.settings?.native_web_search === "boolean") {
+    webSearchEnabled = list.settings.native_web_search;
+    renderWebSearch();
+  }
   listedSeq = listed;
   showPageError("");
   renderProviders();
@@ -1196,6 +1247,7 @@ function rerender() {
   renderUpdated();
   renderLogin();
   renderSettings();
+  renderWebSearch();
 }
 
 bridge.onContext?.((next) => {
@@ -1620,6 +1672,7 @@ settingsNameInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") void saveSettings();
 });
 byId("settings-default").addEventListener("click", () => void setDefaultAccount());
+webSearchToggle.addEventListener("click", () => void toggleWebSearch());
 settingsSave.addEventListener("click", () => void saveSettings());
 settingsCancel.addEventListener("click", closeSettings);
 closeSettingsButton.addEventListener("click", closeSettings);

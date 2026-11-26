@@ -173,6 +173,8 @@ export const strings = {
     sessionExpired: "The sign-in session expired",
     sessionExpiredDetail:
       "If you already authorized, check the provider list. Otherwise, sign in again.",
+    webSearchTitle: "Native web search",
+    webSearchHint: "Allow models to use Codex native web search and append source links.",
   },
   zh: {
     // Stable error codes reported by the plugin's WebUI API.
@@ -338,6 +340,8 @@ export const strings = {
     expired: "设备码已过期",
     sessionExpired: "登录会话已失效",
     sessionExpiredDetail: "如已完成授权，请在列表中确认；否则请重新登录。",
+    webSearchTitle: "原生网络搜索",
+    webSearchHint: "允许模型按需使用 Codex 原生网络搜索，并在回答末尾附加来源链接。",
   },
   ru: {
     // Stable error codes reported by the plugin's WebUI API.
@@ -495,6 +499,8 @@ export const strings = {
     expired: "Срок действия кода истёк",
     sessionExpired: "Срок действия сеанса входа истёк",
     sessionExpiredDetail: "Если вы уже подтвердили вход, проверьте список провайдеров. Иначе войдите снова.",
+    webSearchTitle: "Встроенный веб-поиск",
+    webSearchHint: "Разрешить моделям использовать встроенный веб-поиск Codex и добавлять ссылки на источники.",
   },
   ja: {
     // Stable error codes reported by the plugin's WebUI API.
@@ -652,6 +658,8 @@ export const strings = {
     expired: "デバイスコードの有効期限が切れました",
     sessionExpired: "ログインセッションの有効期限が切れました",
     sessionExpiredDetail: "認証済みの場合はプロバイダー一覧を確認してください。それ以外の場合は再ログインしてください。",
+    webSearchTitle: "ネイティブ Web 検索",
+    webSearchHint: "モデルが Codex ネイティブ Web 検索を使い、回答末尾に出典リンクを付けることを許可します。",
   },
 
 };

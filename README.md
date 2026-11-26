@@ -88,7 +88,7 @@
 
 ## 原生网络搜索
 
-可在插件设置中开启 **原生网络搜索**（默认关闭）。开启后，请求会附带 Codex 原生 `web_search` 工具（`external_web_access: true`），无需额外 API Key 或第三方搜索服务，并可与 AstrBot 函数工具同时启用。
+可在插件详情页 **Plugin Views → providers → 原生网络搜索** 中开启或关闭（默认关闭）。开启后，请求会附带 Codex 原生 `web_search` 工具（`external_web_access: true`），无需额外 API Key 或第三方搜索服务，并可与 AstrBot 函数工具同时启用。
 
 模型触发联网检索并在响应中包含引用时，插件会在回答末尾附加去重后的来源链接列表；未触发搜索或无引用时不会附加来源区块。
 
