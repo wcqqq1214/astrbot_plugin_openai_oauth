@@ -18,6 +18,10 @@
     "chat_language": {
       "description": "チャットの返信言語",
       "hint": "/usage、/effort、/openai_login の返信言語です。プラグインページはダッシュボードの言語に従います。保存後にプラグインを再読み込みしてください。"
+    },
+    "native_web_search": {
+      "description": "ネイティブ Web 検索",
+      "hint": "モデルが Codex ネイティブ Web 検索を使用し、回答の末尾に出典リンクを付けることを許可します。"
     }
   }
 }

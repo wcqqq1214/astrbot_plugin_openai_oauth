@@ -5,11 +5,14 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncGenerator
 from typing import Any
+from urllib.parse import urlsplit
 
 import astrbot.core.message.components as Comp
 from astrbot.api.event import MessageChain
 from astrbot.core.exceptions import EmptyModelOutputError
 from astrbot.core.provider.entities import LLMResponse, TokenUsage
+
+from . import messages
 
 
 class CodexStreamMixin:
@@ -164,28 +167,58 @@ class CodexStreamMixin:
                             "Responses API output was rejected by the provider "
                             f"content filter. response_id={response_id}"
                         )
-                    if self._field(event_response, "output"):
-                        yield await self._parse_response(event_response, tools)
-                        return
-                    if output_items:
+                    final: LLMResponse | None = None
+                    citation_items: Any = None
+                    completed_output = self._field(event_response, "output")
+                    if completed_output:
+                        final = await self._parse_response(event_response, tools)
+                        citation_items = completed_output
+                    elif output_items:
+                        ordered_items = [
+                            output_items[index] for index in sorted(output_items)
+                        ]
+                        citation_items = ordered_items
                         try:
-                            parsed = await self._parse_response(
+                            final = await self._parse_response(
                                 self._response_with_output(
                                     event_response, response_id, output_items
                                 ),
                                 tools,
                             )
                         except EmptyModelOutputError:
-                            parsed = None
-                        if parsed is not None:
-                            yield parsed
-                            return
+                            final = None
+                    if final is None:
+                        final = self._assemble_streamed_response(
+                            response_id,
+                            text_parts,
+                            reasoning_parts,
+                            function_calls,
+                            usage=self._extract_response_usage(event_response),
+                        )
+                    if final is None:
+                        raise EmptyModelOutputError(
+                            f"Responses stream returned no usable output. "
+                            f"response_id={response_id}"
+                        )
+                    citations = self._extract_url_citations(citation_items)
+                    sources_suffix = self._append_citations(final, citations)
+                    if sources_suffix and text_parts:
+                        yield LLMResponse(
+                            "assistant",
+                            result_chain=MessageChain(
+                                chain=[Comp.Plain(sources_suffix)]
+                            ),
+                            is_chunk=True,
+                            id=final.id or response_id,
+                        )
+                    yield final
+                    return
                 final = self._assemble_streamed_response(
                     response_id,
                     text_parts,
                     reasoning_parts,
                     function_calls,
-                    usage=self._extract_response_usage(event_response),
+                    usage=None,
                 )
                 if final is not None:
                     yield final
@@ -198,6 +231,58 @@ class CodexStreamMixin:
         raise EmptyModelOutputError(
             f"Responses stream ended without a terminal event. response_id={response_id}"
         )
+
+    def _extract_url_citations(self, output: Any) -> list[tuple[str, str]]:
+        """Extract deduplicated (title, url) pairs from message url_citation annotations."""
+        citations: list[tuple[str, str]] = []
+        seen_urls: set[str] = set()
+        for item in output or []:
+            if self._field(item, "type") != "message":
+                continue
+            for content in self._field(item, "content", []) or []:
+                for annotation in self._field(content, "annotations", []) or []:
+                    if self._field(annotation, "type") != "url_citation":
+                        continue
+                    raw_url = self._field(annotation, "url")
+                    if not isinstance(raw_url, str):
+                        continue
+                    url = raw_url.strip()
+                    parsed = urlsplit(url)
+                    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                        continue
+                    if url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    raw_title = self._field(annotation, "title")
+                    title = (
+                        raw_title.strip()
+                        if isinstance(raw_title, str) and raw_title.strip()
+                        else url
+                    )
+                    citations.append((title, url))
+        return citations
+
+    @staticmethod
+    def _append_citations(
+        response: LLMResponse, citations: list[tuple[str, str]]
+    ) -> str | None:
+        """Append a deduplicated sources block once to a final response."""
+        if not citations:
+            return None
+        lines = [
+            f"{index}. [{title}]({url})"
+            for index, (title, url) in enumerate(citations, start=1)
+        ]
+        sources_block = messages.text("search.sources") + "\n" + "\n".join(lines)
+        existing = response.completion_text or ""
+        if not existing or existing.endswith("\n\n"):
+            suffix = sources_block
+        elif existing.endswith("\n"):
+            suffix = f"\n{sources_block}"
+        else:
+            suffix = f"\n\n{sources_block}"
+        response.result_chain = MessageChain().message(existing + suffix)
+        return suffix
 
     def _assemble_streamed_response(
         self,

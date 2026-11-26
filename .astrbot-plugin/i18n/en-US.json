@@ -18,6 +18,10 @@
     "chat_language": {
       "description": "Chat reply language",
       "hint": "Language of /usage, /effort and /openai_login replies. The plugin page follows the dashboard language. Reload the plugin after saving."
+    },
+    "native_web_search": {
+      "description": "Native web search",
+      "hint": "Allow the model to use Codex native web search and append source links."
     }
   }
 }

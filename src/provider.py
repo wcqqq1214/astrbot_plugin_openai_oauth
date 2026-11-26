@@ -311,19 +311,37 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         """Stream one request shaped for the Codex backend, retrying only
         temporary failures that happen before any output. The final response is
         built by ``CodexStreamMixin`` from the stream's completed output items."""
-        if tools:
-            response_tools = []
-            for tool in tools.openai_schema():
-                function = tool.get("function", {})
-                response_tools.append({"type": "function", **function})
-            if response_tools:
-                payloads["tools"] = response_tools
-                payloads["tool_choice"] = payloads.get("tool_choice", "auto")
-
         extra_body: dict[str, Any] = {}
         custom_extra_body = self.provider_config.get("custom_extra_body", {})
         if isinstance(custom_extra_body, dict):
-            extra_body.update(custom_extra_body)
+            extra_body.update(deepcopy(custom_extra_body))
+
+        merged_tools: list[Any] = []
+        if tools:
+            for tool in tools.openai_schema():
+                function = tool.get("function", {})
+                merged_tools.append({"type": "function", **function})
+        payload_tools = payloads.pop("tools", None)
+        if isinstance(payload_tools, list):
+            merged_tools.extend(payload_tools)
+        extra_tools = extra_body.pop("tools", None)
+        if isinstance(extra_tools, list):
+            merged_tools.extend(extra_tools)
+        if runtime.native_web_search_enabled() and not any(
+            isinstance(item, dict)
+            and item.get("type") in {"web_search", "web_search_preview"}
+            for item in merged_tools
+        ):
+            merged_tools.append({"type": "web_search", "external_web_access": True})
+
+        extra_tool_choice = extra_body.pop("tool_choice", None)
+        if extra_tool_choice is not None and (
+            "tool_choice" not in payloads or payloads["tool_choice"] == "auto"
+        ):
+            payloads["tool_choice"] = extra_tool_choice
+        if merged_tools:
+            payloads["tools"] = merged_tools
+            payloads.setdefault("tool_choice", "auto")
 
         for key in list(payloads):
             if key not in self.default_params:
@@ -769,7 +787,9 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
             **kwargs,
         )
         await image_input.resize_input_images(payloads["input"])
-        if func_tool and not func_tool.empty():
+        if (func_tool and not func_tool.empty()) or (
+            runtime.native_web_search_enabled() and tool_choice != "auto"
+        ):
             payloads["tool_choice"] = tool_choice
         custom_extra_body = self.provider_config.get("custom_extra_body")
         if not (

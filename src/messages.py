@@ -81,6 +81,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "device.device_poll_failed": "查询授权状态失败",
         "device.login_failed": "登录失败",
         "stream.interrupted": "回复在输出后中断，未重新发送请求。",
+        "search.sources": "来源：",
     },
     "en-US": {
         "image.disabled": "Enable GPT Image in the plugin settings first.",
@@ -150,6 +151,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "device.device_poll_failed": "checking the authorization failed",
         "device.login_failed": "login failed",
         "stream.interrupted": "The reply was interrupted after output began; the request was not sent again.",
+        "search.sources": "Sources:",
     },
     "ru-RU": {
         "image.disabled": "Включите GPT Image в настройках плагина.",
@@ -219,6 +221,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "device.device_poll_failed": "не удалось проверить авторизацию",
         "device.login_failed": "вход не выполнен",
         "stream.interrupted": "Ответ прервался после начала вывода; запрос не отправлялся повторно.",
+        "search.sources": "Источники:",
     },
     "ja-JP": {
         "image.disabled": "プラグイン設定で GPT Image を有効にしてください。",
@@ -287,6 +290,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "device.device_poll_failed": "認証状態を確認できませんでした",
         "device.login_failed": "ログインに失敗しました",
         "stream.interrupted": "出力の開始後に応答が中断されました。リクエストは再送信していません。",
+        "search.sources": "出典：",
     },
 }
 

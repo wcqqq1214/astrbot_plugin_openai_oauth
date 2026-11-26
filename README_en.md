@@ -86,6 +86,12 @@ To skip follow-up questions from the model, use `/draw <prompt>` directly. It re
 
 Leave `image_account` blank to follow whichever account answered the chat, or set a source ID to allow drawing only on turns handled by that source. Image generation never falls back across accounts.
 
+## Native web search
+
+Turn on **Native web search** (`native_web_search`) in the plugin settings (off by default). When enabled, requests include Codex's native `web_search` tool (`external_web_access: true`) without requiring an extra API key or third-party search service, and it coexists with AstrBot function tools.
+
+When the model searches the web and returns citations, the plugin appends a deduplicated list of source links to the end of the reply; replies without search citations are left unchanged.
+
 ## Commands and reasoning effort
 
 `/openai_login` and `/effort` require administrator permissions. Command replies default to Chinese; set `chat_language` in plugin settings to switch to English, Russian, or Japanese.
