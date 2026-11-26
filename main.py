@@ -37,7 +37,7 @@ __all__ = ["OpenAI_OAuth_Plugin", "ProviderOpenAICodex"]
 @register(
     "astrbot_plugin_openai_oauth",
     "wcqqq1214",
-    "ChatGPT 订阅 (Codex OAuth) provider 插件",
+    "用 ChatGPT 订阅在 AstrBot 聊天，无需 API Key。",
     "2.5.1",
 )
 class OpenAI_OAuth_Plugin(Star):
