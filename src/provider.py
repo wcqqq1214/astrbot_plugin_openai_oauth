@@ -41,6 +41,7 @@ from .codex_stream import CodexStreamMixin
 from .credential_store import (
     CredentialCooldownError,
     CredentialError,
+    CredentialPersistenceError,
     CredentialRefreshError,
     CredentialSchemaError,
     CredentialSnapshot,
@@ -63,6 +64,7 @@ from .provider_routing import (
     RoutingBudgetError,
     RoutingExhaustedError,
 )
+from .source_editor import HookCompatibilityError
 from .transport_pool import TransportPool
 
 
@@ -76,6 +78,38 @@ def _attempt_limit(request_max_retries: int | None) -> int:
         source="OpenAI Codex",
         warn=request_max_retries is not None,
     )
+
+
+def _localize_provider_error(
+    exc: BaseException, *, lang: str | None = None
+) -> str | None:
+    """Translate user-facing credential errors at the chat boundary."""
+    if not isinstance(exc, CredentialError):
+        return None
+    if isinstance(exc, HookCompatibilityError):
+        return messages.text("usage.incompatible", lang=lang)
+    if isinstance(exc, RoutingExhaustedError):
+        return messages.format_routing_exhausted(exc.reason, exc.failures, lang=lang)
+    if isinstance(exc, ProviderDisabledError):
+        return messages.text("provider.disabled", lang=lang)
+    if isinstance(exc, CredentialsNotConfiguredError):
+        return messages.text("provider.not_logged_in", lang=lang)
+    if isinstance(exc, CredentialCooldownError):
+        return messages.format_cooldown(exc.cooldown_until, lang=lang)
+    if isinstance(exc, ReauthenticationRequiredError):
+        key = (
+            "provider.local_reauth_required"
+            if "local Codex" in str(exc)
+            else "provider.reauth_required"
+        )
+        return messages.text(key, lang=lang)
+    if isinstance(exc, CredentialSchemaError):
+        return messages.text("usage.unsupported", lang=lang)
+    if isinstance(exc, CredentialRefreshError):
+        return messages.text("provider.refresh_failed", lang=lang)
+    if isinstance(exc, CredentialPersistenceError):
+        return messages.text("provider.save_failed", lang=lang)
+    return messages.text("provider.source_error", lang=lang)
 
 
 def _register_subscription_adapter(cls: type) -> type:
@@ -774,7 +808,14 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
             if not chunk.is_chunk:
                 final_response = chunk
         if final_response is None:
-            raise RuntimeError("OpenAI Codex returned no complete response.")
+            reply_language = (
+                await messages.resolve_language(runtime.get_context(), session_id)
+                if messages.is_auto()
+                else None
+            )
+            raise RuntimeError(
+                messages.text("provider.no_response", lang=reply_language)
+            )
         return final_response
 
     async def text_chat_stream(
@@ -843,8 +884,11 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                 async for item in stream:
                     emitted = True
                     yield item
-        except Exception:
+        except Exception as exc:
             if not emitted:
+                localized = _localize_provider_error(exc, lang=reply_language)
+                if localized is not None:
+                    exc.args = (localized,)
                 raise
             # AstrBot can fall back after an exception even after a stream chunk.
             # A terminal error response preserves its no-replay branch instead.

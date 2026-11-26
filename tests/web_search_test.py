@@ -818,6 +818,105 @@ class WebSearchConfigIntegrationTests(unittest.IsolatedAsyncioTestCase):
         finally:
             provider_module.messages.set_language("zh-CN")
 
+    async def test_pre_stream_credential_errors_are_localized_with_metadata_intact(
+        self,
+    ):
+        await self.registry.migrate()
+        saved_model = self.conf["provider"][0]
+        await self.manager.reload(saved_model)
+        loaded = self.manager.inst_map[saved_model["id"]]
+        self.assertIsInstance(loaded, provider_module.ProviderOpenAICodex)
+
+        class _LocaleContext:
+            async def get_locale(self, umo: str | None = None) -> str:
+                return "en-US" if umo == "webchat:en" else "zh-CN"
+
+        store = lifecycle_fixtures.fixtures.store
+        routing = provider_module.RoutingExhaustedError
+        cases = [
+            (
+                store.ProviderDisabledError("disabled"),
+                store.ProviderDisabledError,
+                "disabled",
+                "已停用",
+            ),
+            (
+                store.ReauthenticationRequiredError("Sign in to this Provider again."),
+                store.ReauthenticationRequiredError,
+                "sign in again",
+                "重新登录",
+            ),
+            (
+                store.ReauthenticationRequiredError(
+                    "Sign in to local Codex on the AstrBot host."
+                ),
+                store.ReauthenticationRequiredError,
+                "local codex login",
+                "本地 Codex 登录",
+            ),
+            (
+                store.CredentialCooldownError(1_900_000_000, "usage_limit_reached"),
+                store.CredentialCooldownError,
+                "cooling down",
+                "冷却中",
+            ),
+            (
+                routing([("local", "cooling")], "startup_timeout"),
+                routing,
+                "timed out",
+                "自动回退超时",
+            ),
+        ]
+
+        try:
+            provider_module.messages.set_language(
+                provider_module.messages.AUTO_LANGUAGE
+            )
+            with (
+                mock.patch.object(
+                    runtime, "_config_mgr", self.coordinator.config_manager
+                ),
+                mock.patch.object(runtime, "_credential_coordinator", self.coordinator),
+                mock.patch.object(runtime, "_startup_error", None),
+                mock.patch.object(runtime, "_context", _LocaleContext()),
+            ):
+                for err, expected_cls, en_fragment, zh_fragment in cases:
+                    with mock.patch.object(
+                        loaded, "_stream_with_current_credentials", side_effect=err
+                    ):
+                        with self.assertRaises(expected_cls) as en_caught:
+                            async for _ in loaded.text_chat_stream(
+                                prompt="Hi", session_id="webchat:en"
+                            ):
+                                pass
+                        self.assertIn(en_fragment, str(en_caught.exception).lower())
+                        self.assertEqual(en_caught.exception.code, err.code)
+
+                    with mock.patch.object(
+                        loaded, "_stream_with_current_credentials", side_effect=err
+                    ):
+                        with self.assertRaises(expected_cls) as zh_caught:
+                            async for _ in loaded.text_chat_stream(
+                                prompt="Hi", session_id="webchat:zh"
+                            ):
+                                pass
+                        self.assertIn(zh_fragment, str(zh_caught.exception))
+
+                # Non-credential errors keep their original message unchanged.
+                with mock.patch.object(
+                    loaded,
+                    "_stream_with_current_credentials",
+                    side_effect=RuntimeError("raw upstream error"),
+                ):
+                    with self.assertRaises(RuntimeError) as raw_caught:
+                        async for _ in loaded.text_chat_stream(
+                            prompt="Hi", session_id="webchat:en"
+                        ):
+                            pass
+                    self.assertEqual(str(raw_caught.exception), "raw upstream error")
+        finally:
+            provider_module.messages.set_language("zh-CN")
+
 
 if __name__ == "__main__":
     unittest.main()

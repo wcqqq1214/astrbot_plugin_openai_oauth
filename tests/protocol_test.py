@@ -392,6 +392,38 @@ def test_chat_languages() -> None:
             )
 
         asyncio.run(verify_resolve())
+
+        # Cooldown and routing exhaustion formatters translate cleanly.
+        cooldown_ts = int(datetime(2026, 5, 6, 14, 0).timestamp())
+        check(
+            "冷却中" in messages.format_cooldown(cooldown_ts, lang="zh-CN")
+            and "cooling down" in messages.format_cooldown(cooldown_ts, lang="en-US")
+            and "восстанавливается"
+            in messages.format_cooldown(cooldown_ts, lang="ru-RU")
+            and "クールダウン中" in messages.format_cooldown(cooldown_ts, lang="ja-JP"),
+            "format_cooldown renders all supported languages",
+        )
+        check(
+            messages.format_routing_exhausted("unavailable", [], lang="en-US")
+            == "No configured OpenAI account is currently available."
+            and "自动回退超时"
+            in messages.format_routing_exhausted(
+                "startup_timeout", [("local", "cooling")], lang="zh-CN"
+            )
+            and "attempt limit reached"
+            in messages.format_routing_exhausted(
+                "attempt_limit", [("a", "attempt_limit")], lang="en-US"
+            )
+            and "クールダウン中"
+            in messages.format_routing_exhausted(
+                "unavailable", [("a", "cooling")], lang="ja-JP"
+            )
+            and "отключён"
+            in messages.format_routing_exhausted(
+                "unavailable", [("a", "disabled")], lang="ru-RU"
+            ),
+            "format_routing_exhausted formats reasons and details per language",
+        )
     finally:
         messages.set_language("zh-CN")
 

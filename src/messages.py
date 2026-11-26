@@ -8,10 +8,11 @@ system locale via ``context.get_locale(umo)`` when available and fall back to
 from __future__ import annotations
 
 import inspect
+import math
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 AUTO_LANGUAGE = "auto"
@@ -98,6 +99,27 @@ _CATALOG: dict[str, dict[str, str]] = {
         "device.login_failed": "登录失败",
         "stream.interrupted": "回复在输出后中断，未重新发送请求。",
         "search.sources": "来源：",
+        "provider.disabled": "当前 OpenAI 账号已停用，请在插件详情页启用该账号或切换其他账号。",
+        "provider.not_logged_in": "尚未登录 OpenAI 账号，请在插件详情页完成登录后重试。",
+        "provider.reauth_required": "OpenAI 登录凭据已失效，请在插件详情页重新登录后重试。",
+        "provider.local_reauth_required": "本地 Codex 登录已失效或未登录，请在运行 AstrBot 的主机上重新登录本地 Codex，或在插件详情页改用设备码账号。",
+        "provider.refresh_failed": "刷新 OpenAI 登录凭据失败，请稍后重试。",
+        "provider.save_failed": "刷新后的 OpenAI 凭据未能保存，请检查配置存储权限后重试。",
+        "provider.source_error": "当前 OpenAI 账号配置已变更或不可用，请重试请求或在插件详情页检查账号状态。",
+        "provider.no_response": "OpenAI Codex 未返回完整回复，请重试。",
+        "provider.routing_exhausted": "所有可用的 OpenAI 账号当前均不可用。",
+        "provider.routing_timeout": "自动回退超时，没有找到可用的 OpenAI 账号。",
+        "provider.routing_attempt_limit": "已达到自动回退重试上限，没有可用的 OpenAI 账号。",
+        "provider.routing_detail": "{summary}（{details}）",
+        "provider.reason.disabled": "已停用",
+        "provider.reason.cooling": "额度冷却中",
+        "provider.reason.reauth_required": "需重新登录",
+        "provider.reason.not_logged_in": "未登录",
+        "provider.reason.invalid_credentials": "凭据无效",
+        "provider.reason.temporary": "临时故障",
+        "provider.reason.rate_limit": "请求受限",
+        "provider.reason.duplicate_account": "重复账号",
+        "provider.reason.attempt_limit": "达到重试上限",
     },
     "en-US": {
         "image.disabled": "Enable GPT Image in the plugin settings first.",
@@ -168,6 +190,27 @@ _CATALOG: dict[str, dict[str, str]] = {
         "device.login_failed": "login failed",
         "stream.interrupted": "The reply was interrupted after output began; the request was not sent again.",
         "search.sources": "Sources:",
+        "provider.disabled": "This OpenAI account is disabled. Enable it on the plugin page or choose another account.",
+        "provider.not_logged_in": "No OpenAI account is signed in yet. Sign in on the plugin page and try again.",
+        "provider.reauth_required": "The OpenAI login has expired. Sign in again on the plugin page and try again.",
+        "provider.local_reauth_required": "The local Codex login is missing or expired. Sign in to local Codex on the AstrBot host, or switch to a device-code account on the plugin page.",
+        "provider.refresh_failed": "Could not refresh the OpenAI login. Try again shortly.",
+        "provider.save_failed": "Refreshed OpenAI credentials could not be saved. Check configuration storage permissions and try again.",
+        "provider.source_error": "The selected OpenAI account changed or is unavailable. Retry the request or check the account on the plugin page.",
+        "provider.no_response": "OpenAI Codex returned no complete response. Try again.",
+        "provider.routing_exhausted": "No configured OpenAI account is currently available.",
+        "provider.routing_timeout": "Automatic fallback timed out with no available OpenAI account.",
+        "provider.routing_attempt_limit": "Automatic fallback reached its retry limit with no available OpenAI account.",
+        "provider.routing_detail": "{summary} ({details})",
+        "provider.reason.disabled": "disabled",
+        "provider.reason.cooling": "cooling down",
+        "provider.reason.reauth_required": "sign-in expired",
+        "provider.reason.not_logged_in": "not signed in",
+        "provider.reason.invalid_credentials": "invalid login",
+        "provider.reason.temporary": "temporary error",
+        "provider.reason.rate_limit": "rate limited",
+        "provider.reason.duplicate_account": "duplicate account",
+        "provider.reason.attempt_limit": "attempt limit reached",
     },
     "ru-RU": {
         "image.disabled": "Включите GPT Image в настройках плагина.",
@@ -238,6 +281,27 @@ _CATALOG: dict[str, dict[str, str]] = {
         "device.login_failed": "вход не выполнен",
         "stream.interrupted": "Ответ прервался после начала вывода; запрос не отправлялся повторно.",
         "search.sources": "Источники:",
+        "provider.disabled": "Этот аккаунт OpenAI отключён. Включите его на странице плагина или выберите другой аккаунт.",
+        "provider.not_logged_in": "Вход в аккаунт OpenAI ещё не выполнен. Войдите на странице плагина и повторите попытку.",
+        "provider.reauth_required": "Срок действия входа OpenAI истёк. Войдите снова на странице плагина и повторите попытку.",
+        "provider.local_reauth_required": "Локальный вход Codex отсутствует или истёк. Войдите в локальный Codex на хосте AstrBot или переключитесь на аккаунт с кодом устройства на странице плагина.",
+        "provider.refresh_failed": "Не удалось обновить данные входа OpenAI. Повторите попытку позже.",
+        "provider.save_failed": "Не удалось сохранить обновлённые данные входа OpenAI. Проверьте права доступа к хранилищу конфигурации и повторите попытку.",
+        "provider.source_error": "Выбранный аккаунт OpenAI изменился или недоступен. Повторите запрос или проверьте аккаунт на странице плагина.",
+        "provider.no_response": "OpenAI Codex не вернул полный ответ. Повторите попытку.",
+        "provider.routing_exhausted": "Нет доступных аккаунтов OpenAI.",
+        "provider.routing_timeout": "Превышено время ожидания автоматического переключения: нет доступных аккаунтов OpenAI.",
+        "provider.routing_attempt_limit": "Достигнут лимит попыток автоматического переключения: нет доступных аккаунтов OpenAI.",
+        "provider.routing_detail": "{summary} ({details})",
+        "provider.reason.disabled": "отключён",
+        "provider.reason.cooling": "восстановление лимита",
+        "provider.reason.reauth_required": "требуется повторный вход",
+        "provider.reason.not_logged_in": "не выполнен вход",
+        "provider.reason.invalid_credentials": "неверные данные входа",
+        "provider.reason.temporary": "временная ошибка",
+        "provider.reason.rate_limit": "ограничение частоты",
+        "provider.reason.duplicate_account": "дубликат аккаунта",
+        "provider.reason.attempt_limit": "лимит попыток",
     },
     "ja-JP": {
         "image.disabled": "プラグイン設定で GPT Image を有効にしてください。",
@@ -307,6 +371,27 @@ _CATALOG: dict[str, dict[str, str]] = {
         "device.login_failed": "ログインに失敗しました",
         "stream.interrupted": "出力の開始後に応答が中断されました。リクエストは再送信していません。",
         "search.sources": "出典：",
+        "provider.disabled": "この OpenAI アカウントは無効になっています。プラグインページで有効にするか、別のアカウントを選択してください。",
+        "provider.not_logged_in": "OpenAI アカウントにまだログインしていません。プラグインページでログインしてから再試行してください。",
+        "provider.reauth_required": "OpenAI のログイン有効期限が切れました。プラグインページで再ログインしてから再試行してください。",
+        "provider.local_reauth_required": "ローカル Codex のログインが見つからないか期限切れです。AstrBot のホストでローカル Codex に再ログインするか、プラグインページでデバイスコードアカウントに切り替えてください。",
+        "provider.refresh_failed": "OpenAI のログイン情報を更新できませんでした。しばらくしてから再試行してください。",
+        "provider.save_failed": "更新した OpenAI 認証情報を保存できませんでした。設定ストレージの権限を確認して再試行してください。",
+        "provider.source_error": "選択された OpenAI アカウントが変更されたか利用できません。再試行するか、プラグインページでアカウントを確認してください。",
+        "provider.no_response": "OpenAI Codex から完全な応答が返されませんでした。再試行してください。",
+        "provider.routing_exhausted": "利用可能な OpenAI アカウントがありません。",
+        "provider.routing_timeout": "自動切替がタイムアウトし、利用可能な OpenAI アカウントが見つかりませんでした。",
+        "provider.routing_attempt_limit": "自動切替の再試行上限に達し、利用可能な OpenAI アカウントがありません。",
+        "provider.routing_detail": "{summary}（{details}）",
+        "provider.reason.disabled": "無効",
+        "provider.reason.cooling": "クールダウン中",
+        "provider.reason.reauth_required": "再ログインが必要",
+        "provider.reason.not_logged_in": "未ログイン",
+        "provider.reason.invalid_credentials": "認証情報が無効",
+        "provider.reason.temporary": "一時的なエラー",
+        "provider.reason.rate_limit": "レート制限",
+        "provider.reason.duplicate_account": "重複アカウント",
+        "provider.reason.attempt_limit": "再試行上限",
     },
 }
 
@@ -419,3 +504,55 @@ def format_datetime(moment: datetime, now: datetime, *, lang: str | None = None)
         return f"{date} {clock}" if same_year else f"{date} {moment.year} г. {clock}"
     date = f"{moment.month}月{moment.day}日"
     return f"{date} {clock}" if same_year else f"{moment.year}年{date} {clock}"
+
+
+def format_cooldown(cooldown_until: float | None, *, lang: str | None = None) -> str:
+    """Format a cooldown notice with an optional localized reset timestamp."""
+    reset = ""
+    if (
+        not isinstance(cooldown_until, bool)
+        and isinstance(cooldown_until, (int, float))
+        and math.isfinite(cooldown_until)
+    ):
+        try:
+            dt = datetime.fromtimestamp(cooldown_until, tz=UTC).astimezone()
+            now = datetime.now(UTC).astimezone()
+            reset = text(
+                "usage.reset", lang=lang, when=format_datetime(dt, now, lang=lang)
+            )
+        except (OSError, OverflowError, ValueError):
+            reset = ""
+    return text("usage.cooldown", lang=lang, reset=reset)
+
+
+def format_routing_exhausted(
+    reason: str,
+    failures: tuple[tuple[str, str], ...] | list[tuple[str, str]],
+    *,
+    lang: str | None = None,
+) -> str:
+    """Format a localized summary when automatic account routing fails."""
+    if reason == "startup_timeout":
+        summary_key = "provider.routing_timeout"
+    elif reason == "attempt_limit":
+        summary_key = "provider.routing_attempt_limit"
+    else:
+        summary_key = "provider.routing_exhausted"
+    summary = text(summary_key, lang=lang)
+    if not failures:
+        return summary
+    entries = []
+    for source, status in failures:
+        reason_key = f"provider.reason.{status}"
+        label = (
+            text(reason_key, lang=lang)
+            if reason_key in _CATALOG[DEFAULT_LANGUAGE]
+            else status
+        )
+        entries.append(f"{source}: {label}")
+    return text(
+        "provider.routing_detail",
+        lang=lang,
+        summary=summary,
+        details="; ".join(entries),
+    )

@@ -128,7 +128,7 @@ def cooldown_until_from_usage(usage: dict[str, Any]) -> int | None:
 
 
 def _format_cooldown(cooldown_until: int | None) -> str:
-    return messages.text("usage.cooldown", reset=_format_reset_at(cooldown_until, None))
+    return messages.format_cooldown(cooldown_until)
 
 
 async def fetch_usage(
