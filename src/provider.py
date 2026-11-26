@@ -305,6 +305,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         *,
         request_max_retries: int | None = None,
         session_effort: str | None = None,
+        reply_language: str | None = None,
         before_attempt: Callable[[], None] | None = None,
         on_stream_open: Callable[[], None] | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
@@ -416,7 +417,14 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
             if on_stream_open is not None:
                 on_stream_open()
             try:
-                async for response in self._consume_stream(stream, tools):
+                consume_kwargs = (
+                    {"reply_language": reply_language}
+                    if reply_language is not None
+                    else {}
+                )
+                async for response in self._consume_stream(
+                    stream, tools, **consume_kwargs
+                ):
                     emitted_response = True
                     yield response
                 return
@@ -522,10 +530,14 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         *,
         request_max_retries: int | None,
         session_effort: str | None = None,
+        reply_language: str | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
         coordinator = runtime.get_coordinator()
         candidates = coordinator.providers.candidates(self._source_id)
         automatic = coordinator.providers.routing_mode(self._source_id) == "auto"
+        reply_kwargs = (
+            {"reply_language": reply_language} if reply_language is not None else {}
+        )
         if not automatic:
             async with aclosing(
                 self._stream_from_source(
@@ -534,6 +546,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                     tools,
                     request_max_retries=request_max_retries,
                     session_effort=session_effort,
+                    **reply_kwargs,
                 )
             ) as stream:
                 async for response in stream:
@@ -583,6 +596,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                                 budget=budget,
                                 seen=seen,
                                 on_stream_open=stream_opened,
+                                **reply_kwargs,
                             )
                         ) as stream:
                             async for response in stream:
@@ -631,6 +645,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         *,
         request_max_retries: int | None,
         session_effort: str | None = None,
+        reply_language: str | None = None,
         budget: RequestBudget | None = None,
         seen: set[str] | None = None,
         on_stream_open: Callable[[], None] | None = None,
@@ -677,6 +692,11 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                             session_effort=session_effort,
                             before_attempt=guard,
                             on_stream_open=on_stream_open,
+                            **(
+                                {"reply_language": reply_language}
+                                if reply_language is not None
+                                else {}
+                            ),
                         )
                     ) as stream,
                 ):
@@ -800,6 +820,11 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
             if cache_key:
                 payloads.setdefault("prompt_cache_key", cache_key)
         session_effort = await effort.get_session_effort(session_id)
+        reply_language = (
+            await messages.resolve_language(runtime.get_context(), session_id)
+            if messages.is_auto()
+            else None
+        )
         emitted = False
         try:
             async with aclosing(
@@ -808,6 +833,11 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                     func_tool,
                     request_max_retries=request_max_retries,
                     session_effort=session_effort,
+                    **(
+                        {"reply_language": reply_language}
+                        if reply_language is not None
+                        else {}
+                    ),
                 )
             ) as stream:
                 async for item in stream:
@@ -820,5 +850,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
             # A terminal error response preserves its no-replay branch instead.
             yield LLMResponse(
                 role="err",
-                completion_text=messages.text("stream.interrupted"),
+                completion_text=messages.text(
+                    "stream.interrupted", lang=reply_language
+                ),
             )

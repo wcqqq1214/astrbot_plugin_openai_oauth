@@ -29,6 +29,7 @@ _CREDENTIAL_KEY_ENV = "OPENAI_OAUTH_CREDENTIAL_KEY_FILE"
 _COORDINATOR_ATTR = "_astrbot_openai_oauth_credential_coordinator"
 
 # Bound by the entry point; all consumers resolve credentials through this module.
+_context: Any = None
 _config_mgr: Any = None
 _credential_coordinator: LocalCredentialCoordinator | None = None
 _local_codex_store: LocalCodexStore | None = None
@@ -71,6 +72,10 @@ def native_web_search_enabled() -> bool:
         return get_coordinator().providers.native_web_search()
     except CredentialError:
         return False
+
+
+def get_context() -> Any:
+    return _context
 
 
 def get_coordinator() -> LocalCredentialCoordinator:
@@ -154,8 +159,9 @@ def _block_startup(context, error) -> None:
 
 def configure(context: Context, config: AstrBotConfig) -> None:
     """Check critical contracts before publishing account configuration hooks."""
-    global _config_mgr, _local_codex_store, _credential_sealer
+    global _context, _config_mgr, _local_codex_store, _credential_sealer
     global _remove_source_guard, _startup_error
+    _context = context
     failures = []
     fields = None
     try:
@@ -184,7 +190,7 @@ def configure(context: Context, config: AstrBotConfig) -> None:
     try:
         _config_mgr = context.astrbot_config_mgr
         _credential_sealer = FernetCredentialSealer(_credential_key_path())
-        messages.set_language(config.get("chat_language", messages.DEFAULT_LANGUAGE))
+        messages.set_language(config.get("chat_language", messages.AUTO_LANGUAGE))
         _local_codex_store = LocalCodexStore(
             str(config.get("codex_auth_path", "") or "")
         )
@@ -280,7 +286,8 @@ async def initialize(context: Context) -> None:
 
 def terminate() -> None:
     """Remove AstrBot integration hooks when the plugin is unloaded."""
-    global _remove_source_guard, _remove_image_bridge
+    global _context, _remove_source_guard, _remove_image_bridge
+    _context = None
     if _remove_image_bridge is not None:
         _remove_image_bridge()
         _remove_image_bridge = None

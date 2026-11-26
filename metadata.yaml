@@ -5,6 +5,7 @@ desc: 支持本地 Codex 登录和设备码登录，可管理多个账号、查�
 version: 2.5.1
 author: wcqqq1214
 repo: https://github.com/wcqqq1214/astrbot_plugin_openai_oauth
+category: provider_adapter
 tags:
   - LLM
   - provider

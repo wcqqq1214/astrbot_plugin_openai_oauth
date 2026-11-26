@@ -1,6 +1,6 @@
 import { strings } from "./strings.js";
 
-const bridge = window.AstrBotPluginPage;
+const bridge = window.AstrBotPluginView ?? window.AstrBotPluginPage;
 const context = await bridge.ready();
 const byId = (id) => document.getElementById(id);
 const startButton = byId("start");

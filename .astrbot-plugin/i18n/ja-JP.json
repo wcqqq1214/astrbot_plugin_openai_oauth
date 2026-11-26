@@ -17,7 +17,14 @@
     },
     "chat_language": {
       "description": "チャットの返信言語",
-      "hint": "/usage、/effort、/openai_login、/draw の返信言語です。プラグインページはダッシュボードの言語に従います。保存後にプラグインを再読み込みしてください。"
+      "labels": [
+        "システム言語に従う",
+        "简体中文",
+        "English",
+        "Русский",
+        "日本語"
+      ],
+      "hint": "/usage、/effort、/openai_login、/draw などのチャット返信言語です。「システム言語に従う」を選ぶと AstrBot のシステム言語に従います（古い AstrBot では簡体字中国語にフォールバックします）。プラグインページはダッシュボードの言語に従います。保存後にプラグインを再読み込みしてください。"
     },
     "image_enabled": {
       "description": "GPT Image 画像生成を有効にする",

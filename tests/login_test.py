@@ -767,12 +767,19 @@ def test_effort_command() -> None:
 def test_plugin_page_assets() -> None:
     print("\n=== Plugin Page bridge assets ===")
     page_root = os.path.join(os.path.dirname(__file__), "..", "pages", "providers")
+    plugin_root = os.path.join(os.path.dirname(__file__), "..")
     with open(os.path.join(page_root, "index.html"), encoding="utf-8") as source_file:
         html = source_file.read()
     with open(os.path.join(page_root, "app.js"), encoding="utf-8") as source_file:
         app = source_file.read()
+    with open(os.path.join(page_root, "style.css"), encoding="utf-8") as source_file:
+        css = source_file.read()
     with open(os.path.join(page_root, "strings.js"), encoding="utf-8") as source_file:
         translations = source_file.read()
+    with open(
+        os.path.join(plugin_root, "metadata.yaml"), encoding="utf-8"
+    ) as meta_file:
+        metadata = meta_file.read()
     check(
         'import { strings } from "./strings.js";' in app,
         "Plugin Page imports its translations as a module",
@@ -781,7 +788,13 @@ def test_plugin_page_assets() -> None:
 
     check("./app.js" in html, "Plugin Page loads external JavaScript")
     check("/api/plugin/page/bridge-sdk.js" in html, "Plugin Page loads the bridge SDK")
-    check("window.AstrBotPluginPage" in app, "Plugin Page uses the scoped bridge")
+    check("window.AstrBotPluginView" in app, "Plugin Page prefers the new view bridge")
+    check("window.AstrBotPluginPage" in app, "Plugin Page keeps legacy bridge fallback")
+    check("--astrbot-color-primary" in css, "Plugin Page reads host theme color tokens")
+    check(
+        "category: provider_adapter" in metadata,
+        "Plugin metadata declares provider_adapter marketplace category",
+    )
     check("await bridge.ready()" in app, "Plugin Page waits for bridge readiness")
     check('bridge.apiPost("device/start",' in app, "page starts through the bridge")
     check('bridge.apiPost("device/poll"' in app, "page polls through the bridge")

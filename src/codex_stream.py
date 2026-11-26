@@ -47,7 +47,7 @@ class CodexStreamMixin:
         }
 
     async def _consume_stream(
-        self, stream: Any, tools: Any
+        self, stream: Any, tools: Any, *, reply_language: str | None = None
     ) -> AsyncGenerator[LLMResponse, None]:
         """Keep partial response state scoped to a single stream attempt."""
         response_id: str | None = None
@@ -201,7 +201,9 @@ class CodexStreamMixin:
                             f"response_id={response_id}"
                         )
                     citations = self._extract_url_citations(citation_items)
-                    sources_suffix = self._append_citations(final, citations)
+                    sources_suffix = self._append_citations(
+                        final, citations, reply_language=reply_language
+                    )
                     if sources_suffix and text_parts:
                         yield LLMResponse(
                             "assistant",
@@ -264,7 +266,10 @@ class CodexStreamMixin:
 
     @staticmethod
     def _append_citations(
-        response: LLMResponse, citations: list[tuple[str, str]]
+        response: LLMResponse,
+        citations: list[tuple[str, str]],
+        *,
+        reply_language: str | None = None,
     ) -> str | None:
         """Append a deduplicated sources block once to a final response."""
         if not citations:
@@ -273,7 +278,11 @@ class CodexStreamMixin:
             f"{index}. [{title}]({url})"
             for index, (title, url) in enumerate(citations, start=1)
         ]
-        sources_block = messages.text("search.sources") + "\n" + "\n".join(lines)
+        sources_block = (
+            messages.text("search.sources", lang=reply_language)
+            + "\n"
+            + "\n".join(lines)
+        )
         existing = response.completion_text or ""
         if not existing or existing.endswith("\n\n"):
             suffix = sources_block

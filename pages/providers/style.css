@@ -1,31 +1,33 @@
 /* Color roles mirror the AstrBot dashboard theme (dashboard/src/theme
-   LightTheme.ts / DarkTheme.ts): white / #1a1a1a backgrounds, outlined flat
-   cards with an 8px radius, the primary blue for actions and progress, and
-   Vuetify-style "tonal" fills (the role color at ~12%). Status text uses a
-   darkened tone of AstrBot's success/warning/error so it stays readable on
-   light surfaces; fills and dots use the original colors. */
+   LightTheme.ts / DarkTheme.ts) and follow host-injected --astrbot-color-*
+   tokens when present, falling back to the standalone palette on older AstrBot
+   versions: white / #1a1a1a backgrounds, outlined flat cards with an 8px
+   radius, the primary blue for actions and progress, and Vuetify-style "tonal"
+   fills (the role color at ~12%). Status text uses a darkened tone of
+   AstrBot's success/warning/error so it stays readable on light surfaces; fills
+   and dots use the original colors. */
 :root {
-  --bg: #ffffff;
-  --surface: #ffffff;
+  --bg: var(--astrbot-color-background, #ffffff);
+  --surface: var(--astrbot-color-surface, #ffffff);
   --surface-low: #fafafa;
-  --muted-surface: #ecf2fa;
+  --muted-surface: color-mix(in srgb, var(--primary) 8%, var(--bg));
   --hover-fill: rgb(0 0 0 / 4%);
-  --text: #1b1c1d;
-  --secondary: rgb(0 0 0 / 67%);
+  --text: var(--astrbot-color-text, #1b1c1d);
+  --secondary: var(--astrbot-color-text-secondary, rgb(0 0 0 / 67%));
   --muted: rgb(0 0 0 / 50%);
-  --line: rgb(208 208 208 / 60%);
-  --line-strong: #d0d0d0;
-  --primary: #3c96ca;
-  --primary-strong: #216b97;
-  --primary-fill: #246f9d;
+  --line-strong: var(--astrbot-color-border, #d0d0d0);
+  --line: color-mix(in srgb, var(--line-strong) 60%, transparent);
+  --primary: var(--astrbot-color-primary, #3c96ca);
+  --primary-strong: color-mix(in oklab, var(--primary) 72%, #000);
+  --primary-fill: color-mix(in oklab, var(--primary) 78%, #000);
   --primary-soft: color-mix(in srgb, var(--primary) 12%, transparent);
-  --on-primary: #ffffff;
+  --on-primary: var(--astrbot-color-on-primary, #ffffff);
   --track: color-mix(in srgb, var(--primary) 16%, transparent);
   --ok: #00c853;
   --ok-text: color-mix(in oklab, var(--ok) 64%, #000);
   --warn: #ffc107;
   --warn-text: color-mix(in oklab, var(--warn) 56%, #000);
-  --bad: #f44336;
+  --bad: var(--astrbot-color-error, #f44336);
   --bad-text: color-mix(in oklab, var(--bad) 86%, #000);
   --ok-soft: color-mix(in srgb, var(--ok) 12%, transparent);
   --warn-soft: color-mix(in srgb, var(--warn) 16%, transparent);
@@ -52,26 +54,27 @@
   background: var(--bg);
 }
 :root[data-theme="dark"] {
-  --bg: #1a1a1a;
-  --surface: #242424;
+  --bg: var(--astrbot-color-background, #1a1a1a);
+  --surface: var(--astrbot-color-surface, #242424);
   --surface-low: #1f1f1f;
   --muted-surface: #2a2a2a;
   --hover-fill: rgb(255 255 255 / 6%);
-  --text: #e8eaed;
-  --secondary: rgb(255 255 255 / 80%);
+  --text: var(--astrbot-color-text, #e8eaed);
+  --secondary: var(--astrbot-color-text-secondary, rgb(255 255 255 / 80%));
   --muted: rgb(255 255 255 / 52%);
-  --line: #3a3a3a;
-  --line-strong: #4a4a4a;
-  --primary: #5ba4d4;
-  --primary-strong: #84c9ea;
+  --line: var(--astrbot-color-border, #3a3a3a);
+  --line-strong: color-mix(in srgb, var(--line) 82%, #fff);
+  --primary: var(--astrbot-color-primary, #5ba4d4);
+  --primary-strong: color-mix(in oklab, var(--primary) 72%, #fff);
+  --primary-fill: color-mix(in oklab, var(--primary) 78%, #000);
   --primary-soft: color-mix(in srgb, var(--primary) 16%, transparent);
-  --on-primary: #ffffff;
+  --on-primary: var(--astrbot-color-on-primary, #ffffff);
   --track: color-mix(in srgb, var(--primary) 20%, transparent);
   --ok: #52c41a;
   --ok-text: var(--ok);
   --warn: #faad14;
   --warn-text: var(--warn);
-  --bad: #ff4d4f;
+  --bad: var(--astrbot-color-error, #ff4d4f);
   --bad-text: var(--bad);
   --ok-soft: color-mix(in srgb, var(--ok) 14%, transparent);
   --warn-soft: color-mix(in srgb, var(--warn) 14%, transparent);

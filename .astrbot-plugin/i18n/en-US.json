@@ -17,7 +17,14 @@
     },
     "chat_language": {
       "description": "Chat reply language",
-      "hint": "Language for /usage, /effort, /openai_login, and /draw replies. The plugin page follows the dashboard language. Reload the plugin after saving."
+      "labels": [
+        "Follow system language",
+        "简体中文",
+        "English",
+        "Русский",
+        "日本語"
+      ],
+      "hint": "Language for chat replies such as /usage, /effort, /openai_login, and /draw. When set to Follow system language, replies follow AstrBot's system language (older AstrBot versions fall back to Simplified Chinese). The plugin page follows the dashboard language. Reload the plugin after saving."
     },
     "image_enabled": {
       "description": "Enable GPT Image generation",

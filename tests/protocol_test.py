@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -291,8 +292,11 @@ def test_chat_languages() -> None:
         "windows": [{"label_seconds": 18000, "used_percent": 25}],
         "limit_reached": True,
     }
+    moment = datetime(2026, 5, 6, 12, 30)
+    now = datetime(2026, 5, 6, 10, 0)
     try:
         messages.set_language("en-US")
+        check(not messages.is_auto(), "explicit language disables auto mode")
         english = usage_service.format_usage(usage)
         check(
             english.startswith("OpenAI subscription allowance:")
@@ -308,6 +312,86 @@ def test_chat_languages() -> None:
             "5小时窗口：剩余 75%" in usage_service.format_usage(usage),
             "Chinese stays the default",
         )
+
+        # Session scoping and explicit lang overrides.
+        with messages.use_language("en-US"):
+            check(
+                messages.language() == "en-US"
+                and messages.text("search.sources") == "Sources:"
+                and messages.format_datetime(moment, now) == "May 6 12:30",
+                "use_language scopes text and datetime formatting",
+            )
+        check(
+            messages.language() == "zh-CN",
+            "use_language restores the previous language on exit",
+        )
+        check(
+            messages.text("search.sources", lang="en-US") == "Sources:"
+            and messages.format_datetime(moment, now, lang="ru-RU") == "6 мая 12:30",
+            "explicit lang parameter overrides active language",
+        )
+
+        # Auto mode follows AstrBot's system locale when available.
+        messages.set_language(messages.AUTO_LANGUAGE)
+        check(
+            messages.is_auto() and messages.language() == "zh-CN",
+            "auto mode keeps Chinese as the base fallback",
+        )
+
+        class _AsyncLocaleContext:
+            def __init__(self, locale_value: object) -> None:
+                self.locale_value = locale_value
+                self.calls: list[object] = []
+
+            async def get_locale(self, umo: object = None) -> object:
+                self.calls.append(umo)
+                return self.locale_value
+
+        class _SyncLocaleContext:
+            def get_locale(self, umo: object = None) -> str:
+                return "en"
+
+        class _BrokenLocaleContext:
+            async def get_locale(self, umo: object = None) -> str:
+                raise RuntimeError("boom")
+
+        async def verify_resolve() -> None:
+            ctx_en = _AsyncLocaleContext("en-US")
+            check(
+                await messages.resolve_language(ctx_en, "webchat:Friend:u1") == "en-US"
+                and ctx_en.calls == ["webchat:Friend:u1"],
+                "auto mode resolves async get_locale(umo)",
+            )
+            check(
+                await messages.resolve_language(_AsyncLocaleContext("zh-CN"), "u1")
+                == "zh-CN",
+                "auto mode resolves zh-CN from get_locale",
+            )
+            check(
+                await messages.resolve_language(_SyncLocaleContext(), "u1") == "en-US",
+                "auto mode supports sync get_locale and short locale tags",
+            )
+            check(
+                await messages.resolve_language(_AsyncLocaleContext("fr-FR"), "u1")
+                == "zh-CN",
+                "auto mode falls back to Chinese for unsupported locales",
+            )
+            check(
+                await messages.resolve_language(object(), "u1") == "zh-CN",
+                "auto mode falls back when host lacks get_locale",
+            )
+            check(
+                await messages.resolve_language(_BrokenLocaleContext(), "u1")
+                == "zh-CN",
+                "auto mode falls back when get_locale raises",
+            )
+            messages.set_language("ja-JP")
+            check(
+                await messages.resolve_language(ctx_en, "u1") == "ja-JP",
+                "explicit chat_language ignores get_locale",
+            )
+
+        asyncio.run(verify_resolve())
     finally:
         messages.set_language("zh-CN")
 

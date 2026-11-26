@@ -696,6 +696,128 @@ class WebSearchConfigIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 "Latest result.\n\n来源：\n1. [Official](https://official.example)",
             )
 
+    async def test_auto_language_follows_context_get_locale_for_citations_and_interrupted_stream(
+        self,
+    ):
+        await self.registry.migrate()
+        saved_model = self.conf["provider"][0]
+        await self.manager.reload(saved_model)
+        loaded = self.manager.inst_map[saved_model["id"]]
+        self.assertIsInstance(loaded, provider_module.ProviderOpenAICodex)
+
+        events = [
+            {
+                "type": "response.output_text.delta",
+                "delta": "Latest result.",
+            },
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "id": "msg_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Latest result.",
+                            "annotations": [
+                                {
+                                    "type": "url_citation",
+                                    "title": "Official",
+                                    "url": "https://official.example",
+                                    "start_index": 0,
+                                    "end_index": 14,
+                                }
+                            ],
+                        }
+                    ],
+                },
+            },
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp-en",
+                    "status": "completed",
+                    "output": [],
+                },
+            },
+        ]
+
+        class _LocaleContext:
+            async def get_locale(self, umo: str | None = None) -> str:
+                return "en-US" if umo == "webchat:en" else "zh-CN"
+
+        def ok_transport(_cfg):
+            return httpx.AsyncClient(
+                transport=httpx.MockTransport(
+                    lambda _req: httpx.Response(
+                        200,
+                        text="".join(f"data: {json.dumps(e)}\n\n" for e in events),
+                        headers={"content-type": "text/event-stream"},
+                    )
+                )
+            )
+
+        loaded._create_http_client = ok_transport
+        try:
+            provider_module.messages.set_language(
+                provider_module.messages.AUTO_LANGUAGE
+            )
+            with (
+                mock.patch.object(
+                    runtime, "_config_mgr", self.coordinator.config_manager
+                ),
+                mock.patch.object(runtime, "_credential_coordinator", self.coordinator),
+                mock.patch.object(runtime, "_startup_error", None),
+                mock.patch.object(runtime, "_context", _LocaleContext()),
+            ):
+                en_reply = await loaded.text_chat(prompt="Hi", session_id="webchat:en")
+                self.assertEqual(
+                    en_reply.completion_text,
+                    "Latest result.\n\nSources:\n1. [Official](https://official.example)",
+                )
+                self.assertEqual(provider_module.messages.language(), "zh-CN")
+
+                zh_reply = await loaded.text_chat(prompt="Hi", session_id="webchat:zh")
+                self.assertEqual(
+                    zh_reply.completion_text,
+                    "Latest result.\n\n来源：\n1. [Official](https://official.example)",
+                )
+
+                class _BrokenStreamBody(httpx.AsyncByteStream):
+                    async def __aiter__(self):
+                        yield (
+                            f"data: {json.dumps({'type': 'response.output_text.delta', 'delta': 'Partial'})}\n\n"
+                        ).encode()
+                        raise httpx.ReadError("connection dropped")
+
+                await loaded._transport_pool.close()
+                loaded._create_http_client = lambda _cfg: httpx.AsyncClient(
+                    transport=httpx.MockTransport(
+                        lambda _req: httpx.Response(
+                            200,
+                            stream=_BrokenStreamBody(),
+                            headers={"content-type": "text/event-stream"},
+                        )
+                    )
+                )
+                chunks = [
+                    chunk
+                    async for chunk in loaded.text_chat_stream(
+                        prompt="Hi", session_id="webchat:en"
+                    )
+                ]
+                self.assertEqual(chunks[-1].role, "err")
+                self.assertEqual(
+                    chunks[-1].completion_text,
+                    provider_module.messages.text("stream.interrupted", lang="en-US"),
+                )
+                self.assertEqual(provider_module.messages.language(), "zh-CN")
+        finally:
+            provider_module.messages.set_language("zh-CN")
+
 
 if __name__ == "__main__":
     unittest.main()

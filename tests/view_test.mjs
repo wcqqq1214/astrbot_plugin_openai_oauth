@@ -1590,6 +1590,8 @@ for (const dictionary of Object.values(reloaded.strings)) {
   checkText(dictionary);
 }
 fixtures[0].name = "Local Codex";
+const confSchema = JSON.parse(readFileSync(new URL("../_conf_schema.json", import.meta.url), "utf8"));
+const chatLanguageOptions = confSchema.chat_language.options;
 const cases = [
   ["zh-CN", "zh", "本地 Codex"],
   ["en-US", "en", "Local Codex"],
@@ -1650,6 +1652,11 @@ for (const [locale, key, localName] of cases) {
   assert.ok(native.metadata.display_name && native.metadata.desc && native.metadata.short_desc);
   assert.ok(native.config.codex_auth_path.description);
   assert.ok(native.config.codex_auth_path.hint.includes("$CODEX_HOME/auth.json"));
+  assert.equal(
+    native.config.chat_language.labels.length,
+    chatLanguageOptions.length,
+    `${locale} chat_language labels match schema option count`,
+  );
 }
 assert.equal(reloaded.resolveLanguage("RU_ru"), "ru");
 assert.equal(reloaded.resolveLanguage("ja"), "ja");
@@ -1741,3 +1748,19 @@ assert.equal(webSearchBtn.getAttribute("aria-checked"), "true");
 assert.equal(webSearchState, true);
 assert.equal(ids.get("save-error").hidden, true);
 console.log("Plugin View native web search switch passed: state sync, failure recovery and save.");
+
+// New window.AstrBotPluginView bridge works without window.AstrBotPluginPage.
+const viewBridgeWindow = {
+  AstrBotPluginView: bridge,
+  setInterval() {},
+  setTimeout() {
+    return 1;
+  },
+  clearTimeout() {},
+};
+const viewBridgePage = await vm.runInNewContext(
+  `(async () => {${source}\n await queryUsage(); return {loadProviders, rowNodes};})()`,
+  { window: viewBridgeWindow, document, navigator, console, URL },
+);
+assert.equal(viewBridgePage.rowNodes.size, defaultAccounts.length);
+console.log("AstrBotPluginView bridge global check passed.");

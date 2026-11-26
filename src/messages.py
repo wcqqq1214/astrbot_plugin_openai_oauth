@@ -1,17 +1,33 @@
-"""Chat replies in the language chosen in the plugin settings.
+"""Chat replies in the configured language or AstrBot's system locale.
 
-AstrBot has no server-side locale, so chat commands follow the plugin's
-``chat_language`` setting; the Plugin View follows the dashboard instead.
+When ``chat_language`` is ``"auto"``, handlers follow AstrBot's server-side
+system locale via ``context.get_locale(umo)`` when available and fall back to
+``DEFAULT_LANGUAGE``. The Plugin View follows the dashboard locale instead.
 """
 
 from __future__ import annotations
 
+import inspect
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Any
 
+AUTO_LANGUAGE = "auto"
 DEFAULT_LANGUAGE = "zh-CN"
 LANGUAGES = ("zh-CN", "en-US", "ru-RU", "ja-JP")
+_PRIMARY_LANGUAGE_MAP = {
+    "zh": "zh-CN",
+    "en": "en-US",
+    "ru": "ru-RU",
+    "ja": "ja-JP",
+}
 _language = DEFAULT_LANGUAGE
+_follow_system_locale = False
+_session_language: ContextVar[str | None] = ContextVar(
+    "openai_oauth_chat_language", default=None
+)
 
 _CATALOG: dict[str, dict[str, str]] = {
     "zh-CN": {
@@ -324,29 +340,81 @@ _MONTHS_RU = (
 )
 
 
+def normalize_language(value: Any) -> str:
+    """Normalize a locale string to a supported catalog key."""
+    if not isinstance(value, str):
+        return DEFAULT_LANGUAGE
+    cleaned = value.strip()
+    if cleaned in _CATALOG:
+        return cleaned
+    primary = cleaned.replace("_", "-").split("-", 1)[0].lower()
+    return _PRIMARY_LANGUAGE_MAP.get(primary, DEFAULT_LANGUAGE)
+
+
 def set_language(language: Any) -> None:
-    """Choose the chat language; unknown values fall back to Chinese."""
-    global _language
+    """Choose the chat language; ``auto`` tracks AstrBot's system locale."""
+    global _language, _follow_system_locale
+    if language == AUTO_LANGUAGE:
+        _follow_system_locale = True
+        _language = DEFAULT_LANGUAGE
+        return
+    _follow_system_locale = False
     _language = language if language in _CATALOG else DEFAULT_LANGUAGE
 
 
+def is_auto() -> bool:
+    """Return whether replies follow AstrBot's system locale."""
+    return _follow_system_locale
+
+
 def language() -> str:
-    return _language
+    return _session_language.get() or _language
 
 
-def text(key: str, **values: Any) -> str:
-    template = _CATALOG[_language].get(key) or _CATALOG[DEFAULT_LANGUAGE][key]
+@contextmanager
+def use_language(lang: str | None) -> Iterator[None]:
+    """Scope replies inside the current coroutine/task to ``lang``."""
+    if lang is None:
+        yield
+        return
+    token = _session_language.set(normalize_language(lang))
+    try:
+        yield
+    finally:
+        _session_language.reset(token)
+
+
+async def resolve_language(context: Any, umo: Any = None) -> str:
+    """Resolve the reply language for a session, respecting ``auto`` mode."""
+    if not _follow_system_locale:
+        return _language
+    getter = getattr(context, "get_locale", None)
+    if not callable(getter):
+        return _language
+    try:
+        result = getter(umo) if isinstance(umo, str) and umo else getter()
+        if inspect.isawaitable(result):
+            result = await result
+    except Exception:  # noqa: BLE001 - fall back cleanly on incompatible hosts
+        return _language
+    return normalize_language(result)
+
+
+def text(key: str, *, lang: str | None = None, **values: Any) -> str:
+    effective = normalize_language(lang) if lang is not None else language()
+    template = _CATALOG[effective].get(key) or _CATALOG[DEFAULT_LANGUAGE][key]
     return template.format(**values) if values else template
 
 
-def format_datetime(moment: datetime, now: datetime) -> str:
+def format_datetime(moment: datetime, now: datetime, *, lang: str | None = None) -> str:
     """Write a reset time the way each chat language usually does."""
+    effective = normalize_language(lang) if lang is not None else language()
     same_year = moment.year == now.year
     clock = f"{moment:%H:%M}"
-    if _language == "en-US":
+    if effective == "en-US":
         date = f"{_MONTHS_EN[moment.month - 1]} {moment.day}"
         return f"{date} {clock}" if same_year else f"{date}, {moment.year} {clock}"
-    if _language == "ru-RU":
+    if effective == "ru-RU":
         date = f"{moment.day} {_MONTHS_RU[moment.month - 1]}"
         return f"{date} {clock}" if same_year else f"{date} {moment.year} г. {clock}"
     date = f"{moment.month}月{moment.day}日"

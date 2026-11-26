@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict
 from copy import copy
+from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
@@ -32,6 +33,13 @@ from .src.credential_store import (
 from .src.provider import ProviderOpenAICodex
 
 __all__ = ["OpenAI_OAuth_Plugin", "ProviderOpenAICodex"]
+
+
+async def _resolve_reply_language(plugin_obj: Any, event: AstrMessageEvent) -> str:
+    context = getattr(plugin_obj, "context", None) or runtime.get_context()
+    return await messages.resolve_language(
+        context, getattr(event, "unified_msg_origin", None)
+    )
 
 
 @register(
@@ -70,7 +78,9 @@ class OpenAI_OAuth_Plugin(Star):
     @filter.command("usage")
     async def usage(self, event: AstrMessageEvent) -> None:
         """Show the remaining subscription quota for the selected provider."""
-        await usage.handle_usage(self.context, event)
+        reply_language = await _resolve_reply_language(self, event)
+        with messages.use_language(reply_language):
+            await usage.handle_usage(self.context, event)
 
     @filter.on_llm_request()
     async def prepare_image_tool(
@@ -105,17 +115,19 @@ class OpenAI_OAuth_Plugin(Star):
     async def draw(self, event: AstrMessageEvent, prompt: GreedyStr):
         """Generate an image using this conversation's last successful Codex chat."""
         event.should_call_llm(False)
-        umo = event.unified_msg_origin
-        cid = (
-            await self.context.conversation_manager.get_curr_conversation_id(umo)
-            if self.config.get("image_enabled", False)
-            else None
-        )
-        error = await self._send_image(
-            event, self._image_accounts.get((umo, cid)), prompt
-        )
-        if error:
-            await event.send(MessageChain().message(error))
+        reply_language = await _resolve_reply_language(self, event)
+        with messages.use_language(reply_language):
+            umo = event.unified_msg_origin
+            cid = (
+                await self.context.conversation_manager.get_curr_conversation_id(umo)
+                if self.config.get("image_enabled", False)
+                else None
+            )
+            error = await self._send_image(
+                event, self._image_accounts.get((umo, cid)), prompt
+            )
+            if error:
+                await event.send(MessageChain().message(error))
 
     @filter.llm_tool(name=image_generation.TOOL_NAME)
     async def codex_generate_image(self, event: AstrMessageEvent, prompt: str) -> str:
@@ -124,16 +136,18 @@ class OpenAI_OAuth_Plugin(Star):
         Args:
             prompt(string): Describe the image, including any requested orientation and composition.
         """
-        invocation = image_generation.tool_invocation.get()
-        error = await self._send_image(
-            event,
-            invocation.account if invocation is not None else None,
-            prompt,
-            runner_timeout=invocation.runner_timeout
-            if invocation is not None
-            else None,
-        )
-        return error or messages.text("image.sent")
+        reply_language = await _resolve_reply_language(self, event)
+        with messages.use_language(reply_language):
+            invocation = image_generation.tool_invocation.get()
+            error = await self._send_image(
+                event,
+                invocation.account if invocation is not None else None,
+                prompt,
+                runner_timeout=invocation.runner_timeout
+                if invocation is not None
+                else None,
+            )
+            return error or messages.text("image.sent")
 
     async def _send_image(
         self,
@@ -191,7 +205,9 @@ class OpenAI_OAuth_Plugin(Star):
         value: str | None = None,
     ) -> None:
         """View or override reasoning effort for the current session."""
-        await effort.handle_effort(self.context, event, value)
+        reply_language = await _resolve_reply_language(self, event)
+        with messages.use_language(reply_language):
+            await effort.handle_effort(self.context, event, value)
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("openai_login")
@@ -201,7 +217,9 @@ class OpenAI_OAuth_Plugin(Star):
         action: str | None = None,
     ) -> None:
         """Start, or with "cancel" stop, an administrator private-chat login."""
-        await login.handle_login(event, action)
+        reply_language = await _resolve_reply_language(self, event)
+        with messages.use_language(reply_language):
+            await login.handle_login(event, action)
 
     async def terminate(self) -> None:
         """Stop background discovery and device login during plugin unload."""
