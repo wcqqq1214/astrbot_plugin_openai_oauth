@@ -516,7 +516,7 @@ await openSettings("工作");
 await click(ids.get("settings-routing-auto"));
 assert.equal(ids.get("settings-routing-auto").attributes["aria-pressed"], "true");
 assert.equal(ids.get("settings-routing-fixed").attributes["aria-pressed"], "false");
-assert.match(read("settings-routing-help"), /先用它.*列表顺序.*已启用且可用.*同一账号只尝试一次.*开始输出后不再切换/);
+assert.match(read("settings-routing-help"), /优先使用此账号.*列表顺序.*其他可用账号.*只试一次.*开始输出后不再切换/);
 // Switching back to the starting mode is not a change.
 await click(ids.get("settings-routing-fixed"));
 assert.equal(saveButton.disabled, true, "returning to the starting values is not a change");
@@ -961,7 +961,7 @@ assert.ok(shown("start") && shown("login-name-field") && !shown("cancel") && !sh
 // A rejected start request is recoverable from the same form.
 startResponse = {status: "error", message: "login_sessions_full"};
 await page.startLogin();
-assert.match(read("error"), /会话已达上限/);
+assert.match(read("error"), /登录过多/);
 // Text that is not a known code (an older server, a transport error) is kept.
 startResponse = {status: "error", message: "Gateway unavailable"};
 await page.startLogin();
@@ -1206,7 +1206,7 @@ await openSettings("Mine");
 typeName("Orphan");
 await page.queryUsage();
 assert.equal(settingsBox.open, false);
-assert.match(read("page-error"), /该账号 已不存在/);
+assert.match(read("page-error"), /该账号已不存在/);
 assert.equal(document.activeElement, ids.get("add-provider"));
 assert.equal(providerUpdates.length, sentBeforeGone);
 hideDevice = false;

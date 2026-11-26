@@ -22,7 +22,7 @@
         </button>
         <button id="add-provider" class="button primary with-icon" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-          <span id="add-provider-label">新增 Provider</span>
+          <span id="add-provider-label">新增账号</span>
         </button>
       </header>
       <p id="page-error" class="error" role="alert" hidden></p>
@@ -60,7 +60,7 @@
 
     <dialog id="login-dialog" aria-labelledby="instructions-title">
       <div class="dialog-heading">
-        <h2 id="instructions-title">新增 Provider</h2>
+        <h2 id="instructions-title">新增账号</h2>
         <button id="close-login" class="icon-button" type="button" aria-label="关闭">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
@@ -71,7 +71,7 @@
         <p id="login-intro" class="dialog-intro"></p>
         <div id="login-name-field" class="field">
           <label for="login-name">
-            <span id="login-name-label">Provider 名称</span>
+            <span id="login-name-label">账号名称</span>
             <span id="login-name-optional" class="field-optional">可选</span>
           </label>
           <input id="login-name" class="text-input" type="text" maxlength="80" value="ChatGPT" placeholder="ChatGPT" autocomplete="off" />
@@ -120,7 +120,7 @@
         <span id="settings-icon" class="provider-icon" aria-hidden="true"></span>
         <div class="settings-heading-copy">
           <h2 id="settings-title">—</h2>
-          <p id="settings-kicker" class="settings-kicker">Provider 设置</p>
+          <p id="settings-kicker" class="settings-kicker">账号设置</p>
         </div>
         <button id="close-settings" class="icon-button" type="button" aria-label="关闭">
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -137,7 +137,7 @@
         <div class="field">
           <span id="settings-routing-label" class="field-label">路由</span>
           <div class="segmented" role="group" aria-labelledby="settings-routing-label">
-            <button id="settings-routing-fixed" type="button" aria-pressed="true">固定 Provider</button>
+            <button id="settings-routing-fixed" type="button" aria-pressed="true">固定账号</button>
             <button id="settings-routing-auto" type="button" aria-pressed="false">自动回退</button>
           </div>
           <p id="settings-routing-help" class="field-hint"></p>
@@ -164,7 +164,7 @@
           </div>
           <div id="settings-danger" class="danger-zone">
             <div class="danger-copy">
-              <strong id="settings-remove-title">移除 Provider</strong>
+              <strong id="settings-remove-title">移除账号</strong>
               <span id="settings-remove-hint"></span>
             </div>
             <div class="danger-actions">
