@@ -17,7 +17,15 @@
     },
     "chat_language": {
       "description": "Chat reply language",
-      "hint": "Language of /usage, /effort and /openai_login replies. The plugin page follows the dashboard language. Reload the plugin after saving."
+      "hint": "Language for /usage, /effort, /openai_login, and /draw replies. The plugin page follows the dashboard language. Reload the plugin after saving."
+    },
+    "image_enabled": {
+      "description": "Enable GPT Image generation",
+      "hint": "Allow image generation in chat and via /draw using the current chat account's subscription allowance."
+    },
+    "image_account": {
+      "description": "Image account source ID (optional)",
+      "hint": "Leave blank to follow the account used in chat. Set a source ID to allow image generation only on turns handled by that account."
     }
   }
 }

@@ -17,7 +17,15 @@
     },
     "chat_language": {
       "description": "聊天回复语言",
-      "hint": "/usage、/effort 和 /openai_login 的回复语言。插件页面跟随 Dashboard 语言。保存后重载插件生效。"
+      "hint": "/usage、/effort、/openai_login 和 /draw 的回复语言。插件页面跟随 Dashboard 语言。保存后重载插件生效。"
+    },
+    "image_enabled": {
+      "description": "启用 GPT Image 生图",
+      "hint": "允许在对话中由模型自动生图，或用 /draw 直接生图（消耗当前聊天账号的订阅额度）。"
+    },
+    "image_account": {
+      "description": "生图账号来源 ID（可选）",
+      "hint": "留空则跟随当前聊天使用的账号；填写指定来源 ID 后，只有该账号回复的对话才允许生图。"
     }
   }
 }

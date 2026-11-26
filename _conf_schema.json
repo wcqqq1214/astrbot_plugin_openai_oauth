@@ -27,12 +27,12 @@
     "description": "启用 GPT Image 生图",
     "type": "bool",
     "default": false,
-    "hint": "允许使用 /draw 和 LLM 生图工具。使用当前聊天的 OAuth 账号及订阅权益。"
+    "hint": "允许在对话中由模型自动生图，或用 /draw 直接生图（消耗当前聊天账号的订阅额度）。"
   },
   "image_account": {
     "description": "生图账号来源 ID（可选）",
     "type": "string",
     "default": "",
-    "hint": "留空跟随聊天实际账号。填写来源 ID 后，仅在聊天实际使用该来源时允许生图。"
+    "hint": "留空则跟随当前聊天使用的账号；填写指定来源 ID 后，只有该账号回复的对话才允许生图。"
   }
 }
