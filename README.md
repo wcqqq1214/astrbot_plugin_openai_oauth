@@ -54,7 +54,7 @@
 
 ![多账号额度页面](https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/images/providers-overview-zh.webp)
 
-*截图中的账号和额度仅为示例。页面跟随 AstrBot 语言设置，支持中文、英语、俄语和日语。*
+*截图中的账号和额度仅为示例。页面跟随 AstrBot 语言与主题配色，支持中文、英语、俄语和日语。*
 
 移除账号前需先更换默认账号并解除模型绑定；本地 Codex 账号只能在主机本地管理，不能在页面删除。
 
@@ -94,7 +94,7 @@
 
 ## 常用命令与思考强度
 
-`/openai_login` 和 `/effort` 需要管理员权限。命令回复默认为中文，可在插件设置的 **聊天回复语言**（`chat_language`）中改为英文、俄文或日文。
+`/openai_login` 和 `/effort` 需要管理员权限。聊天回复默认跟随 AstrBot 系统语言（旧版 AstrBot 回退为中文），也可在插件设置的 **聊天回复语言**（`chat_language`）中手动指定中文、英文、俄文或日文。
 
 | 命令 | 用途 |
 | --- | --- |

@@ -54,7 +54,7 @@ Manage all accounts in **Plugin Views → providers**:
 
 ![Account allowance panels](https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/images/providers-overview-en.webp)
 
-*Account names and allowance values shown above are examples. The page follows AstrBot's language setting (Chinese, English, Russian, and Japanese).*
+*Account names and allowance values shown above are examples. The page follows AstrBot's language and theme colors (Chinese, English, Russian, and Japanese).*
 
 Before removing an account, switch the default account elsewhere and clear any model bindings pointing to it. Local Codex is managed on the host and cannot be deleted here.
 
@@ -94,7 +94,7 @@ When the model cites web results, the plugin appends the source links at the end
 
 ## Commands and reasoning effort
 
-`/openai_login` and `/effort` require administrator permissions. Command replies default to Chinese; set `chat_language` in plugin settings to switch to English, Russian, or Japanese.
+`/openai_login` and `/effort` require administrator permissions. Chat replies follow AstrBot's system language by default (falling back to Chinese on older AstrBot versions), or can be set manually via `chat_language` in plugin settings (Chinese, English, Russian, or Japanese).
 
 | Command | What it does |
 | --- | --- |
