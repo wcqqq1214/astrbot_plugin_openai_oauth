@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+## [v2.7.0] - 2026-11-28
+
+### 新增
+
+- ChatUI 在运行记录中显示 Codex 原生网络搜索的查询词，并在回复正文的引用位置显示可点击的来源卡片。
+- Bot 回复在引用处标注编号，同一网址复用同一编号。根据平台能力，读者可通过正文链接、来源按钮或文末的网址访问原文。
+
+### 修复
+
+- 保留原文中的有效链接，合并 ChatUI 来源卡片旁指向同一网址的重复链接，并保留上游流式回复的输出行为。
+- 在支持逐请求用量统计的 AstrBot 版本中，分别记录每次上游 Codex 对话请求的用量，并在交付最终回复前完成结算。
+
+### Added
+
+- ChatUI now shows native Codex web search queries in the run history and places clickable source cards at the cited passages.
+- Bot replies number citations and reuse the same number for repeated URLs. Readers can open sources through inline links, source buttons, or a list of URLs, depending on the platform.
+
+### Fixed
+
+- Preserve links in the answer, collapse duplicate links next to ChatUI cards for the same URL, and preserve upstream streaming behavior.
+- On AstrBot versions with per-request accounting, record usage for each upstream Codex chat request and settle it before delivering the final response.
+
 ## [v2.6.1] - 2026-11-27
 
 ### 修复

@@ -47,7 +47,7 @@ async def _resolve_reply_language(plugin_obj: Any, event: AstrMessageEvent) -> s
     "astrbot_plugin_openai_oauth",
     "wcqqq1214",
     "用 ChatGPT 订阅在 AstrBot 聊天，无需 API Key。",
-    "2.6.1",
+    "2.7.0",
 )
 class OpenAI_OAuth_Plugin(Star):
     def __init__(

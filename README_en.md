@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/releases/tag/v2.6.1"><img src="https://img.shields.io/badge/version-2.6.1-10A37F?style=flat-square&logo=openai&logoColor=white" alt="Version 2.6.1"></a>
+  <a href="https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/releases/tag/v2.7.0"><img src="https://img.shields.io/badge/version-2.7.0-10A37F?style=flat-square&logo=openai&logoColor=white" alt="Version 2.7.0"></a>
   <a href="https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/wcqqq1214/astrbot_plugin_openai_oauth/test.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=tests" alt="Tests"></a>
   <a href="https://github.com/AstrBotDevs/AstrBot"><img src="https://img.shields.io/badge/AstrBot-%E2%89%A54.27.1-0EA5E9?style=flat-square" alt="AstrBot ≥ 4.27.1"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-%E2%89%A53.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python ≥ 3.12"></a>
