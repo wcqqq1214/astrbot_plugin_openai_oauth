@@ -295,7 +295,9 @@ async def initialize(context: Context) -> None:
         try:
             _remove_citation_bridge = chatui_citations.install()
         except (ImportError, AttributeError, TypeError, ValueError) as exc:
-            logger.debug("OpenAI Subscribe ChatUI search updates unavailable: %s", exc)
+            logger.debug(
+                "OpenAI Subscribe ChatUI activity updates unavailable: %s", exc
+            )
 
 
 def terminate() -> None:

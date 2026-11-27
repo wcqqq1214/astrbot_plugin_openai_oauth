@@ -16,6 +16,7 @@ from astrbot.core.star.filter.command import GreedyStr
 
 from .src import (
     bot_citations,
+    chatui_citations,
     effort,
     image_generation,
     login,
@@ -184,8 +185,9 @@ class OpenAI_OAuth_Plugin(Star):
                 runner_timeout=runner_timeout,
             )
             async with asyncio.timeout(timeout):
-                image = await image_generation.generate(provider, account, prompt)
-                await event.send(MessageChain(chain=[Image.fromBytes(image)]))
+                with chatui_citations.image_generation_indicator(event):
+                    image = await image_generation.generate(provider, account, prompt)
+                    await event.send(MessageChain(chain=[Image.fromBytes(image)]))
         except TimeoutError:
             return messages.text("image.timeout")
         except image_generation.ImageError as exc:

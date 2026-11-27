@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="188" height="188" viewBox="0 0 200 200" role="img" aria-label="生成中">
+  <title>生成中</title>
+  <defs>
+    <pattern id="dots" width="6" height="6" patternUnits="userSpaceOnUse">
+      <circle cx="3" cy="3" r=".81" fill="#fff"/>
+    </pattern>
+    <clipPath id="card"><rect width="200" height="200" rx="17"/></clipPath>
+    <mask id="field"><rect width="200" height="200" fill="url(#dots)"/></mask>
+    <radialGradient id="light">
+      <stop stop-color="#c1c4ca" stop-opacity=".67"/>
+      <stop offset=".51" stop-color="#93969b" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#717479" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <style>
+    .wave { animation: wave 5s ease-in-out infinite alternate }
+    .echo { animation: echo 3.8s ease-in-out infinite alternate }
+    @keyframes wave {
+      from { transform: translate(-17px, 12px) }
+      to { transform: translate(18px, -22px) }
+    }
+    @keyframes echo {
+      from { opacity: .4; transform: translate(0, 4px) }
+      to { opacity: .9; transform: translate(13px, -8px) }
+    }
+    @media (prefers-reduced-motion: reduce) { .wave, .echo { animation: none } }
+  </style>
+  <g clip-path="url(#card)">
+    <rect width="200" height="200" fill="#292929"/>
+    <g mask="url(#field)" fill="url(#light)">
+      <g class="wave"><ellipse cx="116" cy="140" rx="113" ry="54" transform="rotate(-28 116 140)"/></g>
+      <g class="echo"><ellipse cx="66" cy="162" rx="78" ry="34" opacity=".55"/></g>
+    </g>
+    <rect x="112" y="155" width="74" height="31" rx="15.5" fill="#1c1c1d" stroke="#39393b"/>
+    <text x="149" y="176" text-anchor="middle" font-family="system-ui,sans-serif" font-size="15" fill="#45adff">生成中</text>
+  </g>
+</svg>

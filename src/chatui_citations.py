@@ -1,20 +1,33 @@
-"""Bridge Codex citations and search activity to AstrBot WebChat."""
+"""Bridge Codex citations and live search and image activity to AstrBot WebChat."""
 
 from __future__ import annotations
 
 import json
 import re
+from base64 import b64encode
 from bisect import bisect_left
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable, Iterator
-from contextlib import aclosing
+from contextlib import aclosing, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, fields
 from functools import wraps
 from inspect import isasyncgenfunction, iscoroutinefunction, signature
 from itertools import accumulate
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+
+from astrbot.api import logger
+
+_IMAGE_INDICATOR = {
+    "type": "image",
+    "filename": "生成中",
+    "embedded_url": "data:image/svg+xml;base64,"
+    + b64encode(Path(__file__).with_name("image_loading.svg").read_bytes()).decode(
+        "ascii"
+    ),
+}
 
 
 def _display_parts(parts: list[dict], refs: Iterable[dict]) -> list[dict]:
@@ -153,6 +166,7 @@ class _CitationRun:
     rendered_parts: list[dict] | None = None
     visible_marks: list[tuple[int, str]] = field(default_factory=list)
     hidden_chars: int = 0
+    pending_images: int = 0
 
     def __getattr__(self, name):
         return getattr(self.service, name)
@@ -197,7 +211,9 @@ class _CitationRun:
 
     def refresh(self) -> bool:
         if self.run.message_parts is not self.rendered_parts:
-            self.raw_parts = self.run.message_parts
+            self.raw_parts = [
+                p for p in self.run.message_parts if p is not _IMAGE_INDICATOR
+            ]
         parts, marks = self.render(self.raw_parts)
         self.rendered_parts = _display_parts(parts, self.sources.values())
         self.run.message_parts = self.rendered_parts
@@ -210,7 +226,31 @@ class _CitationRun:
         changed = marks != self.visible_marks or hidden != self.hidden_chars
         self.hidden_chars = hidden
         self.visible_marks = marks
+        self.sync_image_indicator()
         return changed
+
+    def sync_image_indicator(self) -> None:
+        # AstrBot replaces the resumable snapshot after each frame. Its separate
+        # reply accumulator handles history and never receives this image.
+        if self.pending_images and not any(
+            part is _IMAGE_INDICATOR for part in self.run.message_parts
+        ):
+            self.run.message_parts.append(_IMAGE_INDICATOR)
+
+    def hide_image_indicator(self) -> None:
+        self.pending_images = 0
+        self.run.message_parts[:] = [
+            p for p in self.run.message_parts if p is not _IMAGE_INDICATOR
+        ]
+        self.publish_image_snapshot()
+
+    def publish_image_snapshot(self) -> None:
+        try:
+            self.publish_snapshot()
+        except Exception as exc:  # noqa: BLE001 - optional UI feedback must not interrupt image delivery
+            logger.debug(
+                "Could not publish ChatUI image activity: %s", type(exc).__name__
+            )
 
     def publish_snapshot(self) -> None:
         run = self.run
@@ -222,6 +262,11 @@ class _CitationRun:
                 break
 
     def _publish_chat_run(self, run, payload):
+        if self.pending_images:
+            if payload["type"] == "end" or run.status != "running":
+                self.hide_image_indicator()
+            elif not self.sources:
+                self.sync_image_indicator()
         changed = self.sources and self.refresh()
         self.service._publish_chat_run(run, payload)
         if changed:
@@ -249,6 +294,36 @@ class _CitationRun:
 _producer: ContextVar[_CitationRun | None] = ContextVar(
     "codex_chatui_citation_producer", default=None
 )
+
+_active_runs: dict[str, _CitationRun] = {}
+
+
+@contextmanager
+def image_generation_indicator(event: Any) -> Iterator[None]:
+    if not _active_runs:
+        yield
+        return
+    from astrbot.core.platform.sources.webchat.webchat_event import WebChatMessageEvent
+
+    state = (
+        _active_runs.get(str(event.message_obj.message_id))
+        if isinstance(event, WebChatMessageEvent)
+        else None
+    )
+    if state is None or state.run.status != "running":
+        yield
+        return
+    state.pending_images += 1
+    try:
+        if state.pending_images == 1:
+            state.sync_image_indicator()
+            state.publish_image_snapshot()
+        yield
+    finally:
+        if state.pending_images == 1:
+            state.hide_image_indicator()
+        elif state.pending_images:
+            state.pending_images -= 1
 
 
 def begin_response() -> dict[tuple[int, int], CitationText] | None:
@@ -323,6 +398,7 @@ def web_search_publisher() -> Callable[[str, dict], Awaitable[bool]] | None:
 
 def install() -> Callable[[], None]:
     """Bridge supported WebChat runs without changing AstrBot files."""
+    global _active_runs
     from astrbot.api.event import AstrMessageEvent
     from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
     from astrbot.core.platform.sources.webchat.webchat_event import WebChatMessageEvent
@@ -363,6 +439,8 @@ def install() -> Callable[[], None]:
             return await consume(state, run)
         finally:
             active_runs.pop(run.run_id, None)
+            if state.pending_images:
+                state.hide_image_indicator()
 
     @wraps(stream)
     async def stream_response(self, *args, **kwargs):
@@ -418,10 +496,15 @@ def install() -> Callable[[], None]:
     )
 
     def remove() -> None:
+        for state in active_runs.values():
+            if state.pending_images:
+                state.hide_image_indicator()
+        active_runs.clear()
         for owner, name, installed, original in hooks:
             if getattr(owner, name) is installed:
                 setattr(owner, name, original)
 
     for owner, name, installed, _ in hooks:
         setattr(owner, name, installed)
+    _active_runs = active_runs
     return remove
