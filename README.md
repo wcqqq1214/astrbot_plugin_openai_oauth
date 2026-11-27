@@ -8,6 +8,10 @@
 </p>
 
 <p align="center">
+  <img src="https://count.getloli.com/get/@astrbot_plugin_openai_oauth?theme=moebooru" alt="仓库访问计数">
+</p>
+
+<p align="center">
   <img src="https://raw.githubusercontent.com/wcqqq1214/astrbot_plugin_openai_oauth/main/logo.webp" alt="OpenAI Subscribe" width="240">
 </p>
 
