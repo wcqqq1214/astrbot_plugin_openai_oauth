@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [v2.6.0] - 2026-11-27
+
+### Added
+
+- Enable native Codex web search from the plugin's account page. Search is off by default. Answers include a deduplicated list of sources in both streaming and non-streaming chats.
+- Show account quota windows reported by Codex chat responses in `/usage` and the account page. Each window expires independently. A passive reading never puts an account into cooldown.
+
+### Changed
+
+- Chat commands, search source headings and provider errors can follow AstrBot's system language. Explicit language settings remain available, and older hosts fall back to Simplified Chinese in automatic mode.
+- Use AstrBot's dashboard theme colors when available and list the plugin in the provider adapter category.
+
+### Fixed
+
+- Default function tools to non-strict schemas while preserving explicit strict settings and native tools.
+- Ignore malformed search citation URLs so a bad link cannot interrupt the answer.
+- Preserve confirmed quota restrictions across partial updates and share concurrent quota lookups after a quota rejection. Usage requests now carry the selected account's configured originator.
+
 ## [v2.5.1] - 2026-11-21
 
 ### Fixed
