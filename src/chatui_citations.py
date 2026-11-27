@@ -263,9 +263,12 @@ def web_search_publisher() -> Callable[[str, dict], Awaitable[bool]] | None:
 
 def install() -> Callable[[], None]:
     """Bridge supported WebChat runs without changing AstrBot files."""
+    from astrbot.api.event import AstrMessageEvent
     from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
     from astrbot.core.platform.sources.webchat.webchat_event import WebChatMessageEvent
     from astrbot.dashboard.services import chat_service
+
+    from . import bot_citations
 
     service = chat_service.ChatService
     runner = ToolLoopAgentRunner
@@ -311,14 +314,25 @@ def install() -> Callable[[], None]:
             and getattr(context, "send_to_user", True)
             else None
         )
+        bot_event = (
+            event
+            if (
+                isinstance(event, AstrMessageEvent)
+                and event.get_platform_name() != "webchat"
+                and getattr(context, "send_to_user", True)
+            )
+            else None
+        )
         async with aclosing(stream(self, *args, **kwargs)) as responses:
             while True:
                 token = _producer.set(state)
+                bot_token = bot_citations.event_context.set(bot_event)
                 try:
                     response = await anext(responses)
                 except StopAsyncIteration:
                     return
                 finally:
+                    bot_citations.event_context.reset(bot_token)
                     _producer.reset(token)
                 yield response
 

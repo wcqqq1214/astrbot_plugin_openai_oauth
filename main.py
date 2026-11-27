@@ -15,6 +15,7 @@ from astrbot.core.message.components import Image
 from astrbot.core.star.filter.command import GreedyStr
 
 from .src import (
+    bot_citations,
     effort,
     image_generation,
     login,
@@ -110,6 +111,14 @@ class OpenAI_OAuth_Plugin(Star):
             self._image_accounts[scope] = account
             if len(self._image_accounts) > 1024:
                 self._image_accounts.popitem(last=False)
+
+    @filter.after_message_sent()
+    async def send_bot_sources(self, event: AstrMessageEvent) -> None:
+        await bot_citations.deliver_card(event, after_send=True)
+
+    @filter.on_decorating_result()
+    async def prepare_bot_sources(self, event: AstrMessageEvent) -> None:
+        await bot_citations.deliver_card(event, after_send=False)
 
     @filter.command("draw")
     async def draw(self, event: AstrMessageEvent, prompt: GreedyStr):

@@ -457,6 +457,117 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plain_output[-1].completion_text, "Plain.")
         self.assertNotIn("来源：", plain_output[-1].completion_text)
 
+    async def test_bot_citations_follow_part_offsets_and_reuse_source_numbers(self):
+        bridge = provider_module.bot_citations
+        url = "https://example.org/article"
+        other = "https://example.org/data"
+        ordinary = f"🔎[全文]({url})。"
+        first = ordinary + "发布。"
+        second = "发布。更多。"
+
+        def part(text, refs):
+            return {
+                "type": "output_text",
+                "text": text,
+                "annotations": [
+                    {
+                        "type": "url_citation",
+                        "url": target,
+                        "title": title,
+                        "start_index": 0,
+                        "end_index": end,
+                    }
+                    for end, target, title in refs
+                ],
+            }
+
+        events = [
+            {
+                "type": "response.output_text.delta",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": first,
+            },
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp",
+                    "status": "completed",
+                    "output": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                part(
+                                    first,
+                                    [
+                                        (ordinary.index("]"), url, "Article"),
+                                        (len(first), url, "Article"),
+                                    ],
+                                ),
+                                part(
+                                    second,
+                                    [(3, url, "Article"), (len(second), other, "Data")],
+                                ),
+                            ],
+                        }
+                    ],
+                },
+            },
+        ]
+        for platform in ("telegram", "slack", "aiocqhttp", "line"):
+            with self.subTest(platform=platform):
+                extras = {}
+                event = mock.Mock()
+                event.get_platform_name.return_value = platform
+                event.get_extra.side_effect = extras.get
+                event.set_extra.side_effect = extras.__setitem__
+                event.send = mock.AsyncMock()
+                token = bridge.event_context.set(event)
+                try:
+                    _, output = await self._run_query(
+                        _new_provider(native_web_search=True),
+                        events,
+                        reply_language="en",
+                    )
+                finally:
+                    bridge.event_context.reset(token)
+                if platform == "telegram":
+                    one, two = f"[〔1〕]({url})", f"[〔2〕]({other})"
+                elif platform == "slack":
+                    one, two = f"<{url}|〔1〕>", f"<{other}|〔2〕>"
+                else:
+                    one, two = "〔1〕", "〔2〕"
+                expected = f"{ordinary[:-1]}{one}。发布。{one}发布。{one}更多。{two}"
+                card = platform == "line" and hasattr(bridge.Comp, "ActionRow")
+                if platform in {"line", "aiocqhttp"} and not card:
+                    expected += f"\n\nSources:\n〔1〕 Article {url}\n〔2〕 Data {other}"
+                self.assertEqual(output[-1].completion_text, expected)
+                self.assertEqual(
+                    [item.completion_text for item in output if item.is_chunk],
+                    [expected],
+                )
+                if card:
+                    event.send.side_effect = [RuntimeError("card rejected"), None]
+                    result = bridge.MessageEventResult().message(expected)
+                    result.result_content_type = bridge.ResultContentType.LLM_RESULT
+                    event.get_result.return_value = result
+                    await bridge.deliver_card(event, after_send=False)
+                    event.send.assert_not_awaited()
+                    await bridge.deliver_card(event, after_send=True)
+                    await bridge.deliver_card(event, after_send=True)
+                    native, fallback = [
+                        call.args[0] for call in event.send.await_args_list
+                    ]
+                    self.assertEqual(
+                        [(b.label, b.action.url) for b in native.chain[0].buttons],
+                        [("〔1〕 Article", url), ("〔2〕 Data", other)],
+                    )
+                    self.assertEqual(
+                        fallback.get_plain_text(),
+                        f"Sources:\n〔1〕 Article {url}\n〔2〕 Data {other}",
+                    )
+
     async def test_inline_citations_in_live_and_saved_chat(self):
         from astrbot.core.db.po import PlatformMessageHistory
 
