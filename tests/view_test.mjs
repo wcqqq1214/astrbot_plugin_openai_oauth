@@ -216,6 +216,7 @@ const inspectProvider = async (id) => {
   await page.openProvider(id);
 };
 const read = (id) => ids.get(id).textContent;
+await page.openProvider("local");
 assert.match(read("usage-result"), /每周.*96%/);
 // A weekly-only Pro response renders exactly one compact quota line.
 assert.equal(ids.get("usage-result").children.length, 1);
@@ -1477,17 +1478,19 @@ const multi = await freshPage();
 const panelFor = (id) => multi.rowNodes.get(id).panel;
 const rowMain = (id) => multi.rowNodes.get(id).main;
 const panelText = (id) => panelFor(id).usageResult.textContent;
-assert.deepEqual(quotaCalls, ["p0"], "only the first provider fetches on page load");
-assert.equal(rowMain("p0").getAttribute("aria-expanded"), "true");
-assert.equal(rowMain("p1").getAttribute("aria-expanded"), "false");
-assert.equal(panelFor("p1").detail.hidden, true);
+assert.deepEqual(quotaCalls, [], "collapsed providers do not fetch usage on page load");
 const controlIds = [...multi.rowNodes.values()].map(({main}) => main.getAttribute("aria-controls"));
 assert.equal(new Set(controlIds).size, 6, "each row controls a distinct panel");
 for (const {main, panel} of multi.rowNodes.values()) {
+  assert.equal(main.getAttribute("aria-expanded"), "false");
+  assert.equal(panel.detail.hidden, true);
   assert.equal(main.getAttribute("aria-controls"), panel.detail.id);
   assert.equal(panel.detail.getAttribute("aria-labelledby"), panel.elements["source-name"].id);
 }
 await click(rowMain("p1"));
+assert.deepEqual(quotaCalls, ["p1"]);
+assert.equal(panelFor("p0").detail.hidden, true);
+await click(rowMain("p0"));
 assert.equal(panelFor("p0").detail.hidden, false);
 assert.equal(panelFor("p1").detail.hidden, false);
 assert.match(panelText("p0"), /100%/);
@@ -1569,8 +1572,8 @@ assert.equal(panelFor("p5").detail.hidden, false);
 // A full page reload restores the default, regardless of the previous panels.
 quotaCalls.length = 0;
 const reloaded = await freshPage();
-assert.deepEqual(quotaCalls, ["p0"]);
-assert.equal(reloaded.rowNodes.get("p0").panel.detail.hidden, false);
+assert.deepEqual(quotaCalls, []);
+assert.equal(reloaded.rowNodes.get("p0").panel.detail.hidden, true);
 assert.equal(reloaded.rowNodes.get("p5").panel.detail.hidden, true);
 console.log("Independent provider panel regressions passed: defaults, concurrent expansion, collapsed refresh, locale/rename preservation, isolated errors, stale responses, bounded queue, removal and page reload.");
 
@@ -1601,6 +1604,7 @@ const cases = [
 for (const [locale, key, localName] of cases) {
   initialLocale = locale;
   const translated = await freshPage();
+  await click(translated.rowNodes.get("p0").main);
   const dictionary = translated.strings[key];
   assert.equal(document.documentElement.lang, locale);
   assert.equal(document.title, dictionary.title);

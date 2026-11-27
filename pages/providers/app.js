@@ -82,7 +82,6 @@ let consecutivePollFailures = 0;
 let providers = [];
 let loginSourceId = null;
 let refreshPromise = null;
-let initializedExpansion = false;
 let panelSequence = 0;
 let activeUsageRequests = 0;
 const usageQueue = [];
@@ -769,11 +768,6 @@ async function loadProviders() {
   listedSeq = listed;
   showPageError("");
   renderProviders();
-  if (!initializedExpansion && providers.length) {
-    initializedExpansion = true;
-    rowNodes.get(providers[0].id).panel.expanded = true;
-    renderProviders();
-  }
 }
 
 async function queryUsage(revealId = null) {
