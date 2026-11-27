@@ -9,6 +9,7 @@
 ## Development notes
 
 - Use English for all comments and logs.
+- Write `CHANGELOG.md` in both Chinese and English, placing the Chinese section before the English section for each version.
 - Use `httpx` or `aiohttp` for network requests (do not use `requests`).
 - Persist data under the AstrBot `data` directory, not the plugin directory.
 - For Python changes, run Ruff formatting on changed Python files and the relevant lint checks before committing. Preserve any additional CI checks; documentation-only changes do not require Python formatting.

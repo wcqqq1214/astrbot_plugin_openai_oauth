@@ -61,7 +61,7 @@ Before registering metadata or WebUI routes, startup validates `CONFIG_METADATA_
 Pushing to `main` runs tests without publishing. To cut a release:
 
 1. Bump the version in `metadata.yaml`, `pyproject.toml`, `main.py`, and both README badges, then run `uv lock`.
-2. Add a `## [vX.Y.Z]` section to `CHANGELOG.md` and keep `.astrbot-plugin/i18n/` aligned with `metadata.yaml` if descriptions changed.
+2. Add a bilingual `## [vX.Y.Z]` section to `CHANGELOG.md` (Chinese first, then English) and keep `.astrbot-plugin/i18n/` aligned with `metadata.yaml` if descriptions changed.
 3. Verify `python3 .github/scripts/release_check.py versions`, local checks, and CI on the target commit.
 4. Create and push the `vX.Y.Z` tag (local tags do not trigger releases).
 
