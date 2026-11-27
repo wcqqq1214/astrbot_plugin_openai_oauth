@@ -751,12 +751,7 @@ def test_session_effort_request_override() -> None:
     captured_efforts: list[str | None] = []
 
     async def stream_with_captured_effort(
-        _payloads,
-        _tools,
-        *,
-        request_max_retries,
-        conversation_id=None,
-        session_effort=None,
+        _payloads, _tools, *, session_effort, **kwargs
     ):
         captured_efforts.append(session_effort)
         yield provider_module.LLMResponse(
@@ -805,17 +800,7 @@ def test_pre_stream_credential_recovery() -> None:
     class _UnauthorizedError(RuntimeError):
         status_code = 401
 
-    async def query(
-        _client,
-        _payloads,
-        _tools,
-        *,
-        request_max_retries,
-        conversation_id=None,
-        session_effort=None,
-        before_attempt=None,
-        on_stream_open=None,
-    ):
+    async def query(_client, _payloads, _tools, **kwargs):
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -863,17 +848,7 @@ def test_stream_is_not_replayed_after_output() -> None:
     class _UnauthorizedError(RuntimeError):
         status_code = 401
 
-    async def query(
-        _client,
-        _payloads,
-        _tools,
-        *,
-        request_max_retries,
-        conversation_id=None,
-        session_effort=None,
-        before_attempt=None,
-        on_stream_open=None,
-    ):
+    async def query(_client, _payloads, _tools, **kwargs):
         nonlocal calls
         calls += 1
         yield provider_module.LLMResponse(
@@ -913,17 +888,7 @@ def test_usage_limit_enters_cooldown() -> None:
         def __init__(self) -> None:
             self.body = {"error": {"code": "usage_limit_reached"}}
 
-    async def query(
-        _client,
-        _payloads,
-        _tools,
-        *,
-        request_max_retries,
-        conversation_id=None,
-        session_effort=None,
-        before_attempt=None,
-        on_stream_open=None,
-    ):
+    async def query(_client, _payloads, _tools, **kwargs):
         raise _UsageLimitError()
         yield
 

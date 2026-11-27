@@ -469,13 +469,11 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                     open_stream,
                     conversation_id=conversation_id,
                     max_attempts=1,
-                    streaming=True,
                 )
             )
 
         while attempts < max_attempts:
             consuming = False
-            final_response = None
             try:
                 async with AsyncExitStack() as stack:
                     stream, attempt = await retry_provider_request(
@@ -510,15 +508,15 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                         async for response in responses:
                             emitted_response = True
                             if not response.is_chunk:
-                                final_response = response
                                 break
                             if attempt is not None:
                                 attempt.mark_first_token()
                             yield response
+                        else:
+                            return
                     consuming = False
                 # The agent closes the iterator as soon as it receives the final response.
-                if final_response is not None:
-                    yield final_response
+                yield response
                 return
             except Exception as exc:
                 if (
@@ -628,9 +626,6 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         coordinator = runtime.get_coordinator()
         candidates = coordinator.providers.candidates(self._source_id)
         automatic = coordinator.providers.routing_mode(self._source_id) == "auto"
-        reply_kwargs = (
-            {"reply_language": reply_language} if reply_language is not None else {}
-        )
         if not automatic:
             async with aclosing(
                 self._stream_from_source(
@@ -640,7 +635,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                     request_max_retries=request_max_retries,
                     session_effort=session_effort,
                     conversation_id=conversation_id,
-                    **reply_kwargs,
+                    reply_language=reply_language,
                 )
             ) as stream:
                 async for response in stream:
@@ -691,7 +686,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                                 seen=seen,
                                 on_stream_open=stream_opened,
                                 conversation_id=conversation_id,
-                                **reply_kwargs,
+                                reply_language=reply_language,
                             )
                         ) as stream:
                             async for response in stream:
@@ -791,16 +786,6 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                 )
 
             try:
-                query_kwargs: dict[str, Any] = (
-                    {"reply_language": reply_language}
-                    if reply_language is not None
-                    else {}
-                )
-                if (
-                    getattr(self._query_stream, "__func__", None)
-                    is ProviderOpenAICodex._query_stream
-                ):
-                    query_kwargs["on_rate_limits"] = record_limits
                 async with (
                     self._source_client(snapshot) as request_client,
                     aclosing(
@@ -813,7 +798,8 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                             conversation_id=conversation_id,
                             before_attempt=guard,
                             on_stream_open=on_stream_open,
-                            **query_kwargs,
+                            reply_language=reply_language,
+                            on_rate_limits=record_limits,
                         )
                     ) as stream,
                 ):
@@ -960,11 +946,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                     conversation_id=conversation_id,
                     request_max_retries=request_max_retries,
                     session_effort=session_effort,
-                    **(
-                        {"reply_language": reply_language}
-                        if reply_language is not None
-                        else {}
-                    ),
+                    reply_language=reply_language,
                 )
             ) as stream:
                 async for item in stream:

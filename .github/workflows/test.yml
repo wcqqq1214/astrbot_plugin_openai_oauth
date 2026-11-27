@@ -56,6 +56,10 @@ jobs:
         # Pushes and pull requests test the declared minimum and the newest
         # verified release; the weekly run tests whatever AstrBot released last.
         astrbot: ${{ fromJSON(github.event_name == 'schedule' && '["latest"]' || '["v4.27.1", "v4.29.4"]') }}
+        include:
+          # The release matrix predates per-request accounting (AstrBot #11392).
+          - astrbot: 7c8a8d7f617db264a5775fd46b375c067634464b
+            test_script: request_usage_test.py
     name: integration (AstrBot ${{ matrix.astrbot }})
     steps:
       - name: Checkout plugin
@@ -99,7 +103,7 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/AstrBot/data/plugins"
           "$GITHUB_WORKSPACE/AstrBot/.venv/bin/python" \
-            "$GITHUB_WORKSPACE/astrbot_plugin_openai_oauth/tests/run_tests.py"
+            "$GITHUB_WORKSPACE/astrbot_plugin_openai_oauth/tests/run_tests.py" ${{ matrix.test_script }}
 
   codex-release:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

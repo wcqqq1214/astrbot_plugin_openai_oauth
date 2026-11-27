@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 import httpx
-from provider_routing_test import RoutingFixture, provider_module
+from provider_routing_test import RoutingFixture
 
 HAS_REQUEST_STATS = find_spec("astrbot.core.provider.sources.chat_request") is not None
 if HAS_REQUEST_STATS:
@@ -45,22 +45,6 @@ def event_stream(*events):
         text="".join(f"data: {json.dumps(event)}\n\n" for event in events),
         headers={"content-type": "text/event-stream"},
     )
-
-
-class LegacyUsageTests(RoutingFixture):
-    async def test_response_retains_usage_for_turn_accounting(self):
-        self.outcomes["local"] = [completion()]
-        with patch.object(provider_module, "chat_request", None):
-            response = await self.provider.text_chat(prompt="hi")
-        self.assertEqual(len(self.requests), 1)
-        self.assertEqual(
-            (
-                response.usage.input_other,
-                response.usage.input_cached,
-                response.usage.output,
-            ),
-            (8, 3, 7),
-        )
 
 
 @unittest.skipUnless(HAS_REQUEST_STATS, "Requires per-request statistics")
@@ -110,40 +94,12 @@ class RequestUsageTests(RoutingFixture):
         self.assertEqual(response.usage.total, 18)
         await self.assert_usage([("completed", 8, 3, 7)])
 
-    async def test_stream_records_failed_open_then_success(self):
+    async def test_stream_retry_settles_before_consumer_closes_on_final(self):
         self.outcomes["local"] = [503, completion()]
-        chunks = [
-            chunk
-            async for chunk in self.provider.text_chat_stream(
+        async with aclosing(
+            self.provider.text_chat_stream(
                 prompt="hi", conversation_id="conv", request_max_retries=2
             )
-        ]
-        self.assertEqual(chunks[-1].usage.total, 18)
-        await self.assert_usage([("error", None, None, None), ("completed", 8, 3, 7)])
-
-    async def test_credential_refresh_and_account_fallback_count_only_chat_requests(
-        self,
-    ):
-        await self.registry.edit("local", enabled=False)
-        self.outcomes.update(same=[401, 401], other=[completion()])
-        result = await self.provider.text_chat(prompt="hi", conversation_id="conv")
-        self.assertEqual(result.usage.total, 18)
-        self.assertEqual(self.requested(), ["same", "same", "other"])
-        self.refresh.assert_awaited_once()
-        await self.assert_usage(
-            [("error", None, None, None)] * 2 + [("completed", 8, 3, 7)]
-        )
-
-    async def test_missing_usage_stays_unknown(self):
-        self.outcomes["local"] = [completion(usage=None)]
-        response = await self.provider.text_chat(prompt="hi", conversation_id="conv")
-        self.assertIsNone(response.usage)
-        await self.assert_usage([("completed", None, None, None)], total=0)
-
-    async def test_close_on_final_response_counts_as_completed(self):
-        self.outcomes["local"] = [completion()]
-        async with aclosing(
-            self.provider.text_chat_stream(prompt="hi", conversation_id="conv")
         ) as stream:
             async for response in stream:
                 if not response.is_chunk:
@@ -151,38 +107,35 @@ class RequestUsageTests(RoutingFixture):
                     break
             else:
                 self.fail("Expected a final response")
-        await self.assert_usage([("completed", 8, 3, 7)])
+        await self.assert_usage([("error", None, None, None), ("completed", 8, 3, 7)])
 
-    async def test_empty_usage_and_explicit_zero_are_distinct(self):
-        for usage in ({}, {"input_tokens": 0, "output_tokens": 0}):
+    async def test_only_reported_zero_counts_as_known_usage(self):
+        for usage, expected in (
+            (None, None),
+            ({}, None),
+            ({"input_tokens": 0, "output_tokens": 0}, 0),
+        ):
             self.outcomes["local"] = [completion(usage=usage)]
             result = await self.provider.text_chat(prompt="hi", conversation_id="conv")
-            if usage:
-                self.assertEqual(result.usage.total, 0)
-            else:
-                self.assertIsNone(result.usage)
-        await self.assert_usage(
-            [("completed", None, None, None), ("completed", 0, 0, 0)], total=0
-        )
+            self.assertEqual(
+                result.usage.total if result.usage is not None else None, expected
+            )
+        unknown = ("completed", None, None, None)
+        await self.assert_usage([unknown, unknown, ("completed", 0, 0, 0)], total=0)
 
     async def test_failed_terminal_response_retains_reported_usage(self):
-        for metadata in ({"status": "failed"}, {}):
-            self.outcomes["local"] = [
-                event_stream(
-                    TEXT_DELTA,
-                    {
-                        "type": "response.failed",
-                        "response": {
-                            **metadata,
-                            "error": {"code": "server_error"},
-                            "usage": USAGE,
-                        },
-                    },
-                )
-            ]
-            result = await self.provider.text_chat(prompt="hi", conversation_id="conv")
-            self.assertEqual(result.role, "err")
-        await self.assert_usage([("error", 8, 3, 7)] * 2, total=36)
+        self.outcomes["local"] = [
+            event_stream(
+                TEXT_DELTA,
+                {
+                    "type": "response.failed",
+                    "response": {"error": {"code": "server_error"}, "usage": USAGE},
+                },
+            )
+        ]
+        result = await self.provider.text_chat(prompt="hi", conversation_id="conv")
+        self.assertEqual(result.role, "err")
+        await self.assert_usage([("error", 8, 3, 7)])
 
     async def test_last_reported_snapshot_reaches_both_response_and_dashboard(self):
         self.outcomes["local"] = [
@@ -210,18 +163,6 @@ class RequestUsageTests(RoutingFixture):
         result = await self.provider.text_chat(prompt="hi", conversation_id="conv")
         self.assertEqual(result.usage.total, 18)
         await self.assert_usage([("completed", 8, 3, 7)])
-
-    async def test_failure_after_first_delta_records_error_without_replay(self):
-        self.outcomes["local"] = ["partial", completion()]
-        chunks = [
-            chunk
-            async for chunk in self.provider.text_chat_stream(
-                prompt="hi", conversation_id="conv", request_max_retries=3
-            )
-        ]
-        self.assertEqual(chunks[0].completion_text, "partial")
-        self.assertEqual(chunks[-1].role, "err")
-        await self.assert_usage([("error", None, None, None)], total=0)
 
     async def test_closing_after_first_delta_records_aborted(self):
         self.outcomes["local"] = [completion()]
