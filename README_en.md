@@ -17,6 +17,10 @@
 </p>
 
 <p align="center">
+  <img src="https://count.getloli.com/get/@astrbot_plugin_openai_oauth?theme=moebooru" alt="Repository visitor counter">
+</p>
+
+<p align="center">
   <a href="README.md">简体中文</a> · <strong>English</strong>
 </p>
 
@@ -184,7 +188,3 @@ Migration is automatic: older separate sources consolidate under **OpenAI Subscr
 See the [development guide](https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/blob/main/docs/development.md) for testing and release workflows, and the [API guide](https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/blob/main/docs/provider-routing-api.md) for routing rules and WebUI endpoints.
 
 Licensed under [AGPL-3.0](LICENSE).
-
-<p align="center">
-  <img src="https://count.getloli.com/get/@astrbot_plugin_openai_oauth?theme=moebooru" alt="Repository visitor counter">
-</p>

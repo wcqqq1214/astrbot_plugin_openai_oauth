@@ -17,6 +17,10 @@
 </p>
 
 <p align="center">
+  <img src="https://count.getloli.com/get/@astrbot_plugin_openai_oauth?theme=moebooru" alt="仓库访问计数">
+</p>
+
+<p align="center">
   <strong>简体中文</strong> · <a href="README_en.md">English</a>
 </p>
 
@@ -184,7 +188,3 @@
 测试与发布流程见[开发说明](https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/blob/main/docs/development.md)，路由规则与 WebUI 接口见[接口说明](https://github.com/wcqqq1214/astrbot_plugin_openai_oauth/blob/main/docs/provider-routing-api.md)。
 
 本项目采用 [AGPL-3.0](LICENSE) 许可证。
-
-<p align="center">
-  <img src="https://count.getloli.com/get/@astrbot_plugin_openai_oauth?theme=moebooru" alt="仓库访问计数">
-</p>
