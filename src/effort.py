@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from astrbot import logger
-from astrbot.api import sp
+from astrbot.api import logger, sp
 from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.star import Context
 

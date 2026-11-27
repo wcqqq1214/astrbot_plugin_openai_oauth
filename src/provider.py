@@ -10,7 +10,7 @@ from contextlib import aclosing, asynccontextmanager
 from copy import deepcopy
 from typing import Any
 
-from astrbot import logger
+from astrbot.api import logger
 from astrbot.core.provider.entities import LLMResponse
 from astrbot.core.provider.register import (
     provider_cls_map,

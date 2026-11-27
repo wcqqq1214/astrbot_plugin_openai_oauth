@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import httpx
-from astrbot import logger
+from astrbot.api import logger
 from PIL import Image
 
 from . import oauth, runtime

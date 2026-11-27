@@ -11,7 +11,7 @@ import hashlib
 import json
 from typing import Any
 
-from astrbot import logger
+from astrbot.api import logger
 
 # The ChatGPT backend rejects sampling knobs, output limits and explicit cache
 # options that the public Responses API accepts. Codex never sends them.

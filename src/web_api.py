@@ -5,7 +5,7 @@ from __future__ import annotations
 import secrets
 from typing import Any
 
-from astrbot import logger
+from astrbot.api import logger
 from astrbot.api.star import Context
 from astrbot.api.web import json_response, request
 from astrbot.core.workspace import API_KEY_USERNAME_PREFIX

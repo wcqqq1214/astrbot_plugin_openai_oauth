@@ -6,8 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from astrbot import logger
-from astrbot.api import AstrBotConfig
+from astrbot.api import AstrBotConfig, logger
 from astrbot.api.star import Context
 from astrbot.core.config.default import CONFIG_METADATA_2
 from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path

@@ -11,7 +11,7 @@ from importlib import import_module
 from importlib.util import find_spec
 from weakref import WeakKeyDictionary
 
-from astrbot import logger
+from astrbot.api import logger
 from astrbot.core.agent.message import ImageURLPart
 from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.utils.media_utils import resolve_media_ref_to_base64_data

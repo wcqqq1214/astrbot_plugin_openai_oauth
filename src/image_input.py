@@ -8,7 +8,7 @@ from base64 import b64decode, b64encode
 from collections.abc import Iterator
 from io import BytesIO
 
-from astrbot import logger
+from astrbot.api import logger
 from astrbot.core.utils.media_utils import resolve_media_ref_to_base64_data
 from PIL import Image, ImageOps
 

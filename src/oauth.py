@@ -20,7 +20,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
-from astrbot import logger
+from astrbot.api import logger
 from astrbot.core.utils.network_utils import create_proxy_client, is_connection_error
 from httpx import HTTPStatusError
 from openai import APIConnectionError, APIError
