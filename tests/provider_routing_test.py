@@ -454,10 +454,10 @@ class RoutingTests(RoutingFixture):
         source = plugin.Image.fromBytes(sample_png())
         event.get_messages = lambda: [source]
 
-        async def check(key):
+        async def check(key, prompt="Night scene"):
             self.assertEqual(
-                await star.codex_edit_image(event, "Night scene"),
-                plugin.messages.text(key),
+                await star.codex_edit_image(event, prompt),
+                plugin.messages.text(key, limit=32_000),
             )
             event.send.assert_not_awaited()
 
@@ -472,6 +472,10 @@ class RoutingTests(RoutingFixture):
         star.config.update(image_account="", image_enabled=False)
         await check("image.disabled")
         star.config["image_enabled"] = True
+        with patch.object(image_generation, "read_edit_image") as read_image:
+            for prompt in ("  ", "x" * 32_001):
+                await check("image.edit_prompt", prompt)
+            read_image.assert_not_awaited()
         for parts, error in (
             ([Reply(id="old", chain=[source])], "image.reference_required"),
             ([source, source], "image.reference_required"),
@@ -514,8 +518,8 @@ class RoutingTests(RoutingFixture):
         request = plugin.ProviderRequest(
             prompt=question, image_urls=[image.file], func_tool=tools
         )
-        await star.prepare_image_tool(event, request)
         self.requests.clear()
+        await star.prepare_image_tool(event, request)
         reply = await self.provider.text_chat(
             prompt=question, image_urls=request.image_urls, func_tool=request.func_tool
         )

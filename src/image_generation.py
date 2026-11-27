@@ -17,6 +17,7 @@ import httpx
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.core.message.components import Image as ImageComponent
+from astrbot.core.utils.media_utils import resolve_image_ref_to_base64_data
 from PIL import Image
 
 from . import oauth, runtime
@@ -93,22 +94,16 @@ async def read_edit_image(event: AstrMessageEvent) -> str:
     ]
     if len(attachments) != 1:
         raise ImageError("image.reference_required")
+    attachment = attachments[0]
     try:
-        encoded = await attachments[0].convert_to_base64()
-        return await asyncio.to_thread(_reference_data_url, encoded)
+        image = await resolve_image_ref_to_base64_data(
+            attachment.url or attachment.file, default_mime_type=None
+        )
     except Exception as exc:
-        # Adapter errors may include the source URL or inline image.
         raise ImageError("image.reference_unreadable") from exc
-
-
-def _reference_data_url(encoded: str) -> str:
-    with Image.open(
-        BytesIO(base64.b64decode(encoded, validate=True)),
-        formats=("PNG", "JPEG", "WEBP", "GIF"),
-    ) as source:
-        mime = source.get_format_mimetype()
-        source.verify()
-    return f"data:{mime};base64,{encoded}"
+    if image is None:
+        raise ImageError("image.reference_unreadable")
+    return image.to_data_url()
 
 
 async def generate(
@@ -118,9 +113,6 @@ async def generate(
     *,
     reference_image: str | None = None,
 ) -> bytes:
-    prompt = prompt.strip()
-    if not prompt or len(prompt) > 32000:
-        raise ImageError("image.prompt")
     coordinator = runtime.get_coordinator()
 
     def validate_account(snapshot: CredentialSnapshot) -> None:

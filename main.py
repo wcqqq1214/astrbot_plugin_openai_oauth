@@ -36,6 +36,8 @@ from .src.provider import ProviderOpenAICodex
 
 __all__ = ["OpenAI_OAuth_Plugin", "ProviderOpenAICodex"]
 
+MAX_IMAGE_PROMPT_LENGTH = 32_000
+
 
 async def _resolve_reply_language(plugin_obj: Any, event: AstrMessageEvent) -> str:
     context = getattr(plugin_obj, "context", None) or runtime.get_context()
@@ -198,8 +200,12 @@ class OpenAI_OAuth_Plugin(Star):
     ) -> str | None:
         if not self.config.get("image_enabled", False):
             return messages.text("image.disabled")
-        if not isinstance(prompt, str) or not prompt.strip():
-            return messages.text("image.prompt")
+        prompt = prompt.strip() if isinstance(prompt, str) else ""
+        if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
+            return messages.text(
+                "image.edit_prompt" if edit else "image.prompt",
+                limit=MAX_IMAGE_PROMPT_LENGTH,
+            )
         if account is None:
             return messages.text("image.no_account")
         allowed = str(self.config.get("image_account") or "").strip()

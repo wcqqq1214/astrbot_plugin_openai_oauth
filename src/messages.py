@@ -34,6 +34,7 @@ _CATALOG: dict[str, dict[str, str]] = {
     "zh-CN": {
         "image.disabled": "请先在插件设置中开启 GPT Image 生图。",
         "image.prompt": "用法：/draw <提示词>",
+        "image.edit_prompt": "请在同一条消息中附上原图并说明要修改的内容，修改要求最多 {limit} 个字符。",
         "image.reference_required": "请将一张参考图和修改要求放在同一条消息中发送。",
         "image.reference_unreadable": "无法读取这条消息里的参考图。请重新附上图片，并一起发送修改要求。",
         "image.no_account": "请先在当前对话中发送一条消息，再使用生图功能。",
@@ -130,6 +131,7 @@ _CATALOG: dict[str, dict[str, str]] = {
     "en-US": {
         "image.disabled": "Enable GPT Image generation in the plugin settings first.",
         "image.prompt": "Usage: /draw <prompt>",
+        "image.edit_prompt": "Attach the original image and describe the changes in the same message. Use up to {limit} characters for your instructions.",
         "image.reference_required": "Send one reference image and the requested changes together in the same message.",
         "image.reference_unreadable": "I couldn’t read the reference image in this message. Please attach it again with your edit instructions.",
         "image.no_account": "Send a message in this conversation before using /draw.",
@@ -226,6 +228,7 @@ _CATALOG: dict[str, dict[str, str]] = {
     "ru-RU": {
         "image.disabled": "Сначала включите генерацию GPT Image в настройках плагина.",
         "image.prompt": "Использование: /draw <описание>",
+        "image.edit_prompt": "Прикрепите исходное изображение и опишите изменения в том же сообщении. Максимальная длина описания — {limit} символов.",
         "image.reference_required": "Отправьте одно исходное изображение и описание изменений в одном сообщении.",
         "image.reference_unreadable": "Не удалось прочитать исходное изображение в этом сообщении. Прикрепите его ещё раз вместе с описанием изменений.",
         "image.no_account": "Сначала отправьте сообщение в этом диалоге, затем используйте /draw.",
@@ -322,6 +325,7 @@ _CATALOG: dict[str, dict[str, str]] = {
     "ja-JP": {
         "image.disabled": "先にプラグイン設定で GPT Image 画像生成を有効にしてください。",
         "image.prompt": "使い方: /draw <プロンプト>",
+        "image.edit_prompt": "元の画像を添付し、同じメッセージに変更内容を{limit}文字以内で書いてください。",
         "image.reference_required": "参考画像を1枚添付し、変更内容と一緒に送信してください。",
         "image.reference_unreadable": "このメッセージの参考画像を読み込めませんでした。画像を添付し直し、変更内容と一緒に送信してください。",
         "image.no_account": "この会話で一度メッセージを送信してから /draw を使用してください。",
