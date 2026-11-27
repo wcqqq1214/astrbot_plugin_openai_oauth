@@ -4,13 +4,14 @@
 
 `main.py` holds the AstrBot entry point, lifecycle hooks, and command registration. The implementation lives in `src/`:
 
-- `runtime.py`: shared configuration and credential coordinator setup.
-- `provider.py`: AstrBot provider adapter, retry handling, and account routing.
-- `codex_request.py`, `codex_stream.py`, `transport_pool.py`: request shaping, Responses stream parsing, and per-account HTTP transport pooling.
-- `oauth.py`, `login.py`: OAuth constants/requests, device-login sessions, and task cleanup.
-- `web_api.py`: authenticated WebUI endpoints.
-- `usage.py`, `effort.py`, `messages.py`: allowance queries, per-session reasoning overrides, and localized chat replies.
-- `image_generation.py`, `image_input.py`, `astrbot_image_bridge.py`: GPT Image generation, input image resizing, and optional AstrBot image hooks.
+- `runtime.py`: shared configuration, compatibility validation, and credential coordinator setup.
+- `provider.py`: AstrBot provider adapter, retry handling, account routing, and stream orchestration.
+- `codex_request.py`, `codex_stream.py`, `transport_pool.py`: stateless Responses request shaping, SSE stream parsing, and per-account HTTP transport pooling.
+- `codex_search.py`, `chatui_citations.py`, `bot_citations.py`: native `web_search` call tracking, ChatUI inline source cards and duplicate-link collapsing, and platform-adaptive bot citations (inline links, action-row buttons, or trailing source lists).
+- `oauth.py`, `login.py`: OAuth constants/requests, background npm Codex CLI version discovery, device-login sessions, and task cleanup.
+- `web_api.py`: authenticated WebUI endpoints under `/astrbot_plugin_openai_oauth/`.
+- `usage.py`, `effort.py`, `messages.py`: allowance queries and passive response quota windows, per-session reasoning overrides, and localized chat replies.
+- `image_generation.py`, `image_input.py`, `astrbot_image_bridge.py`: GPT Image generation, oversized input image resizing, and optional AstrBot image hooks.
 - `credential_store.py`, `credential_seal.py`, `local_codex.py`, `provider_registry.py`, `provider_routing.py`: credential coordination, Fernet sealing, local Codex sync, account registry/migration, and routing budgets.
 - `source_editor.py`, `model_editor.py`: AstrBot source-write guard and model-account selector hooks.
 
@@ -43,7 +44,7 @@ By default, this looks for `../AstrBot`; set `ASTRBOT_ROOT=/path/to/AstrBot` oth
 
 ## AstrBot compatibility guard
 
-Before registering metadata or WebUI routes, startup validates `CONFIG_METADATA_2` provider fields and the async `ProviderConfigService.upsert_provider_source(service, source_id, config)` signature (`src/source_editor.py`). Image bridge hooks (`src/astrbot_image_bridge.py`) are optional and degrade safely.
+Before registering metadata or WebUI routes, startup validates `CONFIG_METADATA_2` provider fields and the async `ProviderConfigService.upsert_provider_source(service, source_id, config)` signature (`src/source_editor.py`). Runtime bridges for image hooks (`src/astrbot_image_bridge.py`) and ChatUI citations (`src/chatui_citations.py`) are optional and degrade safely.
 
 - **On critical failure**: startup aborts, account operations return HTTP 503 `incompatible_astrbot`, and a fail-closed blocker replaces `upsert_provider_source` for that config instance (blocking only subscription writes if the signature is still recognizable, or all writes on that config instance otherwise). A subsequent reload on a compatible AstrBot version restores the normal guard; if `ProviderConfigService` cannot be imported or patched, startup still fails and logs that protection is unavailable.
 - **At runtime write boundaries**: if startup failed, queued registry mutations roll back in-memory changes, and credential persistence and token refreshes abort before modifying the source or dispatching.
@@ -62,7 +63,7 @@ Pushing to `main` runs tests without publishing. To cut a release:
 
 1. Bump the version in `metadata.yaml`, `pyproject.toml`, `main.py`, and both README badges, then run `uv lock`.
 2. Add a bilingual `## [vX.Y.Z]` section to `CHANGELOG.md` (Chinese first, then English) and keep `.astrbot-plugin/i18n/` aligned with `metadata.yaml` if descriptions changed.
-3. Verify `python3 .github/scripts/release_check.py versions`, local checks, and CI on the target commit.
+3. Verify `uv run python .github/scripts/release_check.py versions`, local checks, and CI on the target commit.
 4. Create and push the `vX.Y.Z` tag (local tags do not trigger releases).
 
 The release workflow validates the tag and `CHANGELOG.md` entry, packages runtime files per `.gitattributes`, and publishes the GitHub release using that changelog section.

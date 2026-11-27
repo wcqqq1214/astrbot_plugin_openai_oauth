@@ -1,20 +1,21 @@
 # Provider controls and routing API
 
-Reference for the single-source config layout, WebUI API endpoints, enable/disable behavior, and automatic fallback routing in `astrbot_plugin_openai_oauth`.
+Reference for the single-source config layout, WebUI API endpoints, enable/disable behavior, native web search toggle, and automatic fallback routing in `astrbot_plugin_openai_oauth`.
 
 All endpoints are mounted under `/astrbot_plugin_openai_oauth/` using AstrBot's authenticated, same-origin dashboard bridge (API-key sessions are rejected). They never accept or return raw OAuth credentials, and all responses set `Cache-Control: no-store`.
 
-Endpoints:
-
-- `POST /astrbot_plugin_openai_oauth/providers/list`
-- `POST /astrbot_plugin_openai_oauth/providers/update`
-- `POST /astrbot_plugin_openai_oauth/providers/delete`
-- `POST /astrbot_plugin_openai_oauth/routing/update`
-- `POST /astrbot_plugin_openai_oauth/account/status`
-- `POST /astrbot_plugin_openai_oauth/account/usage`
-- `POST /astrbot_plugin_openai_oauth/device/start`
-- `POST /astrbot_plugin_openai_oauth/device/poll`
-- `POST /astrbot_plugin_openai_oauth/device/cancel`
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /astrbot_plugin_openai_oauth/providers/list` | List accounts, routing bindings, and gateway settings (`native_web_search`). |
+| `POST /astrbot_plugin_openai_oauth/providers/update` | Rename an account, toggle `enabled`, or switch `routing_mode` (`fixed` / `auto`). |
+| `POST /astrbot_plugin_openai_oauth/providers/delete` | Delete a device-code account (when not set as default or bound to any model). |
+| `POST /astrbot_plugin_openai_oauth/routing/update` | Set the default account or pin/unpin a model's account binding. |
+| `POST /astrbot_plugin_openai_oauth/settings/update` | Toggle gateway-wide native Codex web search (`native_web_search`). |
+| `POST /astrbot_plugin_openai_oauth/account/status` | Query sanitized account status for a source ID. |
+| `POST /astrbot_plugin_openai_oauth/account/usage` | Fetch live or cached quota windows for a source ID. |
+| `POST /astrbot_plugin_openai_oauth/device/start` | Start a new or reauthorization device-code login session. |
+| `POST /astrbot_plugin_openai_oauth/device/poll` | Poll the status of an owned device-code login session. |
+| `POST /astrbot_plugin_openai_oauth/device/cancel` | Cancel a pending device-code login session before saving begins. |
 
 ## Single AstrBot source and account selection
 
@@ -23,10 +24,10 @@ Endpoints:
 AstrBot stores a single provider source whose ID and type are both `OpenAI Subscribe`, marked with `oauth_gateway: true`. Account state lives inside that source in `data/cmd_config.json` (since AstrBot strips unknown top-level keys on startup):
 
 - `oauth_accounts`: independent account records (`Local Codex` and `device_oauth` accounts).
-- `oauth_routing`: holds `default_account_id` and a legacy `models` map (`model_id -> account_id`).
+- `oauth_routing`: holds `default_account_id`, `native_web_search` (boolean, defaults to `false`), and a legacy `models` map (`model_id -> account_id`).
 - Gateway `key` stays empty; per-request credentials resolve from the chosen account immediately before dispatch.
 
-Subscription models also expose `oauth_account_id` in AstrBot's model editor (`""` follows default; an account ID pins the model). When present, `oauth_account_id` overrides `oauth_routing.models`; the routing API reads both and keeps `oauth_account_id` synchronized on writes. Both the model-editor selector and default-account action are hidden when fewer than two accounts exist.
+Subscription models also expose `oauth_account_id` in AstrBot's model editor (`""` follows default; an account ID pins the model). When present, `oauth_account_id` overrides `oauth_routing.models`; the routing API reads both and keeps `oauth_account_id` synchronized on writes. The default-account badge is always shown in the plugin account list, while the "Set as default account" action in the settings menu and the model-editor selector are hidden when fewer than two accounts exist.
 
 Each device account's `key` is sealed at rest as an `enc:v1:` Fernet token using `credential.key` in the plugin data directory (or `OPENAI_OAUTH_CREDENTIAL_KEY_FILE`). Plaintext credentials from older versions are sealed once at startup.
 
@@ -42,14 +43,20 @@ The plugin guards `ProviderConfigService.upsert_provider_source` for `OpenAI Sub
 - Rejects renaming `OpenAI Subscribe`, changing its adapter type, saving stale pre-migration tabs, or adding extra subscription sources. Migration repairs references to gateways renamed by earlier versions.
 - Replaces cleanly without stacking on reload and unhooks on unload; non-subscription sources pass through untouched.
 
-### Routing API
+### Routing and gateway settings API
 
-`POST providers/list` returns `{ "providers": [...], "routing": {...} }` (keeping historical `providers` / `source_id` names for accounts):
+`POST providers/list` returns `{ "providers": [...], "routing": {...}, "settings": {...} }` (keeping historical `providers` / `source_id` names for accounts):
 
 ```json
 {
-  "default_account_id": "OpenAI Subscribe",
-  "models": [{"id": "my-model", "account_id": null}]
+  "providers": [...],
+  "routing": {
+    "default_account_id": "OpenAI Subscribe",
+    "models": [{"id": "my-model", "account_id": null}]
+  },
+  "settings": {
+    "native_web_search": false
+  }
 }
 ```
 
@@ -59,9 +66,13 @@ The plugin guards `ProviderConfigService.upsert_provider_source` for `OpenAI Sub
 - Pin model: `{"model_id": "<model-id>", "account_id": "<account-id>"}`.
 - Follow default: `{"model_id": "<model-id>", "account_id": null}`.
 
-Success returns HTTP 200 `{ "status": "success", "routing": {...} }`. Invalid payloads return HTTP 400 without changing config. Error responses always use `{ "status": "error", "message": "<code>" }` (translated by `pages/providers/strings.js`).
+`POST settings/update`:
 
-Selection changes take effect immediately on persistence without reloading AstrBot and are read dynamically on every request, without enabling disabled accounts or changing routing modes. An account cannot be deleted while set as default or bound to a model (`Local Codex` can never be deleted).
+- Toggle native web search: `{"native_web_search": true}` (must be a JSON boolean; returns `{ "status": "success", "settings": { "native_web_search": true } }`).
+
+Success returns HTTP 200. Invalid payloads return HTTP 400 without changing config. Error responses always use `{ "status": "error", "message": "<code>" }` (translated by `pages/providers/strings.js`).
+
+Selection and setting changes take effect immediately on persistence without reloading AstrBot and are read dynamically on every request, without enabling disabled accounts or changing routing modes. An account cannot be deleted while set as default or bound to a model (`Local Codex` can never be deleted).
 
 ## Enable / disable
 
