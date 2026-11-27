@@ -1,4 +1,5 @@
 {
+  "image_load_failed": "Image could not be loaded.",
   "metadata": {
     "display_name": "OpenAI Subscription Login",
     "short_desc": "Use your ChatGPT subscription in AstrBot without an API key.",

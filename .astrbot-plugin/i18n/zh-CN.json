@@ -1,4 +1,5 @@
 {
+  "image_load_failed": "图片加载失败。",
   "metadata": {
     "display_name": "OpenAI 订阅登录",
     "short_desc": "用 ChatGPT 订阅在 AstrBot 聊天，无需 API Key。",

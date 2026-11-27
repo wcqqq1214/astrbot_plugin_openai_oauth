@@ -185,9 +185,12 @@ class OpenAI_OAuth_Plugin(Star):
                 runner_timeout=runner_timeout,
             )
             async with asyncio.timeout(timeout):
-                with chatui_citations.image_generation_indicator(event):
+                async with chatui_citations.image_generation_indicator(event) as card:
                     image = await image_generation.generate(provider, account, prompt)
-                    await event.send(MessageChain(chain=[Image.fromBytes(image)]))
+                    if card is None:
+                        await event.send(MessageChain(chain=[Image.fromBytes(image)]))
+                    else:
+                        await card.deliver(image)
         except TimeoutError:
             return messages.text("image.timeout")
         except image_generation.ImageError as exc:

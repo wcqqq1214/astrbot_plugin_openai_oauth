@@ -12,3 +12,7 @@ tags:
   - openai
   - oauth
 astrbot_version: ">=4.27.1"
+views:
+  - name: image_progress
+    target: chat_message
+    title: GPT Image

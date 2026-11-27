@@ -13,8 +13,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).parent))
+from astrbot.core import db_helper
 from astrbot.core.platform.sources.webchat import webchat_event
 from astrbot.core.platform.sources.webchat.webchat_event import WebChatMessageEvent
+from astrbot.core.star.star import star_map
 from astrbot.dashboard.services.chat_service import ChatRunState, ChatService
 from login_test import plugin
 from PIL import Image
@@ -22,8 +24,24 @@ from PIL import Image
 bridge = plugin.chatui_citations
 
 
+@unittest.skipUnless(
+    hasattr(ChatService, "get_chat_view"), "Host lacks chat-message views"
+)
 class ImageIndicatorTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        from astrbot.core.message.interactive_ui import ViewSpec
+
+        await db_helper.initialize()
+        meta = star_map[plugin.__name__]
+        self.enterContext(
+            patch.multiple(
+                meta,
+                activated=True,
+                star_cls=object(),
+                module=plugin,
+                views=[ViewSpec(name="image_progress", target="chat_message")],
+            )
+        )
         self.addCleanup(bridge.install())
         queue = webchat_event.webchat_queue_mgr.get_or_create_back_queue("run")
         self.run = ChatRunState("run", "user", "session", "turn", "webchat", queue)
@@ -33,6 +51,10 @@ class ImageIndicatorTests(unittest.IsolatedAsyncioTestCase):
         self.service.chat_runs = {"run": self.run}
         self.service.chat_runs_by_session = {"session": {"run"}}
         self.service.running_convs = {}
+        self.service.attachments_dir = self.enterContext(tempfile.TemporaryDirectory())
+        self.service.create_attachment_from_file = AsyncMock(
+            return_value={"attachment_id": "result"}
+        )
         self.service.save_bot_message = AsyncMock(return_value=None)
         self.consumer = asyncio.create_task(self.service._consume_chat_run(self.run))
         await self.run.back_queue.put(
@@ -86,17 +108,14 @@ class ImageIndicatorTests(unittest.IsolatedAsyncioTestCase):
                         try:
                             shown = await self.next_frame("run_snapshot")
                             parts = shown["data"]["content"]["message"]
-                            self.assertEqual(parts[-1]["filename"], "生成中")
-                            self.assertTrue(
-                                parts[-1]["embedded_url"].startswith(
-                                    "data:image/svg+xml;base64,"
-                                )
+                            self.assertEqual(
+                                (parts[-1]["type"], parts[-1]["text"]), ("view", "0%")
                             )
                             self.assertEqual(parts[0]["text"], "Ready")
                             if outcome == "success":
                                 generation.set_result(b"image")
                                 await task
-                                self.event.send.assert_awaited_once()
+                                self.service.create_attachment_from_file.assert_awaited()
                             elif outcome == "failure":
                                 generation.set_exception(
                                     plugin.image_generation.ImageError("image.failed")
@@ -121,15 +140,18 @@ class ImageIndicatorTests(unittest.IsolatedAsyncioTestCase):
                             task.cancel()
                             await asyncio.gather(task, return_exceptions=True)
                     hidden = await self.next_frame("run_snapshot")
-                    self.assertEqual(
-                        hidden["data"]["content"]["message"],
-                        [{"type": "plain", "text": "Ready"}],
+                    final = hidden["data"]["content"]["message"]
+                    self.assertFalse(
+                        any(
+                            p.get("text") == "0%" and p["type"] == "view" for p in final
+                        )
                     )
+                    self.assertEqual(final[0]["text"], "Ready")
 
     async def test_reconnect_concurrent_images_and_history(self):
-        with bridge.image_generation_indicator(self.event):
+        async with bridge.image_generation_indicator(self.event):
             await self.next_frame("run_snapshot")
-            with bridge.image_generation_indicator(self.event):
+            async with bridge.image_generation_indicator(self.event):
                 await self.run.back_queue.put(
                     {"type": "plain", "data": "Updated", "streaming": False}
                 )
@@ -140,53 +162,79 @@ class ImageIndicatorTests(unittest.IsolatedAsyncioTestCase):
                 try:
                     frame = json.loads((await anext(resumed)).removeprefix("data: "))
                     self.assertEqual(
-                        frame["data"]["content"]["message"][-1]["filename"], "生成中"
+                        frame["data"]["content"]["message"][-1]["text"], "0%"
                     )
                 finally:
                     await resumed.aclose()
-            self.assertEqual(self.run.message_parts[-1]["filename"], "生成中")
+            self.assertEqual(self.run.message_parts[-1]["text"], "0%")
             self.assertNotIn(
-                "data:image/svg", str(self.service.save_bot_message.await_args_list)
+                "image_progress", str(self.service.save_bot_message.await_args_list)
             )
             self.service.save_bot_message.assert_awaited()
-        self.assertNotIn("embedded_url", str(self.run.message_parts))
-        with bridge.image_generation_indicator(
+        self.assertNotIn("image_progress", str(self.run.message_parts))
+        async with bridge.image_generation_indicator(
             Mock(message_obj=self.event.message_obj)
         ):
-            self.assertNotIn("embedded_url", str(self.run.message_parts))
+            self.assertNotIn("image_progress", str(self.run.message_parts))
 
     async def test_draw_delivers_only_the_finished_png(self):
-        directory = self.enterContext(tempfile.TemporaryDirectory())
-        self.enterContext(patch.object(webchat_event, "attachments_dir", directory))
+        directory = self.service.attachments_dir
         png = BytesIO()
         Image.new("RGB", (2, 2), "blue").save(png, format="PNG")
         data = png.getvalue()
-
-        async def send(chain):
-            await WebChatMessageEvent._send("run", chain, "session")
-
-        self.event.send.side_effect = send
-        self.service.create_attachment_from_file = AsyncMock(
-            return_value={
-                "type": "image",
-                "attachment_id": "result",
-                "filename": "result.png",
-            }
+        from astrbot.core.platform_message_history_mgr import (
+            PlatformMessageHistoryManager,
         )
+        from astrbot.dashboard.services.plugin_page_service import (
+            PluginPageService,
+            PluginPageServiceError,
+        )
+
+        await db_helper.create_platform_session("user", session_id="session")
+        self.service.db = db_helper
+        self.service.platform_history_mgr = PlatformMessageHistoryManager(db_helper)
+        self.service.webchat_img_dir = directory
+        del self.service.save_bot_message, self.service.create_attachment_from_file
+        self.service.core_lifecycle = SimpleNamespace(
+            plugin_manager=SimpleNamespace(context=self.star.context)
+        )
+        generation = asyncio.get_running_loop().create_future()
         with patch.object(
-            plugin.image_generation, "generate", AsyncMock(return_value=data)
+            plugin.image_generation, "generate", Mock(return_value=generation)
         ):
-            await self.star.draw(self.event, "A cat")
-        await self.next_frame("image")
-        saved = self.service.save_bot_message.await_args.args[1]
-        self.assertEqual(
-            [part["attachment_id"] for part in saved if part["type"] == "image"],
-            ["result"],
+            drawing = asyncio.create_task(self.star.draw(self.event, "A cat"))
+            shown = await self.next_frame("run_snapshot")
+            view_id = shown["data"]["content"]["message"][-1]["id"]
+            _, _, spec, entry = await self.service.get_chat_view("user", view_id)
+            self.assertTrue(entry.is_file())
+            pages = object.__new__(PluginPageService)
+            args = {
+                "plugin_name": "astrbot_plugin_openai_oauth",
+                "view_name": spec.name,
+                "asset_path": view_id + ".png",
+            }
+            with self.assertRaises(PluginPageServiceError):
+                await pages.serve_page_content(username="other", **args)
+            download = asyncio.create_task(
+                pages.serve_page_content(username="user", **args)
+            )
+            generation.set_result(data)
+            await drawing
+            self.assertEqual((await download).content, data)
+        await self.next_frame("run_snapshot")
+        await self.next_frame("message_saved")
+        self.service.chat_runs.pop("run")
+        record, _, _, _ = await self.service.get_chat_view("user", view_id)
+        saved = await db_helper.get_platform_message_history_by_id(
+            int(record["message_id"])
         )
-        self.assertNotIn("embedded_url", str(saved))
-        files = list(Path(directory).iterdir())
-        self.assertEqual(len(files), 1)
-        self.assertEqual(files[0].read_bytes(), data)
+        result = saved.content["message"][-1]
+        self.assertEqual(result["id"], view_id)
+        self.assertTrue(await db_helper.get_attachment_by_id(result["attachment_id"]))
+        self.assertEqual(
+            (await pages.serve_page_content(username="user", **args)).content, data
+        )
+        self.assertEqual([p.read_bytes() for p in Path(directory).iterdir()], [data])
 
 
 if __name__ == "__main__":

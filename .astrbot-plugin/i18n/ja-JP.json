@@ -1,4 +1,5 @@
 {
+  "image_load_failed": "画像を読み込めませんでした。",
   "metadata": {
     "display_name": "OpenAI サブスクリプションログイン",
     "short_desc": "API キーなしで ChatGPT サブスクリプションを使って AstrBot とチャット。",

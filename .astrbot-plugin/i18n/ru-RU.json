@@ -1,4 +1,5 @@
 {
+  "image_load_failed": "Не удалось загрузить изображение.",
   "metadata": {
     "display_name": "Вход по подписке OpenAI",
     "short_desc": "Общайтесь в AstrBot через подписку ChatGPT без API-ключа.",

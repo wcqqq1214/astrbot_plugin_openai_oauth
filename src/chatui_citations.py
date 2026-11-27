@@ -2,32 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
-from base64 import b64encode
 from bisect import bisect_left
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable, Iterator
-from contextlib import aclosing, contextmanager
+from contextlib import aclosing, asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, fields
 from functools import wraps
 from inspect import isasyncgenfunction, iscoroutinefunction, signature
 from itertools import accumulate
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 from astrbot.api import logger
-
-_IMAGE_INDICATOR = {
-    "type": "image",
-    "filename": "生成中",
-    "embedded_url": "data:image/svg+xml;base64,"
-    + b64encode(Path(__file__).with_name("image_loading.svg").read_bytes()).decode(
-        "ascii"
-    ),
-}
 
 
 def _display_parts(parts: list[dict], refs: Iterable[dict]) -> list[dict]:
@@ -166,7 +156,7 @@ class _CitationRun:
     rendered_parts: list[dict] | None = None
     visible_marks: list[tuple[int, str]] = field(default_factory=list)
     hidden_chars: int = 0
-    pending_images: int = 0
+    image_cards: dict[str, Any] = field(default_factory=dict)
 
     def __getattr__(self, name):
         return getattr(self.service, name)
@@ -212,7 +202,7 @@ class _CitationRun:
     def refresh(self) -> bool:
         if self.run.message_parts is not self.rendered_parts:
             self.raw_parts = [
-                p for p in self.run.message_parts if p is not _IMAGE_INDICATOR
+                p for p in self.run.message_parts if p.get("id") not in self.image_cards
             ]
         parts, marks = self.render(self.raw_parts)
         self.rendered_parts = _display_parts(parts, self.sources.values())
@@ -232,17 +222,22 @@ class _CitationRun:
     def sync_image_indicator(self) -> None:
         # AstrBot replaces the resumable snapshot after each frame. Its separate
         # reply accumulator handles history and never receives this image.
-        if self.pending_images and not any(
-            part is _IMAGE_INDICATOR for part in self.run.message_parts
-        ):
-            self.run.message_parts.append(_IMAGE_INDICATOR)
+        present = {part.get("id") for part in self.run.message_parts}
+        self.run.message_parts.extend(
+            card.part for key, card in self.image_cards.items() if key not in present
+        )
 
-    def hide_image_indicator(self) -> None:
-        self.pending_images = 0
+    def remove_card(self, card) -> None:
         self.run.message_parts[:] = [
-            p for p in self.run.message_parts if p is not _IMAGE_INDICATOR
+            p for p in self.run.message_parts if p.get("id") != card.id
         ]
+        self.image_cards.pop(card.id, None)
+        card.ready.set()
         self.publish_image_snapshot()
+
+    def close_cards(self) -> None:
+        for card in list(self.image_cards.values()):
+            self.remove_card(card)
 
     def publish_image_snapshot(self) -> None:
         try:
@@ -262,9 +257,19 @@ class _CitationRun:
                 break
 
     def _publish_chat_run(self, run, payload):
-        if self.pending_images:
+        if self.image_cards:
+            if payload["type"] == "view":
+                card = self.image_cards.pop(payload["data"]["id"], None)
+                if card is not None:
+                    # Replace the live placeholder with the persisted card without
+                    # appending a second iframe or interrupting its download.
+                    self.sync_image_indicator()
+                    if self.sources:
+                        self.refresh()
+                    self.publish_image_snapshot()
+                    return
             if payload["type"] == "end" or run.status != "running":
-                self.hide_image_indicator()
+                self.close_cards()
             elif not self.sources:
                 self.sync_image_indicator()
         changed = self.sources and self.refresh()
@@ -298,10 +303,10 @@ _producer: ContextVar[_CitationRun | None] = ContextVar(
 _active_runs: dict[str, _CitationRun] = {}
 
 
-@contextmanager
-def image_generation_indicator(event: Any) -> Iterator[None]:
+@asynccontextmanager
+async def image_generation_indicator(event: Any):
     if not _active_runs:
-        yield
+        yield None
         return
     from astrbot.core.platform.sources.webchat.webchat_event import WebChatMessageEvent
 
@@ -310,20 +315,25 @@ def image_generation_indicator(event: Any) -> Iterator[None]:
         if isinstance(event, WebChatMessageEvent)
         else None
     )
-    if state is None or state.run.status != "running":
-        yield
+    if (
+        state is None
+        or state.run.status != "running"
+        or not hasattr(state.service, "get_chat_view")
+    ):
+        yield None
         return
-    state.pending_images += 1
+    from . import chatui_images
+
+    card = await chatui_images.create(state)
+    state.image_cards[card.id] = card
+    state.sync_image_indicator()
+    state.publish_image_snapshot()
     try:
-        if state.pending_images == 1:
-            state.sync_image_indicator()
-            state.publish_image_snapshot()
-        yield
+        yield card
     finally:
-        if state.pending_images == 1:
-            state.hide_image_indicator()
-        elif state.pending_images:
-            state.pending_images -= 1
+        if not card.submitted:
+            state.remove_card(card)
+            await asyncio.to_thread(chatui_images.discard_unbound, card.id)
 
 
 def begin_response() -> dict[tuple[int, int], CitationText] | None:
@@ -439,8 +449,7 @@ def install() -> Callable[[], None]:
             return await consume(state, run)
         finally:
             active_runs.pop(run.run_id, None)
-            if state.pending_images:
-                state.hide_image_indicator()
+            state.close_cards()
 
     @wraps(stream)
     async def stream_response(self, *args, **kwargs):
@@ -495,10 +504,19 @@ def install() -> Callable[[], None]:
         (runner, stream_name, stream_response, stream),
     )
 
+    # Older supported AstrBot versions do not render chat-message views.
+    if hasattr(service, "get_chat_view"):
+        from . import chatui_images
+
+        remove_views = chatui_images.install(active_runs)
+    else:
+        remove_views = None
+
     def remove() -> None:
+        if remove_views:
+            remove_views()
         for state in active_runs.values():
-            if state.pending_images:
-                state.hide_image_indicator()
+            state.close_cards()
         active_runs.clear()
         for owner, name, installed, original in hooks:
             if getattr(owner, name) is installed:
