@@ -249,7 +249,10 @@ class CodexStreamMixin:
                     if not isinstance(raw_url, str):
                         continue
                     url = raw_url.strip()
-                    parsed = urlsplit(url)
+                    try:
+                        parsed = urlsplit(url)
+                    except ValueError:
+                        continue
                     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                         continue
                     if url in seen_urls:

@@ -379,6 +379,13 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
                                         },
                                         {
                                             "type": "url_citation",
+                                            "title": "Invalid host",
+                                            "url": "https://[invalid",
+                                            "start_index": 0,
+                                            "end_index": 8,
+                                        },
+                                        {
+                                            "type": "url_citation",
                                             "title": "Missing URL",
                                             "url": "",
                                             "start_index": 0,
