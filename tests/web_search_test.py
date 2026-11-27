@@ -470,7 +470,7 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
             "url": url,
             "title": "Article",
             "start_index": 0,
-            "end_index": len(sentence),
+            "end_index": len(sentence) - 1,
         }
         run = chat_service.ChatRunState(
             "run", "user", "session", "turn", "webchat", asyncio.Queue()
@@ -489,7 +489,7 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         async def events():
             yield {
                 "type": "response.output_text.delta",
-                "delta": sentence,
+                "delta": sentence[:-1],
                 "output_index": 1,
                 "content_index": 0,
             }
@@ -505,8 +505,21 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
             _, snapshot = subscriber.get_nowait()
             self.assertEqual(snapshot["data"]["content"]["message"], prelude)
             self.assertTrue(subscriber.empty())
+            run.message_parts = [*prelude, {"type": "plain", "text": sentence[:-1]}]
+            state._publish_chat_run(run, {"type": "plain", "data": sentence[:-1]})
+            self.assertEqual(subscriber.get_nowait()[1]["type"], "plain")
+            _, snapshot = subscriber.get_nowait()
+            self.assertEqual(
+                snapshot["data"]["content"]["message"][-1]["text"], visible + "(" + tag
+            )
+            yield {
+                "type": "response.output_text.delta",
+                "delta": ")",
+                "output_index": 1,
+                "content_index": 0,
+            }
             run.message_parts = [*prelude, {"type": "plain", "text": sentence}]
-            state._publish_chat_run(run, {"type": "plain", "data": sentence})
+            state._publish_chat_run(run, {"type": "plain", "data": ")"})
             self.assertEqual(subscriber.get_nowait()[1]["type"], "plain")
             _, snapshot = subscriber.get_nowait()
             self.assertEqual(
@@ -563,7 +576,7 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
             content={"type": "bot", "message": saved[1], "refs": saved[3]},
         )
         self.assertIn(
-            f"([example.com]({url})){tag}", record.content["message"][-1]["text"]
+            f"([example.com]({url}){tag})", record.content["message"][-1]["text"]
         )
         uninstall = bridge.install()
         try:
@@ -577,6 +590,24 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
             "".join(item.completion_text for item in output if item.is_chunk), body
         )
         self.assertEqual(output[-1].completion_text, body)
+
+    def test_only_adjacent_links_to_the_cited_url_are_collapsed(self):
+        bridge = runtime.chatui_citations
+        url = "https://example.com/news?q=1#today"
+        refs = [{"index": "codex-1", "url": url}]
+        tag = "<ref>codex-1</ref>"
+        for fragment, expected in (
+            (f"（[{url}]({url}){tag}）", tag),
+            (f"(<{url}>){tag}", tag),
+            (f"{tag} ({url})", tag),
+            (f"[原文]({url}){tag}", f"[原文]({url}){tag}"),
+            (f"[example.com]({url}2){tag}", f"[example.com]({url}2){tag}"),
+        ):
+            with self.subTest(fragment=fragment):
+                shown = bridge._display_parts(
+                    [{"type": "plain", "text": fragment}], refs
+                )
+                self.assertEqual(shown[0]["text"], expected)
 
     async def test_reload_during_active_chat_restores_hooks(self):
         from astrbot.core.agent.runners.tool_loop_agent_runner import (

@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 
 def _display_parts(parts: list[dict], refs: Iterable[dict]) -> list[dict]:
-    """Collapse a domain-only citation link directly followed by its native card."""
+    """Hide a URL-only link when its adjacent native card opens the same URL."""
     rendered = list(parts)
     for ref in refs:
         index = str(ref.get("index", ""))
@@ -36,16 +36,35 @@ def _display_parts(parts: list[dict], refs: Iterable[dict]) -> list[dict]:
         label = re.escape(host.removeprefix("www."))
         if host.startswith("www."):
             label = rf"(?:www\.)?{label}"
-        link = rf"\[{label}\]\({re.escape(url)}\)"
-        # Multiple cards may share a citation offset. Keep their order intact.
-        duplicate = re.compile(
-            rf"(?<![!\\])(?:\({link}\)|（{link}）|{link})"
-            rf"(?=[ \t]*(?:<ref>codex-[0-9]+</ref>)*<ref>{index}</ref>)"
+        target = re.escape(url)
+        # Bare URLs need their own boundaries: a URL may be part of another
+        # destination, and a descriptive Markdown link ends in its URL too.
+        bare = rf"(?<![^\s(（>])(?<!\]\(){target}(?=$|[\s)）。，！？]|<ref>)"
+        link = rf"(?:\[(?:(?i:{label})|{target})\]\((?:{target}|<{target}>)\)|<{target}>|{bare})"
+        wrapped = (
+            rf"(?<![!\\\]])(?:\([ \t]*{link}[ \t]*\)|（[ \t]*{link}[ \t]*）|{link})"
         )
+        other = r"<ref>codex-[0-9]+</ref>"
+        cards = rf"(?:{other}[ \t]*)*<ref>{index}</ref>(?:[ \t]*{other})*"
+        # The annotation may end on either side of the closing parenthesis.
+        duplicate = re.compile(
+            rf"(?<![!\\\]])(?P<opening>[(（])?"
+            rf"(?:{wrapped}[ \t]*(?P<after>{cards})|(?P<before>{cards})[ \t]*{wrapped})"
+            rf"(?P<closing>[)）])?"
+        )
+
+        def keep_cards(match: re.Match) -> str:
+            opening = match["opening"] or ""
+            closing = match["closing"] or ""
+            tags = match["after"] or match["before"]
+            if opening + closing in ("()", "（）"):
+                return tags
+            return opening + tags + closing
+
         for i, part in enumerate(rendered):
             if part.get("type") == "plain":
                 text = part["text"]
-                compact = duplicate.sub("", text)
+                compact = duplicate.sub(keep_cards, text)
                 if compact != text:
                     rendered[i] = {**part, "text": compact}
     return rendered
@@ -73,6 +92,7 @@ class _CitationRun:
     raw_parts: list[dict] = field(default_factory=list)
     rendered_parts: list[dict] | None = None
     visible_marks: list[tuple[int, str]] = field(default_factory=list)
+    hidden_chars: int = 0
 
     def __getattr__(self, name):
         return getattr(self.service, name)
@@ -121,7 +141,14 @@ class _CitationRun:
         parts, marks = self.render(self.raw_parts)
         self.rendered_parts = _display_parts(parts, self.sources.values())
         self.run.message_parts = self.rendered_parts
-        changed = marks != self.visible_marks
+        # A later text frame can finish a duplicate link after an existing card.
+        hidden = sum(
+            len(raw["text"]) - len(shown["text"])
+            for raw, shown in zip(parts, self.rendered_parts)
+            if raw is not shown
+        )
+        changed = marks != self.visible_marks or hidden != self.hidden_chars
+        self.hidden_chars = hidden
         self.visible_marks = marks
         return changed
 
