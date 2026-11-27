@@ -3,13 +3,79 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable
+import re
+from bisect import bisect_left
+from collections import defaultdict
+from collections.abc import Awaitable, Callable, Iterable
 from contextlib import aclosing
 from contextvars import ContextVar
 from dataclasses import dataclass, field, fields
 from functools import wraps
 from inspect import isasyncgenfunction, iscoroutinefunction, signature
+from itertools import accumulate
 from typing import Any
+from urllib.parse import urlsplit
+
+
+def _display_parts(parts: list[dict], refs: Iterable[dict]) -> list[dict]:
+    """Hide a URL-only link when its adjacent native card opens the same URL."""
+    rendered = list(parts)
+    for ref in refs:
+        index = str(ref.get("index", ""))
+        if not re.fullmatch(r"codex-[0-9]+", index):
+            continue
+        url = ref.get("url")
+        if not isinstance(url, str):
+            continue
+        try:
+            host = urlsplit(url).hostname
+        except ValueError:
+            continue
+        if not host:
+            continue
+        label = re.escape(host.removeprefix("www."))
+        if host.startswith("www."):
+            label = rf"(?:www\.)?{label}"
+        target = re.escape(url)
+        # Bare URLs need their own boundaries: a URL may be part of another
+        # destination, and a descriptive Markdown link ends in its URL too.
+        bare = rf"(?<![^\s(（>])(?<!\]\(){target}(?=$|[\s)）。，！？]|<ref>)"
+        link = rf"(?:\[(?:(?i:{label})|{target})\]\((?:{target}|<{target}>)\)|<{target}>|{bare})"
+        wrapped = (
+            rf"(?<![!\\\]])(?:\([ \t]*{link}[ \t]*\)|（[ \t]*{link}[ \t]*）|{link})"
+        )
+        other = r"<ref>codex-[0-9]+</ref>"
+        cards = rf"(?:{other}[ \t]*)*<ref>{index}</ref>(?:[ \t]*{other})*"
+        # The annotation may end on either side of the closing parenthesis.
+        duplicate = re.compile(
+            rf"(?<![!\\\]])(?P<opening>[(（])?"
+            rf"(?:{wrapped}[ \t]*(?P<after>{cards})|(?P<before>{cards})[ \t]*{wrapped})"
+            rf"(?P<closing>[)）])?"
+        )
+
+        def keep_cards(match: re.Match) -> str:
+            opening = match["opening"] or ""
+            closing = match["closing"] or ""
+            tags = match["after"] or match["before"]
+            if opening + closing in ("()", "（）"):
+                return tags
+            return opening + tags + closing
+
+        for i, part in enumerate(rendered):
+            if part.get("type") == "plain":
+                text = part["text"]
+                compact = duplicate.sub(keep_cards, text)
+                if compact != text:
+                    rendered[i] = {**part, "text": compact}
+    return rendered
+
+
+@dataclass
+class CitationText:
+    """OpenAI offsets are local to one output_text content part."""
+
+    text: str = ""
+    marks: dict[tuple[int, str], None] = field(default_factory=dict)
 
 
 @dataclass
@@ -20,19 +86,71 @@ class _CitationRun:
     run: Any
     sources: dict[str, dict[str, str]] = field(default_factory=dict)
 
-    # This part belongs to ChatUI. It never enters the provider's Markdown stream.
-    cards: dict[str, str] = field(default_factory=lambda: {"type": "plain", "text": ""})
+    responses: list[tuple[int, dict[tuple[int, int], CitationText]]] = field(
+        default_factory=list
+    )
+    raw_parts: list[dict] = field(default_factory=list)
+    rendered_parts: list[dict] | None = None
+    visible_marks: list[tuple[int, str]] = field(default_factory=list)
+    hidden_chars: int = 0
 
     def __getattr__(self, name):
         return getattr(self.service, name)
 
-    def insert_cards(self, parts: list[dict]) -> None:
-        # ChatUI folds everything through the last reasoning or tool block.
-        start = len(parts)
-        while start and parts[start - 1]["type"] not in ("think", "tool_call"):
-            start -= 1
-        if start == len(parts) or parts[start] is not self.cards:
-            parts.insert(start, self.cards)
+    def render(self, parts: list[dict]) -> tuple[list[dict], list[tuple[int, str]]]:
+        # The host may split one output_text across several plain message parts.
+        plain = [
+            (i, part["text"]) for i, part in enumerate(parts) if part["type"] == "plain"
+        ]
+        body = "".join(text for _, text in plain)
+        boundaries = list(accumulate(len(text) for _, text in plain))
+        cursor = 0
+        marks = []
+        for response_start, response in self.responses:
+            cursor = max(cursor, response_start)
+            for key in sorted(response):
+                content = response[key]
+                start = body.find(content.text, cursor)
+                if start < 0:
+                    # Text deltas can be queued behind their citation event.
+                    if not content.text.startswith(body[cursor:]):
+                        continue
+                    start = cursor
+                for end, ref in content.marks:
+                    if end <= len(content.text) and start + end <= len(body):
+                        marks.append((start + end, ref))
+                cursor = start + len(content.text)
+
+        rendered = list(parts)
+        # Insert from right to left to preserve the original character offsets.
+        marks.sort(key=lambda mark: mark[0])
+        for end, ref in reversed(marks):
+            part = bisect_left(boundaries, end)
+            i = plain[part][0]
+            pos = end - (boundaries[part - 1] if part else 0)
+            text = rendered[i]["text"]
+            rendered[i] = {
+                **parts[i],
+                "text": f"{text[:pos]}<ref>{ref}</ref>{text[pos:]}",
+            }
+        return rendered, marks
+
+    def refresh(self) -> bool:
+        if self.run.message_parts is not self.rendered_parts:
+            self.raw_parts = self.run.message_parts
+        parts, marks = self.render(self.raw_parts)
+        self.rendered_parts = _display_parts(parts, self.sources.values())
+        self.run.message_parts = self.rendered_parts
+        # A later text frame can finish a duplicate link after an existing card.
+        hidden = sum(
+            len(raw["text"]) - len(shown["text"])
+            for raw, shown in zip(parts, self.rendered_parts)
+            if raw is not shown
+        )
+        changed = marks != self.visible_marks or hidden != self.hidden_chars
+        self.hidden_chars = hidden
+        self.visible_marks = marks
+        return changed
 
     def publish_snapshot(self) -> None:
         run = self.run
@@ -44,18 +162,10 @@ class _CitationRun:
                 break
 
     def _publish_chat_run(self, run, payload):
-        # The host rebuilds message_parts from its accumulator before each frame.
-        if self.sources:
-            self.insert_cards(run.message_parts)
-            if payload.get("chain_type") in (
-                "reasoning",
-                "tool_call",
-                "tool_call_result",
-            ):
-                # An appended work delta would move the cards into the collapsed block.
-                self.publish_snapshot()
-                return
+        changed = self.sources and self.refresh()
         self.service._publish_chat_run(run, payload)
+        if changed:
+            self.publish_snapshot()
 
     async def save_bot_message(
         self, webchat_conv_id, message_parts, agent_stats, refs, *args, **kwargs
@@ -63,8 +173,7 @@ class _CitationRun:
         if self.sources:
             refs = self.merge_refs(refs)
             self.run.refs = refs
-            message_parts = list(message_parts)
-            self.insert_cards(message_parts)
+            message_parts, _ = self.render(message_parts)
         return await self.service.save_bot_message(
             webchat_conv_id, message_parts, agent_stats, refs, *args, **kwargs
         )
@@ -82,33 +191,44 @@ _producer: ContextVar[_CitationRun | None] = ContextVar(
 )
 
 
-def publish(citations: dict[str, str]) -> None:
-    """Expose new citations in a separate native ChatUI message part."""
+def begin_response() -> dict[tuple[int, int], CitationText] | None:
     state = _producer.get()
-    if state is None or not citations:
-        return
+    if state is None:
+        return None
+    response: dict[tuple[int, int], CitationText] = defaultdict(CitationText)
+    parts = (
+        state.raw_parts
+        if state.run.message_parts is state.rendered_parts
+        else state.run.message_parts
+    )
+    start = sum(len(part["text"]) for part in parts if part["type"] == "plain")
+    state.responses.append((start, response))
+    return response
 
-    run = state.run
-    if run.status != "running":
+
+def publish(
+    content: CitationText, citations: list[tuple[str, str, int | None]]
+) -> None:
+    state = _producer.get()
+    if state is None or state.run.status != "running":
         return
-    added = False
-    for url, title in citations.items():
+    changed = False
+    for url, title, end in citations:
         if url not in state.sources:
             state.sources[url] = {
                 "index": f"codex-{len(state.sources) + 1}",
                 "url": url,
                 "title": title,
             }
-            added = True
-    if added:
-        state.cards["text"] = (
-            " ".join(
-                f"<ref>{source['index']}</ref>" for source in state.sources.values()
-            )
-            + "\n\n"
-        )
-        run.refs = state.merge_refs(run.refs)
-        state.insert_cards(run.message_parts)
+            changed = True
+        if end is not None:
+            key = (end, state.sources[url]["index"])
+            if key not in content.marks:
+                content.marks[key] = None
+                changed = True
+    if changed:
+        state.run.refs = state.merge_refs(state.run.refs)
+        state.refresh()
         state.publish_snapshot()
 
 
@@ -202,7 +322,20 @@ def install() -> Callable[[], None]:
                     _producer.reset(token)
                 yield response
 
+    serialize_history = chat_service.serialize_history_entry
+
+    @wraps(serialize_history)
+    def serialize_entry(history):
+        entry = serialize_history(history)
+        content = entry["content"]
+        if content.get("type") == "bot" and content.get("refs"):
+            content["message"] = _display_parts(
+                content["message"], content["refs"].get("used", [])
+            )
+        return entry
+
     hooks = (
+        (chat_service, "serialize_history_entry", serialize_entry, serialize_history),
         (service, "_consume_chat_run", consume_run, consume),
         (runner, stream_name, stream_response, stream),
     )
