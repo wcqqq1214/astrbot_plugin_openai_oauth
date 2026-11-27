@@ -359,23 +359,6 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
             [item.completion_text for item in sdk_output],
         )
 
-        async def stream_with_completion_check():
-            for event in sdk_events[:-1]:
-                yield event
-            publish.assert_called_once_with(
-                {
-                    "https://example.com/1": "First Title",
-                    "https://example.org/2": "https://example.org/2",
-                }
-            )
-            yield sdk_events[-1]
-
-        with mock.patch.object(runtime.chatui_citations, "publish") as publish:
-            async for _ in provider._consume_stream(
-                stream_with_completion_check(), None
-            ):
-                pass
-
     async def test_citations_from_completed_output_and_edge_cases(self):
         # Completed response.output directly carries web_search_call, message, and edge annotations
         events = [
@@ -474,78 +457,106 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plain_output[-1].completion_text, "Plain.")
         self.assertNotIn("来源：", plain_output[-1].completion_text)
 
-    async def test_annotation_delta_precedes_final_response(self):
+    async def test_inline_citations_in_live_and_saved_chat(self):
+        sentence = "🔎第一条。"
+        second = sentence + "更多。"
         annotation = {
             "type": "url_citation",
             "url": "https://example.com/article",
             "title": "Article",
             "start_index": 0,
-            "end_index": 6,
+            "end_index": len(sentence),
         }
-        annotation_event = {
-            "type": "response.output_text.annotation.added",
-            "annotation": annotation,
-            "item_id": "message-1",
-            "annotation_index": 0,
-            "content_index": 0,
-            "output_index": 0,
-            "sequence_number": 2,
-        }
-        answer = "Answer. [Second](https://example.org/second)"
-        events = [
-            {
-                "type": "response.output_text.delta",
-                "delta": "Answer. [Second](https://exa",
-            },
-            annotation_event,
-            annotation_event,
-            {"type": "response.output_text.delta", "delta": "mple.org/second)"},
-            DEFAULT_SUCCESS[-1],
-        ]
         run = chat_service.ChatRunState(
             "run", "user", "session", "turn", "webchat", asyncio.Queue()
         )
-        parts = [
-            {"type": "think", "think": "Checking the source."},
-            {"type": "plain", "text": answer},
-        ]
-        run.message_parts = list(parts)
+        work = {"type": "think", "think": "Checking the source."}
+        prelude = [{"type": "plain", "text": sentence}, work]
+        run.message_parts = prelude
         service = object.__new__(chat_service.ChatService)
         service.chat_runs = {run.run_id: run}
         subscriber = asyncio.Queue()
         run.subscribers.add(subscriber)
         bridge = runtime.chatui_citations
         state = bridge._CitationRun(service, run)
+        tag = "<ref>codex-1</ref>"
+
+        async def events():
+            yield {
+                "type": "response.output_text.delta",
+                "delta": sentence,
+                "output_index": 1,
+                "content_index": 0,
+            }
+            event = {
+                "type": "response.output_text.annotation.added",
+                "annotation": annotation,
+                "output_index": 1,
+                "content_index": 0,
+            }
+            yield event
+            yield event
+            # Annotation arrived before WebChat consumed the text frame.
+            _, snapshot = subscriber.get_nowait()
+            self.assertEqual(snapshot["data"]["content"]["message"], prelude)
+            self.assertTrue(subscriber.empty())
+            run.message_parts = [*prelude, {"type": "plain", "text": sentence}]
+            state._publish_chat_run(run, {"type": "plain", "data": sentence})
+            self.assertEqual(subscriber.get_nowait()[1]["type"], "plain")
+            _, snapshot = subscriber.get_nowait()
+            self.assertEqual(
+                snapshot["data"]["content"]["message"][-1]["text"], sentence + tag
+            )
+
+            yield {
+                "type": "response.output_text.delta",
+                "delta": second,
+                "output_index": 1,
+                "content_index": 1,
+            }
+            item = {
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [
+                    {"type": "output_text", "text": text, "annotations": [annotation]}
+                    for text in (sentence, second)
+                ],
+            }
+            yield {"type": "response.output_item.done", "item": item, "output_index": 1}
+            yield DEFAULT_SUCCESS[-1]
+
         token = bridge._producer.set(state)
         try:
             _, output = await self._run_query(
-                _new_provider(native_web_search=True), events
+                _new_provider(native_web_search=True), events()
             )
         finally:
             bridge._producer.reset(token)
-        _, snapshot = subscriber.get_nowait()
-        self.assertTrue(subscriber.empty())
-        content = snapshot["data"]["content"]
-        self.assertEqual(content["refs"]["used"][0]["url"], annotation["url"])
-        cards = {"type": "plain", "text": "<ref>codex-1</ref>\n\n"}
-        self.assertEqual(content["message"], [parts[0], cards, parts[1]])
-        later_work = {"type": "think", "think": "Checking another result."}
-        run.message_parts = [*parts, later_work]
-        state._publish_chat_run(run, {"type": "plain", "chain_type": "reasoning"})
-        _, update = subscriber.get_nowait()
+
+        body = sentence + second
+        raw = [*prelude, {"type": "plain", "text": body}]
+        run.message_parts = raw
+        state._publish_chat_run(run, {"type": "plain", "data": second})
+        expected = [
+            *prelude,
+            {"type": "plain", "text": sentence + tag + sentence + tag + "更多。"},
+        ]
+        snapshot = service.get_active_chat_runs("user", "session")[0]["content"]
+        self.assertEqual(snapshot["message"], expected)
         self.assertEqual(
-            update["data"]["content"]["message"], [*parts, later_work, cards]
+            snapshot["refs"]["used"],
+            [{"index": "codex-1", "title": "Article", "url": annotation["url"]}],
         )
         service.save_bot_message = mock.AsyncMock()
-        await state.save_bot_message("session", parts, {}, {})
+        await state.save_bot_message("session", raw, {}, {})
+        saved = service.save_bot_message.await_args.args
+        self.assertEqual((saved[1], saved[3]), (expected, snapshot["refs"]))
         self.assertEqual(
-            service.save_bot_message.await_args.args[1], [parts[0], cards, parts[1]]
+            "".join(item.completion_text for item in output if item.is_chunk), body
         )
-        expected = answer + "\n\n来源：\n1. [Article](https://example.com/article)"
-        self.assertEqual(
-            "".join(item.completion_text for item in output if item.is_chunk), expected
-        )
-        self.assertEqual(output[-1].completion_text, expected)
+        self.assertEqual(output[-1].completion_text, body)
 
     async def test_reload_during_active_chat_restores_hooks(self):
         from astrbot.core.agent.runners.tool_loop_agent_runner import (

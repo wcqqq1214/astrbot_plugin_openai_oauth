@@ -65,6 +65,28 @@ class CodexStreamMixin:
         output_items: dict[int, Any] = {}
         citations: dict[str, str] = {}
 
+        chat_texts = chatui_citations.begin_response()
+
+        def collect_parts(
+            parts: Iterable[Any], output_index: int, first_index: int = 0
+        ) -> None:
+            for part_index, part in enumerate(parts, first_index):
+                kind = self._field(part, "type")
+                if kind not in {"output_text", "refusal"}:
+                    continue
+                content = (
+                    chat_texts[output_index, part_index]
+                    if chat_texts is not None
+                    else None
+                )
+                if content is not None:
+                    content.text = self._field(
+                        part, "text" if kind == "output_text" else "refusal", ""
+                    )
+                self._collect_url_citations(
+                    self._field(part, "annotations", []) or [], citations, content
+                )
+
         async for event in stream:
             event_type = self._field(event, "type", "")
             event_response = self._field(event, "response")
@@ -87,6 +109,12 @@ class CodexStreamMixin:
             if event_type in {"response.output_text.delta", "response.refusal.delta"}:
                 delta = self._field(event, "delta", "")
                 if delta:
+                    if chat_texts is not None:
+                        key = (
+                            self._field(event, "output_index", 0),
+                            self._field(event, "content_index", 0),
+                        )
+                        chat_texts[key].text += str(delta)
                     text_parts.append(str(delta))
                     yield LLMResponse(
                         "assistant",
@@ -120,8 +148,22 @@ class CodexStreamMixin:
                 continue
 
             if event_type == "response.output_text.annotation.added":
+                key = (
+                    self._field(event, "output_index", 0),
+                    self._field(event, "content_index", 0),
+                )
                 self._collect_url_citations(
-                    [self._field(event, "annotation")], citations
+                    [self._field(event, "annotation")],
+                    citations,
+                    chat_texts[key] if chat_texts is not None else None,
+                )
+                continue
+
+            if event_type == "response.content_part.done":
+                collect_parts(
+                    [self._field(event, "part")],
+                    self._field(event, "output_index"),
+                    self._field(event, "content_index"),
                 )
                 continue
 
@@ -132,9 +174,7 @@ class CodexStreamMixin:
                     if isinstance(index, bool) or not isinstance(index, int):
                         index = max(output_items, default=-1) + 1
                     output_items[index] = item
-                    self._collect_url_citations(
-                        self._message_annotations([item]), citations
-                    )
+                    collect_parts(self._field(item, "content", []) or [], index)
                 continue
 
             if event_type == "response.output_item.added":
@@ -193,9 +233,8 @@ class CodexStreamMixin:
                     completed_output = self._field(event_response, "output")
                     if completed_output:
                         final = await self._parse_response(event_response, tools)
-                        self._collect_url_citations(
-                            self._message_annotations(completed_output), citations
-                        )
+                        for index, item in enumerate(completed_output):
+                            collect_parts(self._field(item, "content", []) or [], index)
                     elif output_items:
                         try:
                             final = await self._parse_response(
@@ -219,10 +258,14 @@ class CodexStreamMixin:
                             f"Responses stream returned no usable output. "
                             f"response_id={response_id}"
                         )
-                    sources_suffix = self._append_citations(
-                        final,
-                        citations,
-                        reply_language=reply_language,
+                    sources_suffix = (
+                        None
+                        if chat_texts is not None
+                        else self._append_citations(
+                            final,
+                            citations,
+                            reply_language=reply_language,
+                        )
                     )
                     if sources_suffix and text_parts:
                         yield LLMResponse(
@@ -254,19 +297,13 @@ class CodexStreamMixin:
             f"Responses stream ended without a terminal event. response_id={response_id}"
         )
 
-    def _message_annotations(self, output: Any) -> Iterable[Any]:
-        """Yield annotations from completed message items."""
-        for item in output or []:
-            if self._field(item, "type") != "message":
-                continue
-            for content in self._field(item, "content", []) or []:
-                yield from self._field(content, "annotations", []) or []
-
     def _collect_url_citations(
-        self, annotations: Iterable[Any], citations: dict[str, str]
+        self,
+        annotations: Iterable[Any],
+        citations: dict[str, str],
+        content: chatui_citations.CitationText | None,
     ) -> None:
-        """Publish valid new citations in first-seen order across the stream."""
-        added: dict[str, str] = {}
+        positions = []
         for annotation in annotations:
             if self._field(annotation, "type") != "url_citation":
                 continue
@@ -274,8 +311,6 @@ class CodexStreamMixin:
             if not isinstance(raw_url, str):
                 continue
             url = raw_url.strip()
-            if url in citations:
-                continue
             try:
                 parsed = urlsplit(url)
             except ValueError:
@@ -284,10 +319,19 @@ class CodexStreamMixin:
                 continue
             raw_title = self._field(annotation, "title")
             title = raw_title.strip() if isinstance(raw_title, str) else ""
-            citations[url] = title or url
-            added[url] = citations[url]
-        if added:
-            chatui_citations.publish(added)
+            title = citations.setdefault(url, title or url)
+            if content is not None:
+                start = self._field(annotation, "start_index")
+                end = self._field(annotation, "end_index")
+                positioned = (
+                    isinstance(start, int)
+                    and isinstance(end, int)
+                    and 0 <= start <= end
+                    and end > 0
+                )
+                positions.append((url, title, end if positioned else None))
+        if content is not None and positions:
+            chatui_citations.publish(content, positions)
 
     @staticmethod
     def _append_citations(

@@ -90,7 +90,7 @@ Leave `image_account` blank to follow whichever account answered the chat, or se
 
 Turn on **Native web search** under **Plugin Views → providers** (off by default). When enabled, requests use Codex's built-in `web_search` tool without extra API keys or third-party search services, alongside your existing AstrBot function tools.
 
-When the model cites web results, the plugin appends the source links at the end of the reply (duplicates removed); otherwise, the reply stays unchanged.
+In ChatUI, expand a search in the run history to see its queries. Click a source card at the position cited by OpenAI, or open **Sources** below the reply to see all cited pages. Other platforms list the source links once at the end of the reply.
 
 ## Commands and reasoning effort
 
