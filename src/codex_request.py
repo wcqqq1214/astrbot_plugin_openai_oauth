@@ -59,6 +59,33 @@ def drop_unsupported_params(*bodies: dict[str, Any]) -> None:
         )
 
 
+def default_tool_strict(*bodies: dict[str, Any]) -> None:
+    """Default function tools to non-strict like Codex CLI does.
+
+    The backend rejects valid JSON Schema constructs such as ``oneOf`` or
+    lookaround patterns when ``strict`` is omitted and compiled strictly.
+    Explicit ``strict`` settings and built-in non-function tools stay intact.
+    """
+    for body in bodies:
+        tools = body.get("tools")
+        if not isinstance(tools, list):
+            continue
+        changed = False
+        normalized: list[Any] = []
+        for item in tools:
+            if (
+                isinstance(item, dict)
+                and item.get("type") == "function"
+                and "strict" not in item
+            ):
+                normalized.append({**item, "strict": False})
+                changed = True
+            else:
+                normalized.append(item)
+        if changed:
+            body["tools"] = normalized
+
+
 def shape_replayed_input(items: list[dict]) -> list[dict]:
     """Shape replayed history for a backend that stores nothing.
 

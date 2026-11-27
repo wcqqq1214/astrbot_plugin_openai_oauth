@@ -120,7 +120,7 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
     async def test_request_tools_and_tool_choice_merging(self):
         fn_tools = _make_tool_set("weather", "clock")
         expected_fn_tools = [
-            {"type": "function", **item["function"]}
+            {"type": "function", **item["function"], "strict": False}
             for item in fn_tools.openai_schema()
         ]
 
@@ -164,6 +164,36 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
             DEFAULT_SUCCESS,
         )
         self.assertEqual(body["tools"], [WEB_SEARCH_TOOL])
+
+        # Custom function tools default to strict=False unless explicitly set.
+        strict_custom = {
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "loose_fn",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+                {
+                    "type": "function",
+                    "name": "strict_fn",
+                    "parameters": {"type": "object", "properties": {}},
+                    "strict": True,
+                },
+            ]
+        }
+        body, _ = await self._run_query(
+            _new_provider(native_web_search=True, custom_extra_body=strict_custom),
+            DEFAULT_SUCCESS,
+        )
+        self.assertEqual(
+            body["tools"],
+            [
+                {**strict_custom["tools"][0], "strict": False},
+                strict_custom["tools"][1],
+                WEB_SEARCH_TOOL,
+            ],
+        )
+        self.assertNotIn("strict", strict_custom["tools"][0])
 
         # Explicit tool_choice via text_chat_stream overrides default auto without breaking default-off.
         captured: list[tuple[dict, object]] = []

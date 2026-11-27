@@ -382,6 +382,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                 extra_body[key] = payloads.pop(key)
 
         codex_request.drop_unsupported_params(payloads, extra_body)
+        codex_request.default_tool_strict(payloads, extra_body)
         effective_session_effort = effort.normalize_effort(session_effort)
         supported = oauth.supported_efforts(payloads.get("model"))
         if (
