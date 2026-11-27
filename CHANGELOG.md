@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [v2.6.1] - 2026-11-27
+
+### Fixed
+
+- Use the public `astrbot.api.logger` throughout the plugin so AstrBot routes messages to the plugin's own logger and respects its configured log level.
+
 ## [v2.6.0] - 2026-11-27
 
 ### Added
