@@ -37,6 +37,7 @@ from . import (
     runtime,
 )
 from . import usage as usage_service
+from .codex_search import track_web_search
 from .codex_stream import CodexStreamMixin
 from .credential_store import (
     CredentialCooldownError,
@@ -469,11 +470,15 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                     is CodexStreamMixin._consume_stream
                 ):
                     consume_kwargs["on_rate_limits"] = on_rate_limits
-                async for response in self._consume_stream(
-                    stream, tools, **consume_kwargs
+                async with (
+                    track_web_search(stream, self._field, reply_language) as events,
+                    aclosing(
+                        self._consume_stream(events, tools, **consume_kwargs)
+                    ) as responses,
                 ):
-                    emitted_response = True
-                    yield response
+                    async for response in responses:
+                        emitted_response = True
+                        yield response
                 return
             except Exception as exc:
                 if (

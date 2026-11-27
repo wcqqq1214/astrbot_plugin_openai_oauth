@@ -1,8 +1,9 @@
-"""Adapt Codex citations to AstrBot's existing WebChat reference payload."""
+"""Bridge Codex citations and search activity to AstrBot WebChat."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import json
+from collections.abc import Awaitable, Callable
 from contextlib import aclosing
 from contextvars import ContextVar
 from dataclasses import dataclass, field, fields
@@ -111,6 +112,35 @@ def publish(citations: dict[str, str]) -> None:
         state.publish_snapshot()
 
 
+def web_search_publisher() -> Callable[[str, dict], Awaitable[bool]] | None:
+    """Capture the current ChatUI run for tool frames and stream cleanup."""
+    state = _producer.get()
+    if state is None:
+        return None
+
+    from astrbot.core.platform.sources.webchat.webchat_queue_mgr import (
+        webchat_queue_mgr,
+    )
+
+    run = state.run
+
+    async def publish_tool_frame(chain_type: str, data: dict) -> bool:
+        if run.status != "running":
+            return False
+        return await webchat_queue_mgr.put_back_queue(
+            run.run_id,
+            {
+                "type": "plain",
+                "chain_type": chain_type,
+                "streaming": True,
+                "message_id": run.run_id,
+                "data": json.dumps(data, ensure_ascii=False),
+            },
+        )
+
+    return publish_tool_frame
+
+
 def install() -> Callable[[], None]:
     """Bridge supported WebChat runs without changing AstrBot files."""
     from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
@@ -120,11 +150,19 @@ def install() -> Callable[[], None]:
     service = chat_service.ChatService
     runner = ToolLoopAgentRunner
     consume = service._consume_chat_run
-    stream = runner._recorded_responses
+    stream_name = (
+        "_recorded_responses"
+        if hasattr(runner, "_recorded_responses")
+        else "_iter_llm_responses"
+    )
+    stream = getattr(runner, stream_name)
     if not iscoroutinefunction(consume) or not isasyncgenfunction(stream):
         raise TypeError("WebChat citation hooks are unavailable")
     signature(consume).bind(None, None)
-    signature(stream).bind(None, {}, contexts=[], streaming=True)
+    if stream_name == "_recorded_responses":
+        signature(stream).bind(None, {}, contexts=[], streaming=True)
+    else:
+        signature(stream).bind(None, include_model=True)
     signature(service._publish_chat_run).bind(None, {})
     signature(service.get_active_chat_runs).bind(None, "", "")
     if not {"run_id", "username", "session_id", "status", "refs"} <= {
@@ -166,7 +204,7 @@ def install() -> Callable[[], None]:
 
     hooks = (
         (service, "_consume_chat_run", consume_run, consume),
-        (runner, "_recorded_responses", stream_response, stream),
+        (runner, stream_name, stream_response, stream),
     )
 
     def remove() -> None:

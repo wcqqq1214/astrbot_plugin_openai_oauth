@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import unittest
+from collections.abc import AsyncIterable
 from pathlib import Path
 from unittest import mock
 
@@ -18,6 +19,7 @@ os.chdir(ASTRBOT_ROOT)
 import httpx
 import source_lifecycle_test as lifecycle_fixtures
 from astrbot.core.agent.tool import FunctionTool, ToolSet
+from astrbot.core.platform.sources.webchat.webchat_queue_mgr import webchat_queue_mgr
 from astrbot.dashboard.services import chat_service
 from openai import AsyncOpenAI
 
@@ -78,16 +80,25 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
     async def _run_query(
         self,
         provider: provider_module.ProviderOpenAICodex,
-        events: list[dict],
+        events: list[dict] | AsyncIterable[dict],
         *,
         tools: ToolSet | None = None,
         payload: dict | None = None,
+        reply_language: str | None = None,
     ):
         final_bodies: list[dict] = []
 
+        async def event_stream():
+            if isinstance(events, list):
+                for event in events:
+                    yield event
+            else:
+                async for event in events:
+                    yield event
+
         class EventBody(httpx.AsyncByteStream):
             async def __aiter__(self):
-                for event in events:
+                async for event in event_stream():
                     yield f"data: {json.dumps(event)}\n\n".encode()
 
         def handle(request: httpx.Request) -> httpx.Response:
@@ -115,6 +126,7 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
                     else {"model": "gpt-5.4-mini", "input": []},
                     tools,
                     request_max_retries=1,
+                    reply_language=reply_language,
                 ):
                     output.append(item)
         return final_bodies[0], output
@@ -546,7 +558,12 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
             started.set()
             await finish.wait()
 
-        original_stream = ToolLoopAgentRunner._recorded_responses
+        stream_name = (
+            "_recorded_responses"
+            if hasattr(ToolLoopAgentRunner, "_recorded_responses")
+            else "_iter_llm_responses"
+        )
+        original_stream = getattr(ToolLoopAgentRunner, stream_name)
         original_extract = chat_service.extract_web_search_refs
         with mock.patch.object(chat_service.ChatService, "_consume_chat_run", consume):
             uninstall = runtime.chatui_citations.install()
@@ -564,8 +581,130 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 uninstall()
             self.assertIs(chat_service.ChatService._consume_chat_run, consume)
-            self.assertIs(ToolLoopAgentRunner._recorded_responses, original_stream)
+            self.assertIs(getattr(ToolLoopAgentRunner, stream_name), original_stream)
             self.assertIs(chat_service.extract_web_search_refs, original_extract)
+
+    async def test_native_search_cards_stream_and_persist_in_chatui(self):
+        run_id = "native-search-test"
+        queue = webchat_queue_mgr.get_or_create_back_queue(run_id)
+        run = chat_service.ChatRunState(
+            run_id, "user", "session", "turn", "webchat", queue
+        )
+        service = object.__new__(chat_service.ChatService)
+        service.chat_runs = {run_id: run}
+        service.chat_runs_by_session = {run.session_id: {run_id}}
+        service.running_convs = {}
+        service.save_bot_message = mock.AsyncMock(return_value=None)
+        subscriber = asyncio.Queue()
+        run.subscribers.add(subscriber)
+        bridge = runtime.chatui_citations
+        state = bridge._CitationRun(service, run)
+        continue_answer = asyncio.Event()
+        search_item = {
+            "type": "web_search_call",
+            "id": "ws_1",
+            "status": "completed",
+            "action": {"type": "search", "queries": ["OpenAI news", "官方公告"]},
+        }
+        find_item = {
+            "type": "web_search_call",
+            "id": "ws_2",
+            "status": "completed",
+            "action": {
+                "type": "find_in_page",
+                "url": "https://example.org",
+                "pattern": "Responses API",
+            },
+        }
+
+        async def events():
+            yield {"type": "response.web_search_call.searching", "item_id": "ws_1"}
+            yield {"type": "response.web_search_call.completed", "item_id": "ws_1"}
+            yield {
+                "type": "response.output_item.done",
+                "item": search_item,
+                "output_index": 0,
+            }
+            await continue_answer.wait()
+            yield {"type": "response.web_search_call.searching", "item_id": "ws_3"}
+            yield {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp-search",
+                    "status": "completed",
+                    "output": [
+                        search_item,
+                        find_item,
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "ok"}],
+                        },
+                    ],
+                },
+            }
+
+        consumer = asyncio.create_task(
+            chat_service.ChatService._consume_chat_run(state, run)
+        )
+        token = bridge._producer.set(state)
+        try:
+            producer = asyncio.create_task(
+                self._run_query(
+                    _new_provider(native_web_search=True),
+                    events(),
+                    reply_language="zh-CN",
+                )
+            )
+        finally:
+            bridge._producer.reset(token)
+
+        async def next_card():
+            _, frame = await asyncio.wait_for(subscriber.get(), 5)
+            self.assertEqual(frame["chain_type"], "tool_call")
+            return json.loads(frame["data"])
+
+        try:
+            running = await next_card()
+            self.assertEqual(running["name"], "OpenAI web_search · 搜索中")
+            completed = await next_card()
+            self.assertEqual(completed["name"], "OpenAI web_search · 搜索完成")
+            self.assertGreaterEqual(completed["finished_ts"], running["ts"])
+            details = await next_card()
+            self.assertEqual(details["id"], running["id"])
+            self.assertEqual(
+                details["args"]["queries"], search_item["action"]["queries"]
+            )
+            self.assertEqual(details["finished_ts"], completed["finished_ts"])
+            snapshot = service.get_active_chat_runs(run.username, run.session_id)[0]
+            self.assertEqual(snapshot["content"]["message"][0]["tool_calls"], [details])
+            continue_answer.set()
+            _, output = await asyncio.wait_for(producer, 5)
+            self.assertEqual(output[-1].tools_call_name, [])
+            await queue.put({"type": "end", "message_id": run_id})
+            await asyncio.wait_for(consumer, 5)
+        finally:
+            for task in (producer, consumer):
+                task.cancel()
+            await asyncio.gather(producer, consumer, return_exceptions=True)
+            webchat_queue_mgr.remove_back_queue(run_id)
+
+        parts = service.save_bot_message.await_args.args[1]
+        cards = {call["id"]: call for part in parts for call in part["tool_calls"]}
+        self.assertEqual(len(parts), 3)
+        self.assertEqual(cards[details["id"]]["args"], details["args"])
+        fallback = cards["codex-web-search:ws_2"]
+        self.assertEqual(
+            fallback["args"],
+            {
+                "action": "find_in_page",
+                "url": "https://example.org",
+                "pattern": "Responses API",
+            },
+        )
+        self.assertEqual(fallback["name"], "OpenAI web_search · 搜索完成")
+        interrupted = cards["codex-web-search:ws_3"]
+        self.assertEqual(interrupted["name"], "OpenAI web_search · 搜索中断")
+        self.assertEqual(interrupted["args"], {})
 
     async def test_web_search_call_with_function_call(self):
         fn_tools = _make_tool_set("lookup")
