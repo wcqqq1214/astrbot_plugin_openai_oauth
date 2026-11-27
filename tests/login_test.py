@@ -8,6 +8,7 @@ import importlib
 import json
 import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -768,6 +769,24 @@ def test_plugin_page_assets() -> None:
     print("\n=== Plugin Page bridge assets ===")
     page_root = os.path.join(os.path.dirname(__file__), "..", "pages", "providers")
     plugin_root = os.path.join(os.path.dirname(__file__), "..")
+    from astrbot.dashboard.services.plugin_page_service import PluginPageService
+
+    # Both legacy Pages and newer Views hosts must still discover Providers.
+    root = Path(plugin_root).resolve()
+    service = object.__new__(PluginPageService)
+    service.plugin_manager = SimpleNamespace(plugin_store_path=root.parent)
+    meta = SimpleNamespace(
+        name="astrbot_plugin_openai_oauth", root_dir_name=root.name, reserved=False
+    )
+    remove = plugin.chatui_citations.install()
+    try:
+        entries = asyncio.run(service.discover_plugin_pages(meta))
+        check(
+            [page.name for page in entries] == ["providers"],
+            "ChatUI image view preserves Providers discovery",
+        )
+    finally:
+        remove()
     with open(os.path.join(page_root, "index.html"), encoding="utf-8") as source_file:
         html = source_file.read()
     with open(os.path.join(page_root, "app.js"), encoding="utf-8") as source_file:

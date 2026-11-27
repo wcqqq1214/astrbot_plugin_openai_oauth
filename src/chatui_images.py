@@ -125,7 +125,6 @@ def install(active_runs):
     # authorization on the PNG request as well as the initial HTML request.
     get_view = ChatService.get_chat_view
     serve = PluginPageService.serve_page_content
-    roots = PluginPageService.resolve_plugin_pages_root
     chat = None
 
     @wraps(get_view)
@@ -135,14 +134,6 @@ def install(active_runs):
         if result[0]["module"] == MODULE and result[0]["name"] == VIEW:
             chat = self
         return result
-
-    @wraps(roots)
-    async def pages_root(self, plugin):
-        # The host picks just one root when pages/ and views/ coexist.
-        # Keep the existing Providers page available on old and new hosts.
-        if plugin.name == PLUGIN:
-            return self.get_plugin_root_dir(plugin) / "pages"
-        return await roots(self, plugin)
 
     @wraps(serve)
     async def serve_content(
@@ -181,7 +172,6 @@ def install(active_runs):
 
     hooks = (
         (ChatService, "get_chat_view", get_chat_view, get_view),
-        (PluginPageService, "resolve_plugin_pages_root", pages_root, roots),
         (PluginPageService, "serve_page_content", serve_content, serve),
     )
     for owner, name, hook, _ in hooks:

@@ -498,7 +498,23 @@ def install() -> Callable[[], None]:
             content["message"] = _display_parts(content["message"], refs)
         return entry
 
+    from astrbot.dashboard.services.plugin_page_service import PluginPageService
+
+    roots = PluginPageService.resolve_plugin_pages_root
+
+    @wraps(roots)
+    async def pages_root(self, plugin):
+        # Some hosts discover views/ before pages/ even without chat-message
+        # support. Keep the existing Providers entry and its scoped assets.
+        if plugin.name == "astrbot_plugin_openai_oauth":
+            root = self.get_plugin_root_dir(plugin)
+            pages = (root / "pages").resolve()
+            pages.relative_to(root)
+            return pages
+        return await roots(self, plugin)
+
     hooks = (
+        (PluginPageService, "resolve_plugin_pages_root", pages_root, roots),
         (chat_service, "serialize_history_entry", serialize_entry, serialize_history),
         (service, "_consume_chat_run", consume_run, consume),
         (runner, stream_name, stream_response, stream),
