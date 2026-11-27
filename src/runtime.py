@@ -78,6 +78,15 @@ def get_context() -> Any:
     return _context
 
 
+def get_plugin_config() -> AstrBotConfig:
+    star = _context.get_registered_star(_PLUGIN_NAME) if _context is not None else None
+    if star is None or star.config is None:
+        raise CredentialError(
+            "The plugin configuration is unavailable.", code="configuration_unavailable"
+        )
+    return star.config
+
+
 def get_coordinator() -> LocalCredentialCoordinator:
     ensure_compatible()
     return _resolve_coordinator()

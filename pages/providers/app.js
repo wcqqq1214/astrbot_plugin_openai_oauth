@@ -31,7 +31,6 @@ const settingsNameInput = byId("settings-name");
 const settingsSave = byId("settings-save");
 const settingsCancel = byId("settings-cancel");
 const closeSettingsButton = byId("close-settings");
-const webSearchToggle = byId("web-search-toggle");
 const settingsRouting = {
   fixed: byId("settings-routing-fixed"),
   auto: byId("settings-routing-auto"),
@@ -91,10 +90,10 @@ let cancelling = false;
 let lastUpdated = null;
 let pageErrorMessage = "";
 let saveErrorMessage = "";
-let webSearchEnabled = false;
-let webSearchPending = null;
-let webSearchBusy = false;
-let webSearchMutation = 0;
+const featureSwitches = [
+  { key: "native_web_search", button: byId("web-search-toggle"), title: "webSearchTitle" },
+  { key: "image_enabled", button: byId("image-toggle"), title: "imageTitle" },
+].map((feature) => ({ ...feature, enabled: null, pending: null, mutation: 0 }));
 
 // Keep UI-generated messages translatable while preserving server details.
 // The server reports its own errors as stable codes, translated here.
@@ -176,9 +175,11 @@ function applyLocale(locale) {
     "copy-code": t.copyCode,
     "web-search-title": t.webSearchTitle,
     "web-search-hint": t.webSearchHint,
+    "image-title": t.imageTitle,
+    "image-hint": t.imageHint,
   }))
     byId(id).textContent = value;
-  renderWebSearch();
+  featureSwitches.forEach(renderFeature);
   closeButton.setAttribute("aria-label", t.close);
   verifyUrl.setAttribute("aria-label", t.verifyLink);
   closeSettingsButton.setAttribute("aria-label", t.close);
@@ -712,30 +713,28 @@ async function queryProvider(id) {
 let accountRouting = null;
 let defaultAccountBusy = false;
 
-function renderWebSearch() {
-  const checked = webSearchPending !== null ? webSearchPending : webSearchEnabled;
-  webSearchToggle.setAttribute("aria-checked", String(checked));
-  webSearchToggle.setAttribute("aria-busy", String(webSearchBusy));
-  webSearchToggle.setAttribute("title", webSearchBusy ? t.saving : t.webSearchTitle);
-  webSearchToggle.disabled = webSearchBusy;
+function renderFeature(feature) {
+  const busy = feature.pending !== null;
+  feature.button.setAttribute("aria-checked", String(feature.pending ?? feature.enabled ?? false));
+  feature.button.setAttribute("aria-busy", String(busy));
+  feature.button.setAttribute("title", busy ? t.saving : t[feature.title]);
+  feature.button.disabled = busy || feature.enabled === null;
 }
 
-async function toggleWebSearch() {
-  if (webSearchBusy) return;
-  const next = !webSearchEnabled;
-  webSearchBusy = true;
-  webSearchPending = next;
+async function toggleFeature(feature) {
+  if (feature.pending !== null || feature.enabled === null) return;
+  feature.pending = !feature.enabled;
   showSaveError("");
-  renderWebSearch();
+  renderFeature(feature);
   let reconcile = false;
   try {
-    const result = await bridge.apiPost("settings/update", { native_web_search: next });
+    const result = await bridge.apiPost("settings/update", { [feature.key]: feature.pending });
     if (
       result?.status === "success" &&
-      typeof result?.settings?.native_web_search === "boolean"
+      typeof result?.settings?.[feature.key] === "boolean"
     ) {
-      webSearchEnabled = result.settings.native_web_search;
-      webSearchMutation = ++mutationSeq;
+      feature.enabled = result.settings[feature.key];
+      feature.mutation = ++mutationSeq;
     } else {
       reconcile = true;
       showSaveError(() => t.saveUnknown);
@@ -743,12 +742,11 @@ async function toggleWebSearch() {
   } catch (reason) {
     reconcile = true;
     showSaveError(() =>
-      t.saveFailed(t.webSearchTitle, messageText(reason?.message) || t.saveUnknown),
+      t.saveFailed(t[feature.title], messageText(reason?.message) || t.saveUnknown),
     );
   } finally {
-    webSearchBusy = false;
-    webSearchPending = null;
-    renderWebSearch();
+    feature.pending = null;
+    renderFeature(feature);
   }
   if (reconcile) await reloadProviders();
 }
@@ -761,9 +759,12 @@ async function loadProviders() {
   if (!Array.isArray(list?.providers)) throw new Error();
   providers = list.providers.map((p) => keepNewerEdits(p, since));
   if (!defaultAccountBusy) accountRouting = list.routing || null;
-  if (!webSearchBusy && webSearchMutation <= since && typeof list?.settings?.native_web_search === "boolean") {
-    webSearchEnabled = list.settings.native_web_search;
-    renderWebSearch();
+  for (const feature of featureSwitches) {
+    const enabled = list.settings?.[feature.key];
+    if (feature.pending === null && feature.mutation <= since && typeof enabled === "boolean") {
+      feature.enabled = enabled;
+      renderFeature(feature);
+    }
   }
   listedSeq = listed;
   showPageError("");
@@ -1249,7 +1250,7 @@ function rerender() {
   renderUpdated();
   renderLogin();
   renderSettings();
-  renderWebSearch();
+  featureSwitches.forEach(renderFeature);
 }
 
 bridge.onContext?.((next) => {
@@ -1674,7 +1675,9 @@ settingsNameInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") void saveSettings();
 });
 byId("settings-default").addEventListener("click", () => void setDefaultAccount());
-webSearchToggle.addEventListener("click", () => void toggleWebSearch());
+for (const feature of featureSwitches) {
+  feature.button.addEventListener("click", () => void toggleFeature(feature));
+}
 settingsSave.addEventListener("click", () => void saveSettings());
 settingsCancel.addEventListener("click", closeSettings);
 closeSettingsButton.addEventListener("click", closeSettings);

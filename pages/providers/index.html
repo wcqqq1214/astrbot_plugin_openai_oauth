@@ -31,23 +31,42 @@
       <!-- Each provider owns its independently expandable allowance panel. -->
       <div id="providers" class="provider-list" aria-label="Providers"></div>
 
-      <section id="search-setting" class="setting-card" aria-labelledby="web-search-title">
-        <div class="setting-copy">
-          <strong id="web-search-title" class="setting-title">原生网络搜索</strong>
-          <p id="web-search-hint" class="setting-hint"></p>
-        </div>
-        <button
-          id="web-search-toggle"
-          class="switch"
-          type="button"
-          role="switch"
-          aria-checked="false"
-          aria-labelledby="web-search-title"
-          aria-describedby="web-search-hint"
-        >
-          <span class="switch-track"></span>
-        </button>
-      </section>
+      <div class="feature-settings">
+        <section id="search-setting" class="setting-card" aria-labelledby="web-search-title">
+          <div class="setting-copy">
+            <strong id="web-search-title" class="setting-title">原生网络搜索</strong>
+            <p id="web-search-hint" class="setting-hint"></p>
+          </div>
+          <button
+            id="web-search-toggle"
+            class="switch"
+            type="button"
+            role="switch"
+            aria-checked="false"
+            aria-labelledby="web-search-title"
+            aria-describedby="web-search-hint"
+          >
+            <span class="switch-track"></span>
+          </button>
+        </section>
+        <section id="image-setting" class="setting-card" aria-labelledby="image-title">
+          <div class="setting-copy">
+            <strong id="image-title" class="setting-title">启用 GPT Image 生图</strong>
+            <p id="image-hint" class="setting-hint"></p>
+          </div>
+          <button
+            id="image-toggle"
+            class="switch"
+            type="button"
+            role="switch"
+            aria-checked="false"
+            aria-labelledby="image-title"
+            aria-describedby="image-hint"
+          >
+            <span class="switch-track"></span>
+          </button>
+        </section>
+      </div>
 
       <p class="footnote">
         <svg viewBox="0 0 24 24" aria-hidden="true">

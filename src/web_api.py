@@ -228,7 +228,10 @@ async def _handle_providers_list() -> Any:
                 "providers": providers,
                 "routing": coordinator.providers.routing_view(),
                 "settings": {
-                    "native_web_search": coordinator.providers.native_web_search()
+                    "native_web_search": coordinator.providers.native_web_search(),
+                    "image_enabled": bool(
+                        runtime.get_plugin_config().get("image_enabled", False)
+                    ),
                 },
             },
             headers=_NO_STORE_HEADERS,
@@ -273,15 +276,31 @@ async def _handle_settings_update() -> Any:
         return _login_error_response(message, 403)
     try:
         body = await request.json(default={})
-        if not isinstance(body, dict) or set(body) != {"native_web_search"}:
-            raise CredentialSourceError(
-                "Invalid settings update.", code="invalid_request"
-            )
-        enabled = await runtime.get_coordinator().providers.update_native_web_search(
-            body["native_web_search"]
-        )
+        if not isinstance(body, dict) or len(body) != 1:
+            return _login_error_response("invalid_request", 400)
+        key, enabled = next(iter(body.items()))
+        if key not in {"native_web_search", "image_enabled"} or not isinstance(
+            enabled, bool
+        ):
+            return _login_error_response("invalid_request", 400)
+        if key == "image_enabled":
+            config = runtime.get_plugin_config()
+            had_value = key in config
+            previous = config.get(key)
+            try:
+                config.save_config({key: enabled})
+            except (OSError, TypeError, ValueError):
+                # AstrBot updates its in-memory config before writing the file.
+                if had_value:
+                    config[key] = previous
+                else:
+                    config.pop(key, None)
+                return _login_error_response("save_failed", 500)
+        else:
+            registry = runtime.get_coordinator().providers
+            enabled = await registry.update_native_web_search(enabled)
         return json_response(
-            {"status": "success", "settings": {"native_web_search": enabled}},
+            {"status": "success", "settings": {key: enabled}},
             headers=_NO_STORE_HEADERS,
         )
     except CredentialError as exc:

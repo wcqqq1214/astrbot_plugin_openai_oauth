@@ -108,7 +108,7 @@ Open an account's gear menu, switch routing to **Automatic fallback**, and click
 
 ## GPT Image generation and image inputs
 
-Turn on `image_enabled` in the plugin settings to generate images using the chat account's subscription allowance:
+Turn on **Enable GPT Image generation** next to **Native web search** under **Plugin Views → providers**, or in AstrBot's plugin settings. Both controls use the same `image_enabled` setting, which defaults to off. When enabled, image generation uses the current chat account's subscription allowance.
 
 - **In-chat generation**: Describe an image in an OpenAI Subscribe chat (e.g., *"Draw a portrait poster of a cat holding an umbrella in the rain, with space at the top"*). The model calls `codex_generate_image` to create and send the PNG. Specify orientation, aspect ratio, and composition in your prompt; Codex chooses the pixel dimensions automatically.
 - **Direct `/draw` command**: Send `/draw <prompt>` to skip follow-up questions from the model. It reuses whichever account handled the most recent successful OpenAI Subscribe chat in that conversation (after a plugin reload, send one normal chat message before using `/draw` again).

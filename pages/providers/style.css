@@ -825,12 +825,17 @@ dialog::backdrop {
 .provider-row.disabled .provider-name {
   color: var(--secondary);
 }
+.feature-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
 .setting-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 12px;
   padding: 12px 0 12px 16px;
   border-radius: var(--radius);
   background: var(--surface);

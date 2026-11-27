@@ -1021,9 +1021,14 @@ class WebSearchConfigIntegrationTests(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(runtime, "_credential_coordinator", self.coordinator),
             mock.patch.object(runtime, "_startup_error", None),
         ):
-            with request_context():
+            with (
+                mock.patch.object(runtime, "get_plugin_config", return_value={}),
+                request_context(),
+            ):
                 listed = api_payload(await web_api._handle_providers_list())
-            self.assertEqual(listed["settings"], {"native_web_search": False})
+            self.assertEqual(
+                listed["settings"], {"native_web_search": False, "image_enabled": False}
+            )
             self.assertFalse(runtime.native_web_search_enabled())
 
             for bad_body in ({}, {"native_web_search": "yes"}, {"other": True}):

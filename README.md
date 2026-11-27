@@ -108,7 +108,7 @@
 
 ## GPT Image 生图与图片输入
 
-在插件设置中开启 **启用 GPT Image 生图**（`image_enabled`）后，即可使用当前聊天账号的订阅额度生图：
+在插件详情页 **Plugin Views → providers** 的「原生网络搜索」旁，或在 AstrBot 的插件设置中，打开 **启用 GPT Image 生图**。两个入口共用 `image_enabled`，默认关闭。开启后可使用当前聊天账号的订阅额度生图：
 
 - **对话自动生图**：在 OpenAI Subscribe 对话中直接描述画面（如：「画一张竖版海报，一只猫在雨中撑伞，画面上方留白」），模型会自动调用 `codex_generate_image` 出图。画面方向、比例和构图直接写在提示词里即可，尺寸由 Codex 自动决定并原样返回 PNG。
 - **命令直接生图**：发送 `/draw <提示词>` 可跳过模型追问直接出图。命令复用当前对话最近一次通过 OpenAI Subscribe 成功聊天的账号；插件重载后，需先在当前对话聊一句再用 `/draw`。

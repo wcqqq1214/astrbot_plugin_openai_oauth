@@ -6,11 +6,11 @@ All endpoints are mounted under `/astrbot_plugin_openai_oauth/` using AstrBot's 
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /astrbot_plugin_openai_oauth/providers/list` | List accounts, routing bindings, and gateway settings (`native_web_search`). |
+| `POST /astrbot_plugin_openai_oauth/providers/list` | List accounts, routing bindings, and the current `native_web_search` and `image_enabled` settings. |
 | `POST /astrbot_plugin_openai_oauth/providers/update` | Rename an account, toggle `enabled`, or switch `routing_mode` (`fixed` / `auto`). |
 | `POST /astrbot_plugin_openai_oauth/providers/delete` | Delete a device-code account (when not set as default or bound to any model). |
 | `POST /astrbot_plugin_openai_oauth/routing/update` | Set the default account or pin/unpin a model's account binding. |
-| `POST /astrbot_plugin_openai_oauth/settings/update` | Toggle gateway-wide native Codex web search (`native_web_search`). |
+| `POST /astrbot_plugin_openai_oauth/settings/update` | Update one boolean setting, either `native_web_search` or `image_enabled`. |
 | `POST /astrbot_plugin_openai_oauth/account/status` | Query sanitized account status for a source ID. |
 | `POST /astrbot_plugin_openai_oauth/account/usage` | Fetch live or cached quota windows for a source ID. |
 | `POST /astrbot_plugin_openai_oauth/device/start` | Start a new or reauthorization device-code login session. |
@@ -55,7 +55,8 @@ The plugin guards `ProviderConfigService.upsert_provider_source` for `OpenAI Sub
     "models": [{"id": "my-model", "account_id": null}]
   },
   "settings": {
-    "native_web_search": false
+    "native_web_search": false,
+    "image_enabled": false
   }
 }
 ```
@@ -69,6 +70,7 @@ The plugin guards `ProviderConfigService.upsert_provider_source` for `OpenAI Sub
 `POST settings/update`:
 
 - Toggle native web search: `{"native_web_search": true}` (must be a JSON boolean; returns `{ "status": "success", "settings": { "native_web_search": true } }`).
+- Toggle GPT Image generation with `{"image_enabled": true}`. The endpoint saves the standard AstrBot plugin setting and returns `{ "status": "success", "settings": { "image_enabled": true } }`. This setting defaults to `false` and controls both `codex_generate_image` and `/draw`.
 
 Success returns HTTP 200. Invalid payloads return HTTP 400 without changing config. Error responses always use `{ "status": "error", "message": "<code>" }` (translated by `pages/providers/strings.js`).
 

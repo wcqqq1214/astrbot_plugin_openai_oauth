@@ -432,7 +432,10 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_listing_and_usage_are_scoped_and_do_not_expose_tokens(self):
         await self.registry.migrate()
-        with request_context():
+        with (
+            patch.object(runtime, "get_plugin_config", return_value={}),
+            request_context(),
+        ):
             listing = payload(await web_api._handle_providers_list())
         self.assertEqual(listing["providers"][0]["credential_mode"], "local_codex")
         for secret in (self.creds["access_token"], self.creds["refresh_token"]):

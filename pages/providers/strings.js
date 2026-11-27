@@ -175,6 +175,8 @@ export const strings = {
       "If you already authorized, check the provider list. Otherwise, sign in again.",
     webSearchTitle: "Native web search",
     webSearchHint: "Allow models to search the web when needed and append source links.",
+    imageTitle: "Enable GPT Image generation",
+    imageHint: "Allow image generation in chat and via /draw using the current chat account's subscription allowance.",
   },
   zh: {
     // Stable error codes reported by the plugin's WebUI API.
@@ -342,6 +344,8 @@ export const strings = {
     sessionExpiredDetail: "如果已完成授权，先在列表里看看账号是否已加上；没有的话再重新登录。",
     webSearchTitle: "原生网络搜索",
     webSearchHint: "允许模型在需要时联网搜索，并在回复末尾附上参考链接。",
+    imageTitle: "启用 GPT Image 生图",
+    imageHint: "允许在对话中由模型自动生图，或用 /draw 直接生图（消耗当前聊天账号的订阅额度）。",
   },
   ru: {
     // Stable error codes reported by the plugin's WebUI API.
@@ -501,6 +505,8 @@ export const strings = {
     sessionExpiredDetail: "Если вы уже подтвердили вход, проверьте список провайдеров. Иначе войдите снова.",
     webSearchTitle: "Встроенный веб-поиск",
     webSearchHint: "Разрешить моделям использовать встроенный веб-поиск Codex и добавлять ссылки на источники.",
+    imageTitle: "Включить генерацию изображений GPT Image",
+    imageHint: "Разрешить генерацию изображений в чате и по команде /draw с использованием лимита подписки текущего аккаунта.",
   },
   ja: {
     // Stable error codes reported by the plugin's WebUI API.
@@ -660,6 +666,8 @@ export const strings = {
     sessionExpiredDetail: "認証済みの場合はプロバイダー一覧を確認してください。それ以外の場合は再ログインしてください。",
     webSearchTitle: "ネイティブ Web 検索",
     webSearchHint: "モデルが Codex ネイティブ Web 検索を使い、回答末尾に出典リンクを付けることを許可します。",
+    imageTitle: "GPT Image 画像生成を有効にする",
+    imageHint: "チャットでの自動生成と /draw コマンドでの画像生成を許可します（現在のチャットアカウントのサブスクリプション利用枠を使用します）。",
   },
 
 };

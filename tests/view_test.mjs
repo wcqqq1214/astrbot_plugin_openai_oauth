@@ -1604,6 +1604,8 @@ for (const [locale, key, localName] of cases) {
   const dictionary = translated.strings[key];
   assert.equal(document.documentElement.lang, locale);
   assert.equal(document.title, dictionary.title);
+  assert.equal(read("image-title"), dictionary.imageTitle);
+  assert.equal(read("image-hint"), dictionary.imageHint);
   assert.equal(read("title"), dictionary.title);
   assert.equal(ids.get("providers").getAttribute("aria-label"), dictionary.title);
   assert.equal(translated.rowNodes.get("p0").name.textContent, localName);
@@ -1711,16 +1713,17 @@ assert.equal(shown("settings-default-section"), false);
 assert.equal(defaultPage.rowNodes.get("work").defaultTag.hidden, false);
 console.log("Default account settings passed: multi-account action, failure recovery and single-account hiding.");
 
-// Native web search toggle lives on the Plugin View page.
+// Each feature switch saves independently and ignores stale list responses.
 let webSearchState = false;
-let failWebSearch = false;
+let imageState = true;
+let failSettingSave = false;
 let searchListGate = null;
 bridge.apiPost = async (endpoint, body) => {
   if (endpoint === "providers/list") {
     const snapshot = {
       providers: defaultAccounts,
       routing: structuredClone(defaultState),
-      settings: { native_web_search: webSearchState },
+      settings: { native_web_search: webSearchState, image_enabled: imageState },
     };
     if (searchListGate) await searchListGate.promise;
     return snapshot;
@@ -1729,33 +1732,52 @@ bridge.apiPost = async (endpoint, body) => {
     return { status: "success", account: defaultAccounts[0], usage: { windows: [] } };
   }
   if (endpoint === "settings/update") {
-    if (failWebSearch) throw new Error("save_failed");
+    if (failSettingSave) throw new Error("save_failed");
+    if ("image_enabled" in body) {
+      assert.deepEqual(Object.keys(body), ["image_enabled"]);
+      imageState = body.image_enabled;
+      return { status: "success", settings: { image_enabled: imageState } };
+    }
+    assert.deepEqual(Object.keys(body), ["native_web_search"]);
     webSearchState = body.native_web_search;
     return { status: "success", settings: { native_web_search: webSearchState } };
   }
   throw new Error(`Unexpected endpoint ${endpoint}`);
 };
 const searchPage = await freshPage();
+const imageBtn = ids.get("image-toggle");
+assert.equal(imageBtn.getAttribute("aria-checked"), "true");
 const webSearchBtn = ids.get("web-search-toggle");
 assert.equal(webSearchBtn.getAttribute("aria-checked"), "false");
 assert.ok(read("web-search-title"));
 assert.ok(read("web-search-hint"));
-failWebSearch = true;
+failSettingSave = true;
 await click(webSearchBtn);
 assert.equal(webSearchBtn.getAttribute("aria-checked"), "false");
 assert.equal(webSearchState, false);
 assert.equal(ids.get("save-error").hidden, false);
-failWebSearch = false;
+await click(imageBtn);
+assert.equal(imageBtn.getAttribute("aria-checked"), "true");
+assert.equal(imageState, true);
+failSettingSave = false;
 searchListGate = deferred();
 const staleSearchList = searchPage.loadProviders();
 await click(webSearchBtn);
 assert.equal(webSearchBtn.getAttribute("aria-checked"), "true");
 assert.equal(webSearchState, true);
+assert.equal(imageState, true);
+await click(imageBtn);
+assert.equal(imageState, false);
 searchListGate.resolve();
 await staleSearchList;
 assert.equal(webSearchBtn.getAttribute("aria-checked"), "true");
 assert.equal(ids.get("save-error").hidden, true);
-console.log("Plugin View native web search switch passed: state sync, failure recovery and save.");
+assert.equal(imageBtn.getAttribute("aria-checked"), "false");
+imageState = true;
+await freshPage();
+assert.equal(imageBtn.getAttribute("aria-checked"), "true");
+assert.equal(webSearchBtn.getAttribute("aria-checked"), "true");
+console.log("Plugin View feature switches passed: independent updates, failure recovery and reopen.");
 
 // New window.AstrBotPluginView bridge works without window.AstrBotPluginPage.
 const viewBridgeWindow = {
