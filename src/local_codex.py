@@ -139,7 +139,8 @@ class LocalCodexStore:
             or expires <= datetime.now(UTC).timestamp()
         ):
             raise ReauthenticationRequiredError(
-                "Codex returned an invalid refreshed credential."
+                "Codex returned an invalid refreshed credential.",
+                credential_origin=LOCAL,
             )
         document = {**login.document, "tokens": dict(login.document["tokens"])}
         for key in ("access_token", "refresh_token", "id_token"):
@@ -283,7 +284,10 @@ class LocalCredentialCoordinator(CredentialCoordinator):
             self._states.get(source_id, CredentialStatus("ready")).state
             == "reauth_required"
         ):
-            raise ReauthenticationRequiredError("Sign in to this Provider again.")
+            raise ReauthenticationRequiredError(
+                "Sign in to this Provider again.",
+                credential_origin=snapshot.credential_origin,
+            )
         return snapshot
 
     def mark_reauthentication(self, snapshot: CredentialSnapshot) -> None:
@@ -357,7 +361,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
             validate_snapshot(initial)
         if initial.credential_origin == LOCAL and not initial.access_token:
             raise ReauthenticationRequiredError(
-                "Sign in to local Codex on the AstrBot host."
+                "Sign in to local Codex on the AstrBot host.", credential_origin=LOCAL
             )
         if initial.credential_origin != "local_codex":
             return await super().get_snapshot(
@@ -373,7 +377,8 @@ class LocalCredentialCoordinator(CredentialCoordinator):
             if snapshot.credential_origin == "local_codex":
                 if not snapshot.access_token:
                     raise ReauthenticationRequiredError(
-                        "Sign in to local Codex on the AstrBot host."
+                        "Sign in to local Codex on the AstrBot host.",
+                        credential_origin=LOCAL,
                     )
                 if check_cooldown and snapshot.is_cooling_down():
                     raise CredentialCooldownError(
@@ -386,7 +391,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
                     if snapshot.is_access_token_expired() or force_refresh:
                         self._states[source_id] = CredentialStatus("reauth_required")
                         raise ReauthenticationRequiredError(
-                            "Sign in to local Codex again."
+                            "Sign in to local Codex again.", credential_origin=LOCAL
                         )
                     return snapshot
                 login = self._login(source_id, fresh=True)
@@ -415,7 +420,7 @@ class LocalCredentialCoordinator(CredentialCoordinator):
                                 "reauth_required"
                             )
                             raise ReauthenticationRequiredError(
-                                "Sign in to local Codex again."
+                                "Sign in to local Codex again.", credential_origin=LOCAL
                             ) from None
                         else:
                             self._states[source_id] = CredentialStatus("degraded")

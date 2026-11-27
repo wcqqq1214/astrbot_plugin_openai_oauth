@@ -1714,13 +1714,16 @@ console.log("Default account settings passed: multi-account action, failure reco
 // Native web search toggle lives on the Plugin View page.
 let webSearchState = false;
 let failWebSearch = false;
+let searchListGate = null;
 bridge.apiPost = async (endpoint, body) => {
   if (endpoint === "providers/list") {
-    return {
+    const snapshot = {
       providers: defaultAccounts,
       routing: structuredClone(defaultState),
       settings: { native_web_search: webSearchState },
     };
+    if (searchListGate) await searchListGate.promise;
+    return snapshot;
   }
   if (endpoint === "account/usage") {
     return { status: "success", account: defaultAccounts[0], usage: { windows: [] } };
@@ -1743,9 +1746,14 @@ assert.equal(webSearchBtn.getAttribute("aria-checked"), "false");
 assert.equal(webSearchState, false);
 assert.equal(ids.get("save-error").hidden, false);
 failWebSearch = false;
+searchListGate = deferred();
+const staleSearchList = searchPage.loadProviders();
 await click(webSearchBtn);
 assert.equal(webSearchBtn.getAttribute("aria-checked"), "true");
 assert.equal(webSearchState, true);
+searchListGate.resolve();
+await staleSearchList;
+assert.equal(webSearchBtn.getAttribute("aria-checked"), "true");
 assert.equal(ids.get("save-error").hidden, true);
 console.log("Plugin View native web search switch passed: state sync, failure recovery and save.");
 

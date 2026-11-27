@@ -65,6 +65,12 @@ class ReauthenticationRequiredError(CredentialError):
 
     code = "reauth_required"
 
+    def __init__(
+        self, *args: object, credential_origin: str = "plugin", code: str | None = None
+    ) -> None:
+        super().__init__(*args, code=code)
+        self.credential_origin = credential_origin
+
 
 class CredentialRefreshError(CredentialError):
     """A refresh failed without proving that the credentials are invalid."""

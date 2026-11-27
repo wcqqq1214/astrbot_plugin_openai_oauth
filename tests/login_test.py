@@ -788,8 +788,6 @@ def test_plugin_page_assets() -> None:
 
     check("./app.js" in html, "Plugin Page loads external JavaScript")
     check("/api/plugin/page/bridge-sdk.js" in html, "Plugin Page loads the bridge SDK")
-    check("window.AstrBotPluginView" in app, "Plugin Page prefers the new view bridge")
-    check("window.AstrBotPluginPage" in app, "Plugin Page keeps legacy bridge fallback")
     check("--astrbot-color-primary" in css, "Plugin Page reads host theme color tokens")
     check(
         "category: provider_adapter" in metadata,

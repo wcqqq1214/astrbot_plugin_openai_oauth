@@ -967,6 +967,20 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(self.transports_released())
 
+    async def test_rejected_local_login_points_to_the_host_after_refresh(self):
+        await self.registry.edit("local", routing_mode="fixed")
+
+        def write_refresh(login, refreshed):
+            self.login.update(refreshed)
+            return True
+
+        self.coordinator.local_store.write_refresh = write_refresh
+        self.outcomes["local"] = [401, 401]
+        for _ in range(2):
+            with self.assertRaisesRegex(store.ReauthenticationRequiredError, "主机"):
+                await self.collect(public=True)
+        self.assertEqual(self.requested(), ["local", "local"])
+
     async def test_catalog_invalid_grant_refresh_failure_requires_reauthentication(
         self,
     ):

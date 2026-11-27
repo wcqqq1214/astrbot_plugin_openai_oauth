@@ -94,6 +94,7 @@ let saveErrorMessage = "";
 let webSearchEnabled = false;
 let webSearchPending = null;
 let webSearchBusy = false;
+let webSearchMutation = 0;
 
 // Keep UI-generated messages translatable while preserving server details.
 // The server reports its own errors as stable codes, translated here.
@@ -734,6 +735,7 @@ async function toggleWebSearch() {
       typeof result?.settings?.native_web_search === "boolean"
     ) {
       webSearchEnabled = result.settings.native_web_search;
+      webSearchMutation = ++mutationSeq;
     } else {
       reconcile = true;
       showSaveError(() => t.saveUnknown);
@@ -759,7 +761,7 @@ async function loadProviders() {
   if (!Array.isArray(list?.providers)) throw new Error();
   providers = list.providers.map((p) => keepNewerEdits(p, since));
   if (!defaultAccountBusy) accountRouting = list.routing || null;
-  if (!webSearchBusy && typeof list?.settings?.native_web_search === "boolean") {
+  if (!webSearchBusy && webSearchMutation <= since && typeof list?.settings?.native_web_search === "boolean") {
     webSearchEnabled = list.settings.native_web_search;
     renderWebSearch();
   }

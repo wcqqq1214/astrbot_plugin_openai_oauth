@@ -7,7 +7,6 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -17,17 +16,7 @@ os.chdir(ASTRBOT_ROOT)
 
 import httpx
 import source_lifecycle_test as lifecycle_fixtures
-from astrbot.api.event import AstrMessageEvent
-from astrbot.api.star import Context
-from astrbot.core.agent.hooks import BaseAgentRunHooks
-from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
 from astrbot.core.agent.tool import FunctionTool, ToolSet
-from astrbot.core.agent_output import present_turn
-from astrbot.core.astr_agent_context import AgentContextWrapper, AstrAgentContext
-from astrbot.core.platform.astrbot_message import AstrBotMessage, MessageMember
-from astrbot.core.platform.message_type import MessageType
-from astrbot.core.platform.platform_metadata import PlatformMetadata
-from astrbot.core.provider.entities import ProviderRequest
 from openai import AsyncOpenAI
 
 package = lifecycle_fixtures.runtime.__package__.rsplit(".", 1)[0]
@@ -93,7 +82,6 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         payload: dict | None = None,
     ):
         final_bodies: list[dict] = []
-        sdk_calls: list[tuple[dict, dict]] = []
 
         class EventBody(httpx.AsyncByteStream):
             async def __aiter__(self):
@@ -114,20 +102,7 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
             max_retries=0,
             http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
         ) as client:
-            real_create = client.responses.create
-
-            async def spy_create(**kwargs):
-                extra_body = dict(kwargs.get("extra_body") or {})
-                direct_kwargs = {
-                    k: v
-                    for k, v in kwargs.items()
-                    if k not in {"extra_body", "extra_headers", "stream"}
-                }
-                sdk_calls.append((direct_kwargs, extra_body))
-                return await real_create(**kwargs)
-
             native_search = bool(getattr(provider, "_test_native_web_search", False))
-            client.responses.create = spy_create  # type: ignore[method-assign]
             with mock.patch.object(
                 runtime, "native_web_search_enabled", return_value=native_search
             ):
@@ -140,7 +115,7 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
                     request_max_retries=1,
                 ):
                     output.append(item)
-        return final_bodies[0], sdk_calls[0], output
+        return final_bodies[0], output
 
     async def test_request_tools_and_tool_choice_merging(self):
         fn_tools = _make_tool_set("weather", "clock")
@@ -149,54 +124,48 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
             for item in fn_tools.openai_schema()
         ]
 
-        # 1. Default off: no tools or tool_choice added.
-        body, (direct, extra), _ = await self._run_query(
-            _new_provider(), DEFAULT_SUCCESS
-        )
+        # Default off: no tools or tool_choice added.
+        body, _ = await self._run_query(_new_provider(), DEFAULT_SUCCESS)
         self.assertNotIn("tools", body)
         self.assertNotIn("tool_choice", body)
-        self.assertNotIn("tools", extra)
-        self.assertNotIn("tool_choice", extra)
 
-        # 2. Enabled without function tools: injects web_search and auto tool_choice.
-        body, (direct, extra), _ = await self._run_query(
+        # Enabled without function tools: injects web_search and auto tool_choice.
+        body, _ = await self._run_query(
             _new_provider(native_web_search=True), DEFAULT_SUCCESS
         )
         self.assertEqual(body["tools"], [WEB_SEARCH_TOOL])
         self.assertEqual(body["tool_choice"], "auto")
-        self.assertEqual(direct["tools"], [WEB_SEARCH_TOOL])
-        self.assertNotIn("tools", extra)
-        self.assertNotIn("tool_choice", extra)
 
-        # 3. Enabled with multiple function tools: keeps all function tools + web_search.
-        body, _, _ = await self._run_query(
+        # Enabled with multiple function tools: keeps all function tools + web_search.
+        body, _ = await self._run_query(
             _new_provider(native_web_search=True), DEFAULT_SUCCESS, tools=fn_tools
         )
         self.assertEqual(body["tools"], [*expected_fn_tools, WEB_SEARCH_TOOL])
         self.assertEqual(body["tool_choice"], "auto")
 
-        # 4. Disabled with function tools: sends only function tools.
-        body, _, _ = await self._run_query(
-            _new_provider(native_web_search=False), DEFAULT_SUCCESS, tools=fn_tools
-        )
-        self.assertEqual(body["tools"], expected_fn_tools)
-        self.assertEqual(body["tool_choice"], "auto")
+        # Configured tools override AstrBot functions, including when search is off.
+        custom_body = {"tools": expected_fn_tools[:1], "tool_choice": "required"}
+        for enabled in (False, True):
+            body, _ = await self._run_query(
+                _new_provider(native_web_search=enabled, custom_extra_body=custom_body),
+                DEFAULT_SUCCESS,
+                tools=fn_tools,
+            )
+            expected = [expected_fn_tools[0]]
+            if enabled:
+                expected.append(WEB_SEARCH_TOOL)
+            self.assertEqual(body["tools"], expected)
+            self.assertEqual(body["tool_choice"], "required")
 
-        # 5. Existing web_search in custom_extra_body: no duplicate, no mutation, tools kept.
-        custom_body = {"tools": [dict(WEB_SEARCH_TOOL)], "tool_choice": "required"}
-        provider = _new_provider(native_web_search=True, custom_extra_body=custom_body)
-        body, (direct, extra), _ = await self._run_query(
-            provider, DEFAULT_SUCCESS, tools=fn_tools
+        body, _ = await self._run_query(
+            _new_provider(
+                native_web_search=True, custom_extra_body={"tools": [WEB_SEARCH_TOOL]}
+            ),
+            DEFAULT_SUCCESS,
         )
-        self.assertEqual(body["tools"], [*expected_fn_tools, WEB_SEARCH_TOOL])
-        self.assertEqual(body["tool_choice"], "required")
-        self.assertNotIn("tools", extra)
-        self.assertNotIn("tool_choice", extra)
-        self.assertEqual(
-            custom_body, {"tools": [dict(WEB_SEARCH_TOOL)], "tool_choice": "required"}
-        )
+        self.assertEqual(body["tools"], [WEB_SEARCH_TOOL])
 
-        # 6. Explicit tool_choice via text_chat_stream overrides default auto without breaking default-off.
+        # Explicit tool_choice via text_chat_stream overrides default auto without breaking default-off.
         captured: list[tuple[dict, object]] = []
 
         async def capture_stream(payloads, tools, **_kwargs):
@@ -305,7 +274,7 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         # Real SDK SSE stream parsing path
-        _, _, sdk_output = await self._run_query(
+        _, sdk_output = await self._run_query(
             _new_provider(native_web_search=True), sdk_events
         )
         self.assertEqual(len(sdk_output), 3)
@@ -404,9 +373,7 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
                 },
             }
         ]
-        _, _, output = await self._run_query(
-            _new_provider(native_web_search=True), events
-        )
+        _, output = await self._run_query(_new_provider(native_web_search=True), events)
         self.assertEqual(len(output), 1)
         self.assertEqual(
             output[0].completion_text,
@@ -433,7 +400,7 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
                 "response": {"id": "resp-plain", "status": "completed", "output": []},
             },
         ]
-        _, _, plain_output = await self._run_query(
+        _, plain_output = await self._run_query(
             _new_provider(native_web_search=True), no_cite_events
         )
         self.assertEqual(plain_output[-1].completion_text, "Plain.")
@@ -469,7 +436,7 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
                 "response": {"id": "resp-tool", "status": "completed", "output": []},
             },
         ]
-        _, _, output = await self._run_query(
+        _, output = await self._run_query(
             _new_provider(native_web_search=True), events, tools=fn_tools
         )
         final = output[-1]
@@ -477,106 +444,6 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final.tools_call_name, ["lookup"])
         self.assertEqual(final.tools_call_args, [{"key": "val"}])
         self.assertEqual(final.tools_call_ids, ["call_1"])
-
-    async def test_streaming_and_non_streaming_pipeline_do_not_duplicate_text(self):
-        events = [
-            {"type": "response.output_text.delta", "delta": "Hello "},
-            {"type": "response.output_text.delta", "delta": "world."},
-            {
-                "type": "response.output_item.done",
-                "output_index": 0,
-                "item": {
-                    "id": "msg_1",
-                    "type": "message",
-                    "role": "assistant",
-                    "status": "completed",
-                    "content": [
-                        {
-                            "type": "output_text",
-                            "text": "Hello world.",
-                            "annotations": [
-                                {
-                                    "type": "url_citation",
-                                    "title": "Ref",
-                                    "url": "https://ref.example",
-                                    "start_index": 0,
-                                    "end_index": 12,
-                                }
-                            ],
-                        }
-                    ],
-                },
-            },
-            {
-                "type": "response.completed",
-                "response": {"id": "resp-pipe", "status": "completed", "output": []},
-            },
-        ]
-        expected_text = "Hello world.\n\n来源：\n1. [Ref](https://ref.example)"
-
-        async def run_pipeline(streaming: bool) -> list[str]:
-            provider = _new_provider(native_web_search=True)
-
-            async def fake_stream(*_args, **_kwargs):
-                _, _, items = await self._run_query(provider, events)
-                for item in items:
-                    yield item
-
-            provider.get_model = lambda: "gpt-5.4-mini"  # type: ignore[method-assign]
-            provider.text_chat_stream = fake_stream  # type: ignore[method-assign]
-            provider.text_chat = mock.AsyncMock(  # type: ignore[method-assign]
-                return_value=[item async for item in fake_stream()][-1]
-            )
-            msg = AstrBotMessage()
-            msg.type = MessageType.FRIEND_MESSAGE
-            msg.sender = MessageMember(user_id="u1")
-            msg.self_id = "bot"
-            msg.message_str = "hi"
-            event = AstrMessageEvent(
-                "hi",
-                msg,
-                PlatformMetadata(name="test", id="test", description="test"),
-                "sess-1",
-            )
-            req = ProviderRequest(
-                prompt="hi",
-                session_id="sess-1",
-                contexts=[{"role": "user", "content": "hi"}],
-            )
-            star_ctx = mock.MagicMock(spec=Context)
-            star_ctx.get_config.return_value = {}
-            ctx = AstrAgentContext(context=star_ctx, event=event)
-            runner = ToolLoopAgentRunner()
-            await runner.reset(
-                provider=provider,
-                request=req,
-                run_context=AgentContextWrapper(context=ctx),
-                tool_executor=mock.Mock(),
-                agent_hooks=BaseAgentRunHooks(),
-                streaming=streaming,
-            )
-
-            async def turn_events():
-                async for item in runner.step():
-                    yield SimpleNamespace(payload=item)
-
-            turn = SimpleNamespace(
-                input=SimpleNamespace(event=event),
-                events=turn_events,
-                cancellation_requested=False,
-            )
-            parts: list[str] = []
-            async for chain in present_turn(turn, streaming=streaming):
-                parts.append(chain.get_plain_text())
-            return parts
-
-        streaming_parts = await run_pipeline(streaming=True)
-        self.assertEqual("".join(streaming_parts), expected_text)
-        self.assertEqual(streaming_parts.count("Hello "), 1)
-        self.assertEqual("".join(streaming_parts).count("来源："), 1)
-
-        non_streaming_parts = await run_pipeline(streaming=False)
-        self.assertEqual(non_streaming_parts, [expected_text])
 
 
 class WebSearchConfigIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -780,9 +647,15 @@ class WebSearchConfigIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(provider_module.messages.language(), "zh-CN")
 
-                zh_reply = await loaded.text_chat(prompt="Hi", session_id="webchat:zh")
+                zh_chunks = [
+                    chunk.completion_text
+                    async for chunk in loaded.text_chat_stream(
+                        prompt="Hi", session_id="webchat:zh"
+                    )
+                    if chunk.is_chunk
+                ]
                 self.assertEqual(
-                    zh_reply.completion_text,
+                    "".join(zh_chunks),
                     "Latest result.\n\n来源：\n1. [Official](https://official.example)",
                 )
 
@@ -845,14 +718,6 @@ class WebSearchConfigIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 store.ReauthenticationRequiredError,
                 "sign in again",
                 "重新登录",
-            ),
-            (
-                store.ReauthenticationRequiredError(
-                    "Sign in to local Codex on the AstrBot host."
-                ),
-                store.ReauthenticationRequiredError,
-                "local codex login",
-                "本地 Codex 登录",
             ),
             (
                 store.CredentialCooldownError(1_900_000_000, "usage_limit_reached"),

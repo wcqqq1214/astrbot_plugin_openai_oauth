@@ -57,6 +57,7 @@ from .oauth import (
     DEFAULT_ORIGINATOR,
     CredentialExpiredError,
 )
+from .provider_registry import LOCAL
 from .provider_routing import (
     ROUTING_TIMEOUT_SECONDS,
     SOURCE_ATTEMPTS,
@@ -99,7 +100,7 @@ def _localize_provider_error(
     if isinstance(exc, ReauthenticationRequiredError):
         key = (
             "provider.local_reauth_required"
-            if "local Codex" in str(exc)
+            if exc.credential_origin == LOCAL
             else "provider.reauth_required"
         )
         return messages.text(key, lang=lang)
@@ -351,32 +352,30 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         if isinstance(custom_extra_body, dict):
             extra_body.update(deepcopy(custom_extra_body))
 
-        merged_tools: list[Any] = []
         if tools:
-            for tool in tools.openai_schema():
-                function = tool.get("function", {})
-                merged_tools.append({"type": "function", **function})
-        payload_tools = payloads.pop("tools", None)
-        if isinstance(payload_tools, list):
-            merged_tools.extend(payload_tools)
-        extra_tools = extra_body.pop("tools", None)
-        if isinstance(extra_tools, list):
-            merged_tools.extend(extra_tools)
-        if runtime.native_web_search_enabled() and not any(
-            isinstance(item, dict)
-            and item.get("type") in {"web_search", "web_search_preview"}
-            for item in merged_tools
-        ):
-            merged_tools.append({"type": "web_search", "external_web_access": True})
+            functions = [
+                {"type": "function", **tool["function"]}
+                for tool in tools.openai_schema()
+            ]
+            if functions:
+                payloads["tools"] = functions
+                payloads.setdefault("tool_choice", "auto")
 
-        extra_tool_choice = extra_body.pop("tool_choice", None)
-        if extra_tool_choice is not None and (
-            "tool_choice" not in payloads or payloads["tool_choice"] == "auto"
-        ):
-            payloads["tool_choice"] = extra_tool_choice
-        if merged_tools:
-            payloads["tools"] = merged_tools
-            payloads.setdefault("tool_choice", "auto")
+        if runtime.native_web_search_enabled():
+            # Extend the tool list that would actually be sent by the SDK.
+            configured_tools = extra_body.pop("tools", payloads.get("tools")) or []
+            if not any(
+                tool["type"] in {"web_search", "web_search_preview"}
+                for tool in configured_tools
+            ):
+                configured_tools = [
+                    *configured_tools,
+                    {"type": "web_search", "external_web_access": True},
+                ]
+            payloads["tools"] = configured_tools
+            if payloads.get("tool_choice", "auto") == "auto":
+                payloads["tool_choice"] = extra_body.get("tool_choice", "auto")
+            extra_body.pop("tool_choice", None)
 
         for key in list(payloads):
             if key not in self.default_params:
@@ -769,7 +768,8 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                 if error_kind == "credential" and not emitted_chunk:
                     coordinator.mark_reauthentication(snapshot)
                     raise ReauthenticationRequiredError(
-                        "Sign in to this Provider again."
+                        "Sign in to this Provider again.",
+                        credential_origin=snapshot.credential_origin,
                     ) from None
                 raise
 
