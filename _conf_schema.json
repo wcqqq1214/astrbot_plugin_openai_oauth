@@ -3,7 +3,7 @@
     "description": "Codex auth.json 路径（可选）",
     "type": "string",
     "default": "",
-    "hint": "留空时读取 $CODEX_HOME/auth.json 或 ~/.codex/auth.json。Docker 请挂载整个凭据目录；自动刷新需要目录写权限。保存后重载插件生效。"
+    "hint": "留空默认读取 $CODEX_HOME/auth.json 或 ~/.codex/auth.json。Docker 环境需挂载整个目录并赋予写权限。修改后需重载插件。"
   },
   "chat_language": {
     "description": "聊天回复语言",
@@ -23,18 +23,18 @@
       "Русский",
       "日本語"
     ],
-    "hint": "/usage、/effort、/openai_login 和 /draw 等聊天回复的语言。选择“跟随系统语言”时跟随 AstrBot 系统语言（旧版 AstrBot 回退为简体中文）。插件页面跟随 Dashboard 语言。保存后重载插件生效。"
+    "hint": "命令回复与错误提示的语言。插件页面语言跟随管理面板。修改后需重载插件。"
   },
   "image_enabled": {
-    "description": "启用 GPT Image 生图",
+    "description": "GPT Image 生图",
     "type": "bool",
     "default": false,
-    "hint": "允许在对话中由模型自动生图，或用 /draw 直接生图（消耗当前聊天账号的订阅额度）。"
+    "hint": "开启后支持在对话中自动生图，或使用 /draw 命令生图。"
   },
   "image_account": {
-    "description": "生图账号来源 ID（可选）",
+    "description": "指定生图账号 ID（可选）",
     "type": "string",
     "default": "",
-    "hint": "留空则跟随当前聊天使用的账号；填写指定来源 ID 后，只有该账号回复的对话才允许生图。"
+    "hint": "留空时跟随当前对话使用的账号；填写后仅在该账号回复的对话中允许生图。"
   }
 }

@@ -38,10 +38,10 @@ def install(coordinator):
         accounts = coordinator.providers.owned()
         result["config_schema"]["provider"]["items"][FIELD] = {
             "type": "string",
-            "description": "模型账号 / Model account",
-            "hint": "留空跟随默认账号 / Leave empty to follow the default account.",
+            "description": "绑定账号 / Account",
+            "hint": "留空使用默认账号 / Leave blank to use the default account.",
             "options": [""] + [a["id"] for a in accounts],
-            "labels": ["跟随默认账号 / Follow default"]
+            "labels": ["默认账号 / Default account"]
             + [a.get("name") or a["id"] for a in accounts],
             "invisible": len(accounts) < 2,
             "condition": {"provider_source_id": coordinator.default_source_id},

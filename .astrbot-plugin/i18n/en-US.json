@@ -2,18 +2,18 @@
   "metadata": {
     "display_name": "OpenAI Subscription Login",
     "short_desc": "Use your ChatGPT subscription in AstrBot without an API key.",
-    "desc": "Sign in through local Codex or a device code, manage multiple accounts, and check remaining allowances. Enable automatic fallback to try another account when one is unavailable."
+    "desc": "Sign in via local Codex or device code, manage multiple accounts, check quotas, and enable automatic fallback."
   },
   "pages": {
     "providers": {
       "title": "Providers",
-      "description": "Manage ChatGPT sign-ins, provider settings and subscription allowances."
+      "description": "Manage ChatGPT accounts, routing settings, and subscription quotas."
     }
   },
   "config": {
     "codex_auth_path": {
       "description": "Codex auth.json path (optional)",
-      "hint": "Leave blank to read $CODEX_HOME/auth.json or ~/.codex/auth.json. In Docker, mount the entire credential directory; automatic refresh requires write access to that directory. Reload the plugin after saving."
+      "hint": "Defaults to $CODEX_HOME/auth.json or ~/.codex/auth.json. In Docker, mount the directory with write access. Reload the plugin after changes."
     },
     "chat_language": {
       "description": "Chat reply language",
@@ -24,15 +24,15 @@
         "Русский",
         "日本語"
       ],
-      "hint": "Language for chat replies such as /usage, /effort, /openai_login, and /draw. When set to Follow system language, replies follow AstrBot's system language (older AstrBot versions fall back to Simplified Chinese). The plugin page follows the dashboard language. Reload the plugin after saving."
+      "hint": "Language for command replies and chat errors. The plugin page follows the dashboard language. Reload the plugin after changes."
     },
     "image_enabled": {
-      "description": "Enable GPT Image generation",
-      "hint": "Allow image generation in chat and via /draw using the current chat account's subscription allowance."
+      "description": "GPT Image generation",
+      "hint": "Generate images in chat or with /draw."
     },
     "image_account": {
-      "description": "Image account source ID (optional)",
-      "hint": "Leave blank to follow the account used in chat. Set a source ID to allow image generation only on turns handled by that account."
+      "description": "Image account ID (optional)",
+      "hint": "Leave blank to use the current chat account. Set an account ID to restrict image generation to turns handled by that account."
     }
   }
 }

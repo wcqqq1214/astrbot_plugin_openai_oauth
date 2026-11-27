@@ -286,7 +286,7 @@ assert.match(read("usage-result"), /40%/);
 assert.equal(read("source-name"), "Work");
 // Without a confirmed Pro plan, a lone weekly window keeps its caveat.
 assert.equal(ids.get("quota-policy").hidden, false);
-assert.match(read("quota-policy"), /不代表无限额度/);
+assert.match(read("quota-policy"), /仅返回每周额度/);
 resolveOld({status: "success", account, usage: {windows: [{label_seconds: 604800, used_percent: 1}]}});
 await oldQuery;
 assert.match(read("usage-result"), /40%/);
@@ -517,7 +517,7 @@ await openSettings("工作");
 await click(ids.get("settings-routing-auto"));
 assert.equal(ids.get("settings-routing-auto").attributes["aria-pressed"], "true");
 assert.equal(ids.get("settings-routing-fixed").attributes["aria-pressed"], "false");
-assert.match(read("settings-routing-help"), /优先使用此账号.*列表顺序.*其他可用账号.*只试一次.*开始输出后不再切换/);
+assert.match(read("settings-routing-help"), /优先使用此账号.*其他可用账号.*开始输出后不再切换/);
 // Switching back to the starting mode is not a change.
 await click(ids.get("settings-routing-fixed"));
 assert.equal(saveButton.disabled, true, "returning to the starting values is not a change");
@@ -839,7 +839,7 @@ waitingLogin = page.poll("device-fresh", 5);
 pollFailure(new Error("Network unavailable"));
 await waitingLogin;
 assert.ok(shown("device-panel"));
-assert.match(read("status"), /连接暂时中断，正在重试/);
+assert.match(read("status"), /连接中断，正在重试/);
 // Saving: the code and the cancel action go away, closing is held back
 // because the server refuses to cancel now, and no cancel is sent.
 let savingPoll = page.poll("device-fresh", 5);
