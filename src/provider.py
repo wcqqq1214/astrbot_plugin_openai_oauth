@@ -475,6 +475,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
 
         while attempts < max_attempts:
             consuming = False
+            final_response = None
             try:
                 async with AsyncExitStack() as stack:
                     stream, attempt = await retry_provider_request(
@@ -508,10 +509,16 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                     ):
                         async for response in responses:
                             emitted_response = True
-                            if attempt is not None and response.is_chunk:
+                            if not response.is_chunk:
+                                final_response = response
+                                break
+                            if attempt is not None:
                                 attempt.mark_first_token()
                             yield response
                     consuming = False
+                # The agent closes the iterator as soon as it receives the final response.
+                if final_response is not None:
+                    yield final_response
                 return
             except Exception as exc:
                 if (

@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
+from contextlib import aclosing
 from importlib.util import find_spec
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -21,18 +22,24 @@ if HAS_REQUEST_STATS:
     from sqlmodel import select
 
 
-def completion(*, report_usage=True):
+USAGE = {
+    "input_tokens": 11,
+    "input_tokens_details": {"cached_tokens": 3},
+    "output_tokens": 7,
+}
+TEXT_DELTA = {"type": "response.output_text.delta", "delta": "ok"}
+
+
+def completion(*, usage=USAGE):
     response = {"id": "r", "status": "completed", "output": []}
-    if report_usage:
-        response["usage"] = {
-            "input_tokens": 11,
-            "input_tokens_details": {"cached_tokens": 3},
-            "output_tokens": 7,
-        }
-    events = [
-        {"type": "response.output_text.delta", "delta": "ok"},
-        {"type": "response.completed", "response": response},
-    ]
+    if usage is not None:
+        response["usage"] = usage
+    return event_stream(
+        TEXT_DELTA, {"type": "response.completed", "response": response}
+    )
+
+
+def event_stream(*events):
     return httpx.Response(
         200,
         text="".join(f"data: {json.dumps(event)}\n\n" for event in events),
@@ -114,10 +121,95 @@ class RequestUsageTests(RoutingFixture):
         self.assertEqual(chunks[-1].usage.total, 18)
         await self.assert_usage([("error", None, None, None), ("completed", 8, 3, 7)])
 
+    async def test_credential_refresh_and_account_fallback_count_only_chat_requests(
+        self,
+    ):
+        await self.registry.edit("local", enabled=False)
+        self.outcomes.update(same=[401, 401], other=[completion()])
+        result = await self.provider.text_chat(prompt="hi", conversation_id="conv")
+        self.assertEqual(result.usage.total, 18)
+        self.assertEqual(self.requested(), ["same", "same", "other"])
+        self.refresh.assert_awaited_once()
+        await self.assert_usage(
+            [("error", None, None, None)] * 2 + [("completed", 8, 3, 7)]
+        )
+
     async def test_missing_usage_stays_unknown(self):
-        self.outcomes["local"] = [completion(report_usage=False)]
-        await self.provider.text_chat(prompt="hi", conversation_id="conv")
+        self.outcomes["local"] = [completion(usage=None)]
+        response = await self.provider.text_chat(prompt="hi", conversation_id="conv")
+        self.assertIsNone(response.usage)
         await self.assert_usage([("completed", None, None, None)], total=0)
+
+    async def test_close_on_final_response_counts_as_completed(self):
+        self.outcomes["local"] = [completion()]
+        async with aclosing(
+            self.provider.text_chat_stream(prompt="hi", conversation_id="conv")
+        ) as stream:
+            async for response in stream:
+                if not response.is_chunk:
+                    self.assertEqual(response.usage.total, 18)
+                    break
+            else:
+                self.fail("Expected a final response")
+        await self.assert_usage([("completed", 8, 3, 7)])
+
+    async def test_empty_usage_and_explicit_zero_are_distinct(self):
+        for usage in ({}, {"input_tokens": 0, "output_tokens": 0}):
+            self.outcomes["local"] = [completion(usage=usage)]
+            result = await self.provider.text_chat(prompt="hi", conversation_id="conv")
+            if usage:
+                self.assertEqual(result.usage.total, 0)
+            else:
+                self.assertIsNone(result.usage)
+        await self.assert_usage(
+            [("completed", None, None, None), ("completed", 0, 0, 0)], total=0
+        )
+
+    async def test_failed_terminal_response_retains_reported_usage(self):
+        for metadata in ({"status": "failed"}, {}):
+            self.outcomes["local"] = [
+                event_stream(
+                    TEXT_DELTA,
+                    {
+                        "type": "response.failed",
+                        "response": {
+                            **metadata,
+                            "error": {"code": "server_error"},
+                            "usage": USAGE,
+                        },
+                    },
+                )
+            ]
+            result = await self.provider.text_chat(prompt="hi", conversation_id="conv")
+            self.assertEqual(result.role, "err")
+        await self.assert_usage([("error", 8, 3, 7)] * 2, total=36)
+
+    async def test_last_reported_snapshot_reaches_both_response_and_dashboard(self):
+        self.outcomes["local"] = [
+            event_stream(
+                {
+                    "type": "response.in_progress",
+                    "response": {"usage": {"input_tokens": 5, "output_tokens": 0}},
+                },
+                {"type": "response.in_progress", "response": {"usage": USAGE}},
+                TEXT_DELTA,
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [{"type": "output_text", "text": "ok"}],
+                            }
+                        ],
+                    },
+                },
+            )
+        ]
+        result = await self.provider.text_chat(prompt="hi", conversation_id="conv")
+        self.assertEqual(result.usage.total, 18)
+        await self.assert_usage([("completed", 8, 3, 7)])
 
     async def test_failure_after_first_delta_records_error_without_replay(self):
         self.outcomes["local"] = ["partial", completion()]

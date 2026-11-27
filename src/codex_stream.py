@@ -60,6 +60,7 @@ class CodexStreamMixin:
     ) -> AsyncGenerator[LLMResponse, None]:
         """Keep partial response state scoped to a single stream attempt."""
         response_id: str | None = None
+        usage: TokenUsage | None = None
         text_parts: list[str] = []
         # Deltas are fragments of one text; a new item or summary part starts
         # a new segment, matching how complete responses separate them.
@@ -74,9 +75,11 @@ class CodexStreamMixin:
             event_response = self._field(event, "response")
             if event_response is not None:
                 response_id = self._field(event_response, "id", response_id)
-                usage = self._extract_response_usage(event_response)
-                if attempt is not None and usage is not None:
-                    attempt.usage = usage
+                snapshot = self._extract_response_usage(event_response)
+                if snapshot is not None:
+                    usage = snapshot
+                    if attempt is not None:
+                        attempt.usage = snapshot
 
             if event_type == "codex.rate_limits":
                 if on_rate_limits is not None:
@@ -176,15 +179,17 @@ class CodexStreamMixin:
                 "response.incomplete",
                 "response.failed",
             }:
+                if (
+                    event_type == "response.failed"
+                    or self._field(event_response, "status") == "failed"
+                ):
+                    error = self._field(event_response, "error")
+                    code = self._field(error, "code", "unknown_error")
+                    raise RuntimeError(
+                        f"Responses API request failed: {code}. "
+                        f"response_id={response_id}"
+                    )
                 if event_response is not None:
-                    status = self._field(event_response, "status")
-                    if status == "failed":
-                        error = self._field(event_response, "error")
-                        code = self._field(error, "code", "unknown_error")
-                        raise RuntimeError(
-                            f"Responses API request failed: {code}. "
-                            f"response_id={response_id}"
-                        )
                     if (
                         self._field(
                             self._field(event_response, "incomplete_details"),
@@ -221,6 +226,9 @@ class CodexStreamMixin:
                             function_calls,
                             usage=usage,
                         )
+                    else:
+                        # The base parser sees only the terminal event.
+                        final.usage = usage
                     if final is None:
                         raise EmptyModelOutputError(
                             f"Responses stream returned no usable output. "
@@ -247,7 +255,7 @@ class CodexStreamMixin:
                     text_parts,
                     reasoning_parts,
                     function_calls,
-                    usage=None,
+                    usage=usage,
                 )
                 if final is not None:
                     yield final
@@ -334,8 +342,7 @@ class CodexStreamMixin:
         usage: TokenUsage | None = None,
     ) -> LLMResponse | None:
         """Build a final LLMResponse from streamed deltas like ``_parse_response``."""
-        llm_response = LLMResponse("assistant", id=response_id)
-        llm_response.usage = usage if usage is not None else TokenUsage()
+        llm_response = LLMResponse("assistant", id=response_id, usage=usage)
         completion_text = "".join(text_parts)
         if completion_text:
             llm_response.result_chain = MessageChain().message(completion_text)
@@ -374,12 +381,15 @@ class CodexStreamMixin:
         if usage is None:
             return None
 
+        input_tokens = self._field(usage, "input_tokens")
+        output_tokens = self._field(usage, "output_tokens")
         input_details = self._field(usage, "input_tokens_details")
-        cached_tokens = self._field(input_details, "cached_tokens", 0) or 0
-        input_tokens = self._field(usage, "input_tokens", 0) or 0
-        output_tokens = self._field(usage, "output_tokens", 0) or 0
+        cached_tokens = self._field(input_details, "cached_tokens")
+        if input_tokens is None and output_tokens is None and cached_tokens is None:
+            return None
+        cached_tokens = cached_tokens or 0
         return TokenUsage(
-            input_other=max(input_tokens - cached_tokens, 0),
+            input_other=max((input_tokens or 0) - cached_tokens, 0),
             input_cached=cached_tokens,
-            output=output_tokens,
+            output=output_tokens or 0,
         )
