@@ -108,9 +108,10 @@ Open an account's gear menu, switch routing to **Automatic fallback**, and click
 
 ## GPT Image generation and image inputs
 
-Turn on **Enable GPT Image generation** next to **Native web search** under **Plugin Views → providers**, or in AstrBot's plugin settings. Both controls use the same `image_enabled` setting, which defaults to off. When enabled, image generation uses the current chat account's subscription allowance.
+Turn on **GPT Image generation** next to **Native web search** under **Plugin Views → providers**, or in AstrBot's plugin settings. Both controls use the same `image_enabled` setting, which defaults to off. Generation and editing use the current chat account’s subscription allowance.
 
 - **In-chat generation**: Describe an image in an OpenAI Subscribe chat (e.g., *"Draw a portrait poster of a cat holding an umbrella in the rain, with space at the top"*). The model calls `codex_generate_image` to create and send the PNG. Specify orientation, aspect ratio, and composition in your prompt; Codex chooses the pixel dimensions automatically.
+- **Edit an attached image**. Attach one image and write “Keep the person and composition, and change the background to a night scene” in the same message. The model calls `codex_edit_image` to edit the original with the account serving that turn and sends back a PNG. Asking “What’s in this image?” gets a text answer. If the attachment cannot be read, send it again with the edit instructions.
 - **Direct `/draw` command**: Send `/draw <prompt>` to skip follow-up questions from the model. It reuses whichever account handled the most recent successful OpenAI Subscribe chat in that conversation (after a plugin reload, send one normal chat message before using `/draw` again).
 - **Account restriction**: Leave `image_account` blank to follow whichever account answered the chat, or set a source ID to allow drawing only on turns handled by that source. Image generation never falls back across accounts.
 - **Automatic input image resizing**: Oversized image attachments sent to the model are automatically resized for Codex (longest edge capped at 2048 px by default, or 6000 px when original detail is requested) while leaving original attachments and AstrBot's shared history untouched.
@@ -154,8 +155,8 @@ Configure the following options in the plugin's settings dialog inside AstrBot:
 | --- | --- | --- |
 | `codex_auth_path` | *(empty)* | Optional full path to a local Codex `auth.json` file. When blank, checks `$CODEX_HOME/auth.json` and `~/.codex/auth.json`. Reload the plugin after saving. |
 | `chat_language` | `auto` (follow system) | Language for `/usage`, `/effort`, `/openai_login`, `/draw`, and provider errors (`auto`, Simplified Chinese, English, Russian, or Japanese). |
-| `image_enabled` | `false` | Enables in-chat GPT Image generation (`codex_generate_image`) and the `/draw` command. |
-| `image_account` | *(empty)* | Restricts image generation to conversations answered by a specific account source ID. Blank follows the active chat account. |
+| `image_enabled` | `false` | Enables in-chat GPT Image generation, reference image editing, and the `/draw` command. |
+| `image_account` | *(empty)* | Restricts generation and editing to turns served by the specified account source ID. Blank follows the active chat account. |
 
 ## Common questions
 

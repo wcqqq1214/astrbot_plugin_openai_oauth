@@ -95,9 +95,16 @@ class OpenAI_OAuth_Plugin(Star):
                 request.conversation.cid if request.conversation else None,
             ),
         )
-        if not self.config.get("image_enabled", False) and request.func_tool:
-            request.func_tool = copy(request.func_tool)
+        if not request.func_tool:
+            return
+        request.func_tool = copy(request.func_tool)
+        if not self.config.get("image_enabled", False):
             request.func_tool.remove_tool(image_generation.TOOL_NAME)
+            request.func_tool.remove_tool(image_generation.EDIT_TOOL_NAME)
+        elif any(isinstance(part, Image) for part in event.get_messages()):
+            request.func_tool.remove_tool(image_generation.TOOL_NAME)
+        else:
+            request.func_tool.remove_tool(image_generation.EDIT_TOOL_NAME)
 
     @filter.on_llm_response()
     async def remember_image_account(
@@ -141,11 +148,31 @@ class OpenAI_OAuth_Plugin(Star):
 
     @filter.llm_tool(name=image_generation.TOOL_NAME)
     async def codex_generate_image(self, event: AstrMessageEvent, prompt: str) -> str:
-        """Generate and send an image when the user asks for one.
+        """Generate and send a new image when the user asks for one from text.
+
+        If the user wants to change an existing image, ask them to attach it
+        with their instructions in the same message.
 
         Args:
             prompt(string): Describe the image, including any requested orientation and composition.
         """
+        return await self._run_image_tool(event, prompt, edit=False)
+
+    @filter.llm_tool(name=image_generation.EDIT_TOOL_NAME)
+    async def codex_edit_image(self, event: AstrMessageEvent, prompt: str) -> str:
+        """Edit and send the attached image when the user asks to change it.
+
+        Answer questions about the image directly without calling this tool.
+        If editing fails, report the error.
+
+        Args:
+            prompt(string): Describe the requested changes and what to preserve. The plugin supplies the attachment.
+        """
+        return await self._run_image_tool(event, prompt, edit=True)
+
+    async def _run_image_tool(
+        self, event: AstrMessageEvent, prompt: str, *, edit: bool
+    ) -> str:
         reply_language = await _resolve_reply_language(self, event)
         with messages.use_language(reply_language):
             invocation = image_generation.tool_invocation.get()
@@ -153,6 +180,7 @@ class OpenAI_OAuth_Plugin(Star):
                 event,
                 invocation.account if invocation is not None else None,
                 prompt,
+                edit=edit,
                 runner_timeout=invocation.runner_timeout
                 if invocation is not None
                 else None,
@@ -165,6 +193,7 @@ class OpenAI_OAuth_Plugin(Star):
         account: image_generation.ChatAccount | None,
         prompt: str,
         *,
+        edit: bool = False,
         runner_timeout: float | None = None,
     ) -> str | None:
         if not self.config.get("image_enabled", False):
@@ -186,7 +215,12 @@ class OpenAI_OAuth_Plugin(Star):
             )
             async with asyncio.timeout(timeout):
                 with chatui_citations.image_generation_indicator(event):
-                    image = await image_generation.generate(provider, account, prompt)
+                    reference = (
+                        await image_generation.read_edit_image(event) if edit else None
+                    )
+                    image = await image_generation.generate(
+                        provider, account, prompt, reference_image=reference
+                    )
                     await event.send(MessageChain(chain=[Image.fromBytes(image)]))
         except TimeoutError:
             return messages.text("image.timeout")

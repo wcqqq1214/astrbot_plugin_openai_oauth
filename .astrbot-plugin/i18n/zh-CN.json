@@ -28,7 +28,7 @@
     },
     "image_enabled": {
       "description": "GPT Image 生图",
-      "hint": "开启后支持在对话中自动生图，或使用 /draw 命令生图。"
+      "hint": "可在对话中生图、编辑同一条消息中附带的参考图，或用 /draw 生图。"
     },
     "image_account": {
       "description": "指定生图账号 ID（可选）",

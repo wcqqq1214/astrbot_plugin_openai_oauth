@@ -7,7 +7,7 @@ import importlib
 import json
 import sys
 import unittest
-from base64 import b64encode
+from base64 import b64decode, b64encode
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -19,6 +19,9 @@ from zlib import compress, crc32
 
 sys.path.insert(0, str(Path(__file__).parent))
 import httpx
+from astrbot.core.agent.tool import ToolSet
+from astrbot.core.message.components import Reply
+from astrbot.core.provider.register import llm_tools
 from local_codex_test import Config, jwt, local, store
 from login_test import payload, plugin, request_context
 from openai import BadRequestError, PermissionDeniedError
@@ -42,9 +45,9 @@ def image_response(png: bytes) -> httpx.Response:
     return httpx.Response(200, json={"data": [{"b64_json": b64encode(png).decode()}]})
 
 
-def sample_png() -> bytes:
+def sample_png(color: str = "blue") -> bytes:
     output = BytesIO()
-    with Image.new("RGB", (3, 2), "blue") as image:
+    with Image.new("RGB", (3, 2), color) as image:
         image.save(output, format="PNG")
     return output.getvalue()
 
@@ -385,10 +388,149 @@ class RoutingTests(RoutingFixture):
             should_call_llm=lambda _: None,
         )
         await star.prepare_image_tool(
-            event, SimpleNamespace(conversation=SimpleNamespace(cid="conversation"))
+            event,
+            SimpleNamespace(
+                conversation=SimpleNamespace(cid="conversation"), func_tool=None
+            ),
         )
         await star.remember_image_account(event, self.output[-1])
         return star, event
+
+    async def test_edits_use_each_current_attachment_and_the_serving_account(self):
+        self.outcomes["local"] = [429]
+        await self.collect()
+        account = self.output[-1]._codex_image_account
+        self.assertEqual(account.source_id, "other")
+        star, first = await self.image_entrypoints()
+        _, second = await self.image_entrypoints()
+        second.unified_msg_origin = "another-session"
+        star.config["image_account"] = "other"
+        quoted = Reply(
+            id="previous", chain=[plugin.Image.fromBytes(sample_png("green"))]
+        )
+        sources = {"Night scene": sample_png("red"), "Snow scene": sample_png("yellow")}
+        output = sample_png()
+        self.outcomes["other"] = [image_response(output), image_response(output)]
+
+        async def edit(event, prompt):
+            event.get_messages = lambda: [
+                quoted,
+                plugin.Image.fromBytes(sources[prompt]),
+            ]
+            token = image_generation.tool_invocation.set(
+                image_generation.ToolInvocation(account, 120)
+            )
+            try:
+                result = await star.codex_edit_image(event, prompt)
+            finally:
+                image_generation.tool_invocation.reset(token)
+            self.assertEqual(result, plugin.messages.text("image.sent"))
+            self.assertEqual(
+                event.send.await_args.args[0].chain[0].file,
+                plugin.Image.fromBytes(output).file,
+            )
+
+        await asyncio.gather(edit(first, "Night scene"), edit(second, "Snow scene"))
+        self.assertEqual(self.requested(), ["local", "other", "other", "other"])
+        chat_request = self.requests[1][1]
+        for _, request in self.requests[2:]:
+            self.assertEqual(request.method, "POST")
+            self.assertEqual(str(request.url), f"{oauth.CODEX_BASE}/images/edits")
+            self.assertEqual(request.headers["content-type"], "application/json")
+            for key in ("authorization", "chatgpt-account-id"):
+                self.assertEqual(request.headers[key], chat_request.headers[key])
+            body = json.loads(request.content)
+            self.assertEqual(body["model"], "gpt-image-2")
+            self.assertEqual(body["output_format"], "png")
+            [image] = body["images"]
+            header, encoded = image["image_url"].split(",")
+            self.assertEqual(header, "data:image/png;base64")
+            self.assertEqual(b64decode(encoded, validate=True), sources[body["prompt"]])
+
+    async def test_failed_edit_never_generates_or_uses_cached_account(self):
+        self.provider._source_id = "same"
+        await self.collect()
+        star, event = await self.image_entrypoints()
+        source = plugin.Image.fromBytes(sample_png())
+        event.get_messages = lambda: [source]
+
+        async def check(key):
+            self.assertEqual(
+                await star.codex_edit_image(event, "Night scene"),
+                plugin.messages.text(key),
+            )
+            event.send.assert_not_awaited()
+
+        await check("image.no_account")
+        account = self.output[-1]._codex_image_account
+        token = image_generation.tool_invocation.set(
+            image_generation.ToolInvocation(account, 120)
+        )
+        self.addCleanup(image_generation.tool_invocation.reset, token)
+        star.config["image_account"] = "other"
+        await check("image.account_restricted")
+        star.config.update(image_account="", image_enabled=False)
+        await check("image.disabled")
+        star.config["image_enabled"] = True
+        for parts, error in (
+            ([Reply(id="old", chain=[source])], "image.reference_required"),
+            ([source, source], "image.reference_required"),
+            ([plugin.Image.fromBytes(b"invalid")], "image.reference_unreadable"),
+            (
+                [plugin.Image.fromFileSystem("/missing/reference.png")],
+                "image.reference_unreadable",
+            ),
+        ):
+            event.get_messages = lambda parts=parts: parts
+            await check(error)
+        self.assertEqual(self.requested(), ["same"])
+        event.get_messages = lambda: [source]
+        self.outcomes["same"] = [401, 403]
+        await check("image.forbidden")
+        self.assertEqual(self.requested(), ["same", "same", "same"])
+        first, retry = [request for _, request in self.requests[1:]]
+        self.assertEqual(str(first.url), f"{oauth.CODEX_BASE}/images/edits")
+        self.assertEqual(retry.url, first.url)
+        self.assertEqual(retry.content, first.content)
+        self.assertNotEqual(
+            retry.headers["authorization"], first.headers["authorization"]
+        )
+
+    async def test_vision_question_receives_text_without_an_edit(self):
+        await self.collect()
+        star, event = await self.image_entrypoints()
+        image = plugin.Image.fromBytes(sample_png("purple"))
+        event.get_messages = lambda: [image]
+        tools = ToolSet(
+            tools=[
+                llm_tools.get_func(name)
+                for name in (
+                    image_generation.TOOL_NAME,
+                    image_generation.EDIT_TOOL_NAME,
+                )
+            ]
+        )
+        question = "这张图里有什么？"
+        request = plugin.ProviderRequest(
+            prompt=question, image_urls=[image.file], func_tool=tools
+        )
+        await star.prepare_image_tool(event, request)
+        self.requests.clear()
+        reply = await self.provider.text_chat(
+            prompt=question, image_urls=request.image_urls, func_tool=request.func_tool
+        )
+        await star.remember_image_account(event, reply)
+        self.assertTrue(reply.completion_text)
+        self.assertFalse(reply.tools_call_name)
+        [(_, chat)] = self.requests
+        self.assertEqual(str(chat.url), f"{oauth.CODEX_BASE}/responses")
+        payload = json.loads(chat.content)
+        self.assertIn("input_image", str(payload["input"]))
+        self.assertEqual(payload["tool_choice"], "auto")
+        [tool] = payload["tools"]
+        self.assertEqual(tool["name"], image_generation.EDIT_TOOL_NAME)
+        self.assertEqual(set(tool["parameters"]["properties"]), {"prompt"})
+        event.send.assert_not_awaited()
 
     async def test_image_uses_actual_chat_account_even_after_refresh_or_refusal(self):
         self.outcomes["local"] = ["quota"]
@@ -408,6 +550,7 @@ class RoutingTests(RoutingFixture):
         self.assertEqual(str(first.url), f"{oauth.CODEX_BASE}/images/generations")
         for request in (first, second):
             payload = json.loads(request.content)
+            self.assertNotIn("images", payload)
             self.assertEqual(payload["model"], "gpt-image-2")
             self.assertEqual(payload["size"], "auto")
             self.assertEqual(payload["prompt"], prompt)
