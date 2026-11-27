@@ -755,6 +755,7 @@ def test_session_effort_request_override() -> None:
         _tools,
         *,
         request_max_retries,
+        conversation_id=None,
         session_effort=None,
     ):
         captured_efforts.append(session_effort)
@@ -810,6 +811,7 @@ def test_pre_stream_credential_recovery() -> None:
         _tools,
         *,
         request_max_retries,
+        conversation_id=None,
         session_effort=None,
         before_attempt=None,
         on_stream_open=None,
@@ -867,6 +869,7 @@ def test_stream_is_not_replayed_after_output() -> None:
         _tools,
         *,
         request_max_retries,
+        conversation_id=None,
         session_effort=None,
         before_attempt=None,
         on_stream_open=None,
@@ -916,6 +919,7 @@ def test_usage_limit_enters_cooldown() -> None:
         _tools,
         *,
         request_max_retries,
+        conversation_id=None,
         session_effort=None,
         before_attempt=None,
         on_stream_open=None,

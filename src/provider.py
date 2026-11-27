@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import time
 from collections.abc import AsyncGenerator, Callable
-from contextlib import aclosing, asynccontextmanager
+from contextlib import AsyncExitStack, aclosing, asynccontextmanager
 from copy import deepcopy
 from typing import Any
 
@@ -68,6 +68,13 @@ from .provider_routing import (
 )
 from .source_editor import HookCompatibilityError
 from .transport_pool import TransportPool
+
+try:
+    from astrbot.core.provider.sources.chat_request import chat_request
+except ModuleNotFoundError as exc:
+    if exc.name != "astrbot.core.provider.sources.chat_request":
+        raise
+    chat_request = None
 
 
 def _attempt_limit(request_max_retries: int | None) -> int:
@@ -340,6 +347,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         tools,
         *,
         request_max_retries: int | None = None,
+        conversation_id: str | None = None,
         session_effort: str | None = None,
         reply_language: str | None = None,
         before_attempt: Callable[[], None] | None = None,
@@ -430,66 +438,90 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         attempts = 0
         emitted_response = False
 
-        async def create_stream():
-            nonlocal attempts
-            if before_attempt is not None:
-                before_attempt()
-            attempts += 1
-            return await request_client.responses.create(
+        @asynccontextmanager
+        async def open_stream():
+            stream = await request_client.responses.create(
                 **payloads,
                 stream=True,
                 extra_body=extra_body,
                 **({"extra_headers": session_headers} if session_headers else {}),
             )
+            try:
+                yield stream
+            finally:
+                await stream.close()
+
+        async def open_attempt(stack: AsyncExitStack):
+            nonlocal attempts
+            if before_attempt is not None:
+                before_attempt()
+            attempts += 1
+            if chat_request is None:
+                return await stack.enter_async_context(open_stream()), None
+            # Credential checks and the shared retry budget belong to the plugin.
+            return await stack.enter_async_context(
+                chat_request(
+                    self,
+                    "OpenAI Codex",
+                    extra_body.get("model")
+                    or payloads.get("model")
+                    or self.get_model(),
+                    open_stream,
+                    conversation_id=conversation_id,
+                    max_attempts=1,
+                    streaming=True,
+                )
+            )
 
         while attempts < max_attempts:
-            # Creation and stream iteration share one request-attempt budget.
-            stream = await retry_provider_request(
-                "OpenAI Responses",
-                create_stream,
-                retry_rate_limits=False,
-                max_attempts=max_attempts - attempts,
-            )
-            if on_rate_limits is not None:
-                headers = getattr(getattr(stream, "response", None), "headers", None)
-                if headers is not None:
-                    windows = oauth.parse_rate_limit_headers(headers)
-                    if windows:
-                        on_rate_limits(windows)
-            if on_stream_open is not None:
-                on_stream_open()
+            consuming = False
             try:
-                consume_kwargs: dict[str, Any] = (
-                    {"reply_language": reply_language}
-                    if reply_language is not None
-                    else {}
-                )
-                if (
-                    on_rate_limits is not None
-                    and getattr(self._consume_stream, "__func__", None)
-                    is CodexStreamMixin._consume_stream
-                ):
-                    consume_kwargs["on_rate_limits"] = on_rate_limits
-                async with (
-                    track_web_search(stream, self._field, reply_language) as events,
-                    aclosing(
-                        self._consume_stream(events, tools, **consume_kwargs)
-                    ) as responses,
-                ):
-                    async for response in responses:
-                        emitted_response = True
-                        yield response
+                async with AsyncExitStack() as stack:
+                    stream, attempt = await retry_provider_request(
+                        "OpenAI Responses",
+                        lambda: open_attempt(stack),
+                        retry_rate_limits=False,
+                        max_attempts=max_attempts - attempts,
+                    )
+                    if on_rate_limits is not None:
+                        headers = getattr(
+                            getattr(stream, "response", None), "headers", None
+                        )
+                        if headers is not None:
+                            windows = oauth.parse_rate_limit_headers(headers)
+                            if windows:
+                                on_rate_limits(windows)
+                    if on_stream_open is not None:
+                        on_stream_open()
+                    consuming = True
+                    async with (
+                        track_web_search(stream, self._field, reply_language) as events,
+                        aclosing(
+                            self._consume_stream(
+                                events,
+                                tools,
+                                reply_language=reply_language,
+                                on_rate_limits=on_rate_limits,
+                                attempt=attempt,
+                            )
+                        ) as responses,
+                    ):
+                        async for response in responses:
+                            emitted_response = True
+                            if attempt is not None and response.is_chunk:
+                                attempt.mark_first_token()
+                            yield response
+                    consuming = False
                 return
             except Exception as exc:
                 if (
-                    emitted_response
+                    not consuming
+                    or emitted_response
                     or attempts >= max_attempts
                     or oauth.classify_codex_error(exc) != "temporary"
                 ):
                     raise
                 failure = oauth.safe_error_summary(exc)
-            finally:
-                await stream.close()
 
             delay = min(2 ** min(attempts - 1, 5), REQUEST_RETRY_WAIT_MAX_S)
             logger.warning(
@@ -582,6 +614,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         tools: Any,
         *,
         request_max_retries: int | None,
+        conversation_id: str | None = None,
         session_effort: str | None = None,
         reply_language: str | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
@@ -599,6 +632,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                     tools,
                     request_max_retries=request_max_retries,
                     session_effort=session_effort,
+                    conversation_id=conversation_id,
                     **reply_kwargs,
                 )
             ) as stream:
@@ -649,6 +683,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                                 budget=budget,
                                 seen=seen,
                                 on_stream_open=stream_opened,
+                                conversation_id=conversation_id,
                                 **reply_kwargs,
                             )
                         ) as stream:
@@ -697,6 +732,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         tools: Any,
         *,
         request_max_retries: int | None,
+        conversation_id: str | None = None,
         session_effort: str | None = None,
         reply_language: str | None = None,
         budget: RequestBudget | None = None,
@@ -767,6 +803,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                             tools,
                             request_max_retries=request_max_retries,
                             session_effort=session_effort,
+                            conversation_id=conversation_id,
                             before_attempt=guard,
                             on_stream_open=on_stream_open,
                             **query_kwargs,
@@ -874,6 +911,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         request_max_retries: int | None = None,
         **kwargs,
     ) -> AsyncGenerator[LLMResponse, None]:
+        conversation_id = kwargs.pop("conversation_id", None)
         payloads, _ = await self._prepare_chat_payload(
             prompt,
             image_urls,
@@ -912,6 +950,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                 self._stream_with_current_credentials(
                     payloads,
                     func_tool,
+                    conversation_id=conversation_id,
                     request_max_retries=request_max_retries,
                     session_effort=session_effort,
                     **(

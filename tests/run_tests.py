@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.abc
 import importlib.util
 import os
@@ -30,7 +31,21 @@ def main() -> int:
         test = PLUGIN_ROOT / "tests" / sys.argv[2]
         sys.meta_path.insert(0, CheckoutFinder())
         sys.argv = [str(test)]
-        runpy.run_path(str(test), run_name="__main__")
+        checkout = Path(
+            os.environ.get("ASTRBOT_ROOT") or PLUGIN_ROOT.parent / "AstrBot"
+        )
+        sys.path.insert(0, str(checkout.resolve()))
+        # AstrBot stores request statistics under its runtime root.
+        with tempfile.TemporaryDirectory(prefix="astrbot-test-data-") as root:
+            os.environ["ASTRBOT_ROOT"] = root
+            Path(root, "data", "plugins").mkdir(parents=True)
+            from astrbot.core import db_helper
+
+            # Avoid scheduling background writes on short-lived test event loops.
+            # Accounting tests install their own writer and flush it before querying.
+            if writer := getattr(db_helper, "chat_usage_writer", None):
+                asyncio.run(writer.close())
+            runpy.run_path(str(test), run_name="__main__")
         return 0
     cases = sys.argv[1:] or [
         p.name

@@ -67,7 +67,7 @@ AUTH_FAILURES = (
 )
 
 
-class RoutingTests(unittest.IsolatedAsyncioTestCase):
+class RoutingFixture(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         def source(sid, account, **extra):
             return {
@@ -289,6 +289,8 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
             client.is_closed or id(client) in pooled for _, client in self.transports
         )
 
+
+class RoutingTests(RoutingFixture):
     async def test_transport_is_reused_per_source_until_account_changes(self):
         self.provider._source_id = "same"
         await self.collect()
@@ -728,7 +730,7 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.outcomes["local"] = ["slow"]
         self.outcomes["other"] = ["wait"]
 
-        async def rate_limited_after_open(provider, stream, tools):
+        async def rate_limited_after_open(provider, stream, tools, **kwargs):
             async for _ in stream:
                 response = httpx.Response(429, request=httpx.Request("POST", "/"))
                 raise httpx.HTTPStatusError(

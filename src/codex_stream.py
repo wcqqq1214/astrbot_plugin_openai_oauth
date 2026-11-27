@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncGenerator, Callable, Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 import astrbot.core.message.components as Comp
@@ -13,6 +13,9 @@ from astrbot.core.exceptions import EmptyModelOutputError
 from astrbot.core.provider.entities import LLMResponse, TokenUsage
 
 from . import chatui_citations, messages, oauth
+
+if TYPE_CHECKING:
+    from astrbot.core.provider.sources.chat_request import ChatAttempt
 
 
 class CodexStreamMixin:
@@ -52,6 +55,7 @@ class CodexStreamMixin:
         tools: Any,
         *,
         reply_language: str | None = None,
+        attempt: ChatAttempt | None = None,
         on_rate_limits: Callable[[list[dict[str, Any]]], None] | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
         """Keep partial response state scoped to a single stream attempt."""
@@ -70,6 +74,9 @@ class CodexStreamMixin:
             event_response = self._field(event, "response")
             if event_response is not None:
                 response_id = self._field(event_response, "id", response_id)
+                usage = self._extract_response_usage(event_response)
+                if attempt is not None and usage is not None:
+                    attempt.usage = usage
 
             if event_type == "codex.rate_limits":
                 if on_rate_limits is not None:
@@ -212,7 +219,7 @@ class CodexStreamMixin:
                             text_parts,
                             reasoning_parts,
                             function_calls,
-                            usage=self._extract_response_usage(event_response),
+                            usage=usage,
                         )
                     if final is None:
                         raise EmptyModelOutputError(
