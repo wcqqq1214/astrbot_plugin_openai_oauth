@@ -388,7 +388,10 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                 payloads["tool_choice"] = extra_body.get("tool_choice", "auto")
             extra_body.pop("tool_choice", None)
 
-        bot = bot_citations.for_request(extra_body.get("tools", payloads.get("tools")))
+        choice = extra_body.get("tool_choice", payloads.get("tool_choice"))
+        bot = bot_citations.for_request(
+            [] if choice == "none" else extra_body.get("tools", payloads.get("tools"))
+        )
         for key in list(payloads):
             if key not in self.default_params:
                 extra_body[key] = payloads.pop(key)
@@ -504,7 +507,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                                 reply_language=reply_language,
                                 on_rate_limits=on_rate_limits,
                                 attempt=attempt,
-                                **({"bot": bot} if bot is not None else {}),
+                                bot=bot,
                             )
                         ) as responses,
                     ):
@@ -512,8 +515,6 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                             emitted_response = True
                             if not response.is_chunk:
                                 break
-                            if attempt is not None:
-                                attempt.mark_first_token()
                             yield response
                         else:
                             return

@@ -8,6 +8,7 @@ import os
 import sys
 import unittest
 from collections.abc import AsyncIterable
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest import mock
 
@@ -457,6 +458,43 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plain_output[-1].completion_text, "Plain.")
         self.assertNotIn("来源：", plain_output[-1].completion_text)
 
+    async def test_search_buffering_and_upstream_first_token(self):
+        bridge = provider_module.bot_citations
+        event = mock.Mock()
+        event.get_extra.return_value = None
+        key = bridge.event_context.set(event)
+        self.addCleanup(bridge.event_context.reset, key)
+        attempt = mock.Mock()
+
+        @asynccontextmanager
+        async def track(provider, name, model, open_stream, **kwargs):
+            async with open_stream() as stream:
+                yield stream, attempt
+
+        async def events():
+            yield {"type": "response.output_text.delta", "delta": "a"}
+            attempt.mark_first_token.assert_called_once()
+            yield {"type": "response.output_text.delta", "delta": "b"}
+            yield DEFAULT_SUCCESS[-1]
+
+        with mock.patch.object(provider_module, "chat_request", track):
+            for choice, chunks in (("auto", ["ab"]), ("none", ["a", "b"])):
+                with self.subTest(choice=choice):
+                    attempt.reset_mock()
+                    _, output = await self._run_query(
+                        _new_provider(native_web_search=True),
+                        events(),
+                        payload={
+                            "model": "gpt-5.4-mini",
+                            "input": [],
+                            "tool_choice": choice,
+                        },
+                    )
+                    self.assertEqual(
+                        [item.completion_text for item in output if item.is_chunk],
+                        chunks,
+                    )
+
     async def test_bot_citations_follow_part_offsets_and_reuse_source_numbers(self):
         bridge = provider_module.bot_citations
         url = "https://example.org/article"
@@ -515,14 +553,33 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
                 },
             },
         ]
-        for platform in ("telegram", "slack", "aiocqhttp", "line"):
-            with self.subTest(platform=platform):
+        for platform, accepts_card in (
+            ("telegram", True),
+            ("slack", True),
+            ("aiocqhttp", True),
+            ("line", True),
+            ("line", False),
+        ):
+            with self.subTest(platform=platform, accepts_card=accepts_card):
                 extras = {}
-                event = mock.Mock()
-                event.get_platform_name.return_value = platform
-                event.get_extra.side_effect = extras.get
-                event.set_extra.side_effect = extras.__setitem__
-                event.send = mock.AsyncMock()
+                card = platform == "line" and hasattr(bridge.Comp, "ActionRow")
+                if card:
+                    from astrbot.core.platform.sources.line.line_event import (
+                        LineMessageEvent,
+                    )
+
+                    event = object.__new__(LineMessageEvent)
+                    event.message_obj = mock.Mock(raw_message={"replyToken": "one-use"})
+                    event.line_api = mock.Mock()
+                    event.line_api.reply_message = mock.AsyncMock(
+                        side_effect=[accepts_card, not accepts_card]
+                    )
+                    event.line_api.push_message = mock.AsyncMock(return_value=False)
+                else:
+                    event = mock.Mock()
+                event.get_platform_name = mock.Mock(return_value=platform)
+                event.get_extra = extras.get
+                event.set_extra = extras.__setitem__
                 token = bridge.event_context.set(event)
                 try:
                     _, output = await self._run_query(
@@ -539,7 +596,6 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
                 else:
                     one, two = "〔1〕", "〔2〕"
                 expected = f"{ordinary[:-1]}{one}。发布。{one}发布。{one}更多。{two}"
-                card = platform == "line" and hasattr(bridge.Comp, "ActionRow")
                 if platform in {"line", "aiocqhttp"} and not card:
                     expected += f"\n\nSources:\n〔1〕 Article {url}\n〔2〕 Data {other}"
                 self.assertEqual(output[-1].completion_text, expected)
@@ -548,24 +604,27 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
                     [expected],
                 )
                 if card:
-                    event.send.side_effect = [RuntimeError("card rejected"), None]
-                    result = bridge.MessageEventResult().message(expected)
-                    result.result_content_type = bridge.ResultContentType.LLM_RESULT
-                    event.get_result.return_value = result
-                    await bridge.deliver_card(event, after_send=False)
-                    event.send.assert_not_awaited()
-                    await bridge.deliver_card(event, after_send=True)
-                    await bridge.deliver_card(event, after_send=True)
-                    native, fallback = [
-                        call.args[0] for call in event.send.await_args_list
-                    ]
+                    with mock.patch.object(
+                        bridge.AstrMessageEvent, "send", new=mock.AsyncMock()
+                    ):
+                        await event.send(bridge.MessageChain().message(expected))
+                    event.line_api.push_message.assert_not_awaited()
+                    replies = event.line_api.reply_message.await_args_list
+                    self.assertEqual(len(replies), 1 if accepts_card else 2)
+                    if not accepts_card:
+                        retry = replies[1].args[1]
+                        self.assertEqual(
+                            [item["text"] for item in retry],
+                            [
+                                expected,
+                                f"Sources:\n〔1〕 Article {url}\n〔2〕 Data {other}",
+                            ],
+                        )
+                    text, template = replies[0].args[1]
+                    self.assertEqual(text["text"], expected)
                     self.assertEqual(
-                        [(b.label, b.action.url) for b in native.chain[0].buttons],
-                        [("〔1〕 Article", url), ("〔2〕 Data", other)],
-                    )
-                    self.assertEqual(
-                        fallback.get_plain_text(),
-                        f"Sources:\n〔1〕 Article {url}\n〔2〕 Data {other}",
+                        [action["uri"] for action in template["template"]["actions"]],
+                        [url, other],
                     )
 
     async def test_inline_citations_in_live_and_saved_chat(self):
@@ -649,7 +708,14 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
                 "role": "assistant",
                 "status": "completed",
                 "content": [
-                    {"type": "output_text", "text": text, "annotations": [annotation]}
+                    {
+                        "type": "output_text",
+                        "text": text,
+                        "annotations": [
+                            annotation,
+                            {**annotation, "end_index": ordinary.index("/article")},
+                        ],
+                    }
                     for text in (sentence, second)
                 ],
             }
@@ -668,9 +734,13 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         raw = [*prelude, {"type": "plain", "text": body}]
         run.message_parts = raw
         state._publish_chat_run(run, {"type": "plain", "data": second})
+        with_link_card = visible.replace(f"[原文]({url})", f"[原文]({url}){tag}")
         expected = [
             *prelude,
-            {"type": "plain", "text": visible + tag + visible + tag + "更多。"},
+            {
+                "type": "plain",
+                "text": with_link_card + tag + with_link_card + tag + "更多。",
+            },
         ]
         snapshot = service.get_active_chat_runs("user", "session")[0]["content"]
         self.assertEqual(snapshot["message"], expected)
@@ -688,6 +758,12 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn(
             f"([example.com]({url}){tag})", record.content["message"][-1]["text"]
+        )
+        # Earlier versions persisted the tag inside the destination.
+        saved_text = record.content["message"][-1]["text"]
+        record.content["message"][-1]["text"] = saved_text.replace(
+            f"[原文]({url}){tag}",
+            f"[原文]({url.replace('/article', tag + '/article')})",
         )
         uninstall = bridge.install()
         try:

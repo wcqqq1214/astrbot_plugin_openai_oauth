@@ -6,7 +6,7 @@ import json
 import re
 from bisect import bisect_left
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Iterator
 from contextlib import aclosing
 from contextvars import ContextVar
 from dataclasses import dataclass, field, fields
@@ -70,12 +70,72 @@ def _display_parts(parts: list[dict], refs: Iterable[dict]) -> list[dict]:
     return rendered
 
 
+def _link_spans(text: str) -> Iterator[tuple[int, int]]:
+    """Keep a citation inside a Markdown link from breaking its label or URL."""
+    labels = []
+    start = depth = 0
+    for match in re.finditer(r"\\.|<https?://[^>\n]+>|\]\(|[][()]", text):
+        token = match[0]
+        if depth:
+            if token in ("(", "]("):
+                depth += 1
+            elif token == ")":
+                depth -= 1
+                if not depth:
+                    yield start, match.end()
+        elif token.startswith("<"):
+            yield match.span()
+        elif token == "[":
+            labels.append(match.start())
+        elif token == "]" and labels:
+            labels.pop()
+        elif token == "](" and labels:
+            start = labels.pop()
+            depth = 1
+
+
 @dataclass
 class CitationText:
     """OpenAI offsets are local to one output_text content part."""
 
     text: str = ""
     marks: dict[tuple[int, str], None] = field(default_factory=dict)
+
+    def positioned_marks(self) -> Iterator[tuple[int, str]]:
+        spans = _link_spans(self.text)
+        span = next(spans, None)
+        inserted = set()
+        for end, ref in sorted(self.marks, key=lambda mark: mark[0]):
+            if end > len(self.text):
+                continue
+            while span and span[1] <= end:
+                span = next(spans, None)
+            if span and span[0] < end < span[1]:
+                end = span[1]
+            mark = (end, ref)
+            if mark not in inserted:
+                inserted.add(mark)
+                yield mark
+
+
+def _align_saved_links(text: str, indices: set[str]) -> str:
+    """Recover original offsets from citation tags stored by earlier versions."""
+    content = CitationText()
+    cursor = 0
+    for match in re.finditer(r"<ref>(codex-[0-9]+)</ref>", text):
+        if match[1] in indices:
+            content.text += text[cursor : match.start()]
+            content.marks[len(content.text), match[1]] = None
+            cursor = match.end()
+    if not content.marks:
+        return text
+    content.text += text[cursor:]
+    pieces = []
+    cursor = 0
+    for end, ref in content.positioned_marks():
+        pieces.extend((content.text[cursor:end], f"<ref>{ref}</ref>"))
+        cursor = end
+    return "".join(pieces) + content.text[cursor:]
 
 
 @dataclass
@@ -116,8 +176,8 @@ class _CitationRun:
                     if not content.text.startswith(body[cursor:]):
                         continue
                     start = cursor
-                for end, ref in content.marks:
-                    if end <= len(content.text) and start + end <= len(body):
+                for end, ref in content.positioned_marks():
+                    if start + end <= len(body):
                         marks.append((start + end, ref))
                 cursor = start + len(content.text)
 
@@ -343,9 +403,12 @@ def install() -> Callable[[], None]:
         entry = serialize_history(history)
         content = entry["content"]
         if content.get("type") == "bot" and content.get("refs"):
-            content["message"] = _display_parts(
-                content["message"], content["refs"].get("used", [])
-            )
+            refs = content["refs"].get("used", [])
+            indices = {ref.get("index") for ref in refs}
+            for part in content["message"]:
+                if part.get("type") == "plain":
+                    part["text"] = _align_saved_links(part["text"], indices)
+            content["message"] = _display_parts(content["message"], refs)
         return entry
 
     hooks = (
