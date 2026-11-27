@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable, Iterable
 from typing import Any
 from urllib.parse import urlsplit
@@ -12,7 +13,7 @@ from astrbot.api.event import MessageChain
 from astrbot.core.exceptions import EmptyModelOutputError
 from astrbot.core.provider.entities import LLMResponse, TokenUsage
 
-from . import chatui_citations, messages, oauth
+from . import bot_citations, chatui_citations, messages, oauth
 
 
 class CodexStreamMixin:
@@ -51,6 +52,7 @@ class CodexStreamMixin:
         stream: Any,
         tools: Any,
         *,
+        bot: bot_citations.BotCitations | None = None,
         reply_language: str | None = None,
         on_rate_limits: Callable[[list[dict[str, Any]]], None] | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
@@ -66,6 +68,11 @@ class CodexStreamMixin:
         citations: dict[str, str] = {}
 
         chat_texts = chatui_citations.begin_response()
+        texts = (
+            defaultdict(chatui_citations.CitationText)
+            if bot is not None
+            else chat_texts
+        )
 
         def collect_parts(
             parts: Iterable[Any], output_index: int, first_index: int = 0
@@ -74,17 +81,16 @@ class CodexStreamMixin:
                 kind = self._field(part, "type")
                 if kind not in {"output_text", "refusal"}:
                     continue
-                content = (
-                    chat_texts[output_index, part_index]
-                    if chat_texts is not None
-                    else None
-                )
+                content = texts[output_index, part_index] if texts is not None else None
                 if content is not None:
                     content.text = self._field(
                         part, "text" if kind == "output_text" else "refusal", ""
                     )
                 self._collect_url_citations(
-                    self._field(part, "annotations", []) or [], citations, content
+                    self._field(part, "annotations", []) or [],
+                    citations,
+                    content,
+                    bot=bot,
                 )
 
         async for event in stream:
@@ -109,13 +115,15 @@ class CodexStreamMixin:
             if event_type in {"response.output_text.delta", "response.refusal.delta"}:
                 delta = self._field(event, "delta", "")
                 if delta:
-                    if chat_texts is not None:
+                    if texts is not None:
                         key = (
                             self._field(event, "output_index", 0),
                             self._field(event, "content_index", 0),
                         )
-                        chat_texts[key].text += str(delta)
+                        texts[key].text += str(delta)
                     text_parts.append(str(delta))
+                    if bot is not None:
+                        continue
                     yield LLMResponse(
                         "assistant",
                         result_chain=MessageChain(chain=[Comp.Plain(str(delta))]),
@@ -155,7 +163,8 @@ class CodexStreamMixin:
                 self._collect_url_citations(
                     [self._field(event, "annotation")],
                     citations,
-                    chat_texts[key] if chat_texts is not None else None,
+                    texts[key] if texts is not None else None,
+                    bot=bot,
                 )
                 continue
 
@@ -209,15 +218,18 @@ class CodexStreamMixin:
                 "response.incomplete",
                 "response.failed",
             }:
+                if (
+                    event_type == "response.failed"
+                    or self._field(event_response, "status") == "failed"
+                ):
+                    error = self._field(event_response, "error")
+                    code = self._field(error, "code", "unknown_error")
+                    raise RuntimeError(
+                        f"Responses API request failed: {code}. "
+                        f"response_id={response_id}"
+                    )
+                final: LLMResponse | None = None
                 if event_response is not None:
-                    status = self._field(event_response, "status")
-                    if status == "failed":
-                        error = self._field(event_response, "error")
-                        code = self._field(error, "code", "unknown_error")
-                        raise RuntimeError(
-                            f"Responses API request failed: {code}. "
-                            f"response_id={response_id}"
-                        )
                     if (
                         self._field(
                             self._field(event_response, "incomplete_details"),
@@ -229,7 +241,6 @@ class CodexStreamMixin:
                             "Responses API output was rejected by the provider "
                             f"content filter. response_id={response_id}"
                         )
-                    final: LLMResponse | None = None
                     completed_output = self._field(event_response, "output")
                     if completed_output:
                         final = await self._parse_response(event_response, tools)
@@ -245,53 +256,50 @@ class CodexStreamMixin:
                             )
                         except EmptyModelOutputError:
                             final = None
-                    if final is None:
-                        final = self._assemble_streamed_response(
-                            response_id,
-                            text_parts,
-                            reasoning_parts,
-                            function_calls,
-                            usage=self._extract_response_usage(event_response),
-                        )
-                    if final is None:
-                        raise EmptyModelOutputError(
-                            f"Responses stream returned no usable output. "
-                            f"response_id={response_id}"
-                        )
-                    sources_suffix = (
-                        None
-                        if chat_texts is not None
-                        else self._append_citations(
-                            final,
-                            citations,
-                            reply_language=reply_language,
-                        )
+                if final is None:
+                    final = self._assemble_streamed_response(
+                        response_id,
+                        text_parts,
+                        reasoning_parts,
+                        function_calls,
+                        usage=self._extract_response_usage(event_response),
                     )
-                    if sources_suffix and text_parts:
+                if final is None:
+                    raise EmptyModelOutputError(
+                        f"Responses stream returned no usable output. "
+                        f"response_id={response_id}"
+                    )
+                if bot is not None:
+                    raw_text = final.completion_text or ""
+                    body = bot.render(
+                        raw_text,
+                        texts,
+                        citations,
+                        reply_language,
+                        final_answer=not final.tools_call_name,
+                    )
+                    if body != raw_text:
+                        final.completion_text = body
+                    if body:
                         yield LLMResponse(
                             "assistant",
-                            result_chain=MessageChain(
-                                chain=[Comp.Plain(sources_suffix)]
-                            ),
+                            result_chain=MessageChain().message(body),
                             is_chunk=True,
                             id=final.id or response_id,
                         )
-                    yield final
-                    return
-                final = self._assemble_streamed_response(
-                    response_id,
-                    text_parts,
-                    reasoning_parts,
-                    function_calls,
-                    usage=None,
-                )
-                if final is not None:
-                    yield final
-                    return
-                raise EmptyModelOutputError(
-                    f"Responses stream returned no usable output. "
-                    f"response_id={response_id}"
-                )
+                elif chat_texts is None and event_response is not None:
+                    suffix = self._append_citations(
+                        final, citations, reply_language=reply_language
+                    )
+                    if suffix and text_parts:
+                        yield LLMResponse(
+                            "assistant",
+                            result_chain=MessageChain().message(suffix),
+                            is_chunk=True,
+                            id=final.id or response_id,
+                        )
+                yield final
+                return
 
         raise EmptyModelOutputError(
             f"Responses stream ended without a terminal event. response_id={response_id}"
@@ -302,6 +310,8 @@ class CodexStreamMixin:
         annotations: Iterable[Any],
         citations: dict[str, str],
         content: chatui_citations.CitationText | None,
+        *,
+        bot: bot_citations.BotCitations | None,
     ) -> None:
         positions = []
         for annotation in annotations:
@@ -329,7 +339,11 @@ class CodexStreamMixin:
                     and 0 <= start <= end
                     and end > 0
                 )
-                positions.append((url, title, end if positioned else None))
+                if bot is not None:
+                    if positioned:
+                        content.marks[end, url] = None
+                else:
+                    positions.append((url, title, end if positioned else None))
         if content is not None and positions:
             chatui_citations.publish(content, positions)
 

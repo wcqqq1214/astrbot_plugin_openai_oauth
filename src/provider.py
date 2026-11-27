@@ -28,6 +28,7 @@ from astrbot.core.utils.config_number import coerce_int_config
 
 from . import (
     astrbot_image_bridge,
+    bot_citations,
     codex_request,
     effort,
     image_generation,
@@ -379,6 +380,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                 payloads["tool_choice"] = extra_body.get("tool_choice", "auto")
             extra_body.pop("tool_choice", None)
 
+        bot = bot_citations.for_request(extra_body.get("tools", payloads.get("tools")))
         for key in list(payloads):
             if key not in self.default_params:
                 extra_body[key] = payloads.pop(key)
@@ -470,6 +472,8 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                     is CodexStreamMixin._consume_stream
                 ):
                     consume_kwargs["on_rate_limits"] = on_rate_limits
+                if bot is not None:
+                    consume_kwargs["bot"] = bot
                 async with (
                     track_web_search(stream, self._field, reply_language) as events,
                     aclosing(

@@ -71,6 +71,8 @@ def check_entry_point(module) -> None:
         "codex_generate_image",
         "prepare_image_tool",
         "remember_image_account",
+        "prepare_bot_sources",
+        "send_bot_sources",
     }
     check(
         {item.handler_name for item in handlers} == expected
