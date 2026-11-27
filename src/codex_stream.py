@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Iterable
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -12,7 +12,7 @@ from astrbot.api.event import MessageChain
 from astrbot.core.exceptions import EmptyModelOutputError
 from astrbot.core.provider.entities import LLMResponse, TokenUsage
 
-from . import messages, oauth
+from . import chatui_citations, messages, oauth
 
 
 class CodexStreamMixin:
@@ -63,6 +63,7 @@ class CodexStreamMixin:
         reasoning_segment: tuple[Any, Any, Any] | None = None
         function_calls: list[dict] = []
         output_items: dict[int, Any] = {}
+        citations: dict[str, str] = {}
 
         async for event in stream:
             event_type = self._field(event, "type", "")
@@ -118,6 +119,12 @@ class CodexStreamMixin:
                     )
                 continue
 
+            if event_type == "response.output_text.annotation.added":
+                self._collect_url_citations(
+                    [self._field(event, "annotation")], citations
+                )
+                continue
+
             if event_type == "response.output_item.done":
                 item = self._field(event, "item")
                 if item is not None:
@@ -125,6 +132,9 @@ class CodexStreamMixin:
                     if isinstance(index, bool) or not isinstance(index, int):
                         index = max(output_items, default=-1) + 1
                     output_items[index] = item
+                    self._collect_url_citations(
+                        self._message_annotations([item]), citations
+                    )
                 continue
 
             if event_type == "response.output_item.added":
@@ -180,16 +190,13 @@ class CodexStreamMixin:
                             f"content filter. response_id={response_id}"
                         )
                     final: LLMResponse | None = None
-                    citation_items: Any = None
                     completed_output = self._field(event_response, "output")
                     if completed_output:
                         final = await self._parse_response(event_response, tools)
-                        citation_items = completed_output
+                        self._collect_url_citations(
+                            self._message_annotations(completed_output), citations
+                        )
                     elif output_items:
-                        ordered_items = [
-                            output_items[index] for index in sorted(output_items)
-                        ]
-                        citation_items = ordered_items
                         try:
                             final = await self._parse_response(
                                 self._response_with_output(
@@ -212,9 +219,10 @@ class CodexStreamMixin:
                             f"Responses stream returned no usable output. "
                             f"response_id={response_id}"
                         )
-                    citations = self._extract_url_citations(citation_items)
                     sources_suffix = self._append_citations(
-                        final, citations, reply_language=reply_language
+                        final,
+                        citations,
+                        reply_language=reply_language,
                     )
                     if sources_suffix and text_parts:
                         yield LLMResponse(
@@ -246,43 +254,45 @@ class CodexStreamMixin:
             f"Responses stream ended without a terminal event. response_id={response_id}"
         )
 
-    def _extract_url_citations(self, output: Any) -> list[tuple[str, str]]:
-        """Extract deduplicated (title, url) pairs from message url_citation annotations."""
-        citations: list[tuple[str, str]] = []
-        seen_urls: set[str] = set()
+    def _message_annotations(self, output: Any) -> Iterable[Any]:
+        """Yield annotations from completed message items."""
         for item in output or []:
             if self._field(item, "type") != "message":
                 continue
             for content in self._field(item, "content", []) or []:
-                for annotation in self._field(content, "annotations", []) or []:
-                    if self._field(annotation, "type") != "url_citation":
-                        continue
-                    raw_url = self._field(annotation, "url")
-                    if not isinstance(raw_url, str):
-                        continue
-                    url = raw_url.strip()
-                    try:
-                        parsed = urlsplit(url)
-                    except ValueError:
-                        continue
-                    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-                        continue
-                    if url in seen_urls:
-                        continue
-                    seen_urls.add(url)
-                    raw_title = self._field(annotation, "title")
-                    title = (
-                        raw_title.strip()
-                        if isinstance(raw_title, str) and raw_title.strip()
-                        else url
-                    )
-                    citations.append((title, url))
-        return citations
+                yield from self._field(content, "annotations", []) or []
+
+    def _collect_url_citations(
+        self, annotations: Iterable[Any], citations: dict[str, str]
+    ) -> None:
+        """Publish valid new citations in first-seen order across the stream."""
+        added: dict[str, str] = {}
+        for annotation in annotations:
+            if self._field(annotation, "type") != "url_citation":
+                continue
+            raw_url = self._field(annotation, "url")
+            if not isinstance(raw_url, str):
+                continue
+            url = raw_url.strip()
+            if url in citations:
+                continue
+            try:
+                parsed = urlsplit(url)
+            except ValueError:
+                continue
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                continue
+            raw_title = self._field(annotation, "title")
+            title = raw_title.strip() if isinstance(raw_title, str) else ""
+            citations[url] = title or url
+            added[url] = citations[url]
+        if added:
+            chatui_citations.publish(added)
 
     @staticmethod
     def _append_citations(
         response: LLMResponse,
-        citations: list[tuple[str, str]],
+        citations: dict[str, str],
         *,
         reply_language: str | None = None,
     ) -> str | None:
@@ -290,8 +300,8 @@ class CodexStreamMixin:
         if not citations:
             return None
         lines = [
-            f"{index}. [{title}]({url})"
-            for index, (title, url) in enumerate(citations, start=1)
+            f"{number}. [{title}]({url})"
+            for number, (url, title) in enumerate(citations.items(), start=1)
         ]
         sources_block = (
             messages.text("search.sources", lang=reply_language)

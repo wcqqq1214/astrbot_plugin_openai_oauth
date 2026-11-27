@@ -11,7 +11,7 @@ from astrbot.api.star import Context
 from astrbot.core.config.default import CONFIG_METADATA_2
 from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
 
-from . import astrbot_image_bridge, messages, oauth, source_editor
+from . import astrbot_image_bridge, chatui_citations, messages, oauth, source_editor
 from .credential_seal import FernetCredentialSealer
 from .credential_store import CredentialError
 from .local_codex import LocalCodexStore, LocalCredentialCoordinator
@@ -34,6 +34,7 @@ _credential_coordinator: LocalCredentialCoordinator | None = None
 _local_codex_store: LocalCodexStore | None = None
 _remove_source_guard: Any = None
 _remove_image_bridge: Any = None
+_remove_citation_bridge: Any = None
 _credential_sealer: FernetCredentialSealer | None = None
 _startup_error: str | None = None
 
@@ -230,7 +231,7 @@ def configure(context: Context, config: AstrBotConfig) -> None:
 
 async def initialize(context: Context) -> None:
     """Migrate storage and replace model instances retained across plugin reloads."""
-    global _remove_image_bridge
+    global _remove_image_bridge, _remove_citation_bridge
     from .provider import ProviderOpenAICodex
 
     coordinator = get_coordinator()
@@ -281,12 +282,20 @@ async def initialize(context: Context) -> None:
             else type(exc).__name__
         )
         logger.warning("OpenAI Subscribe image bridge disabled: %s", detail)
+    if _remove_citation_bridge is None:
+        try:
+            _remove_citation_bridge = chatui_citations.install()
+        except (ImportError, AttributeError, TypeError, ValueError) as exc:
+            logger.debug("OpenAI Subscribe ChatUI citations unavailable: %s", exc)
 
 
 def terminate() -> None:
     """Remove AstrBot integration hooks when the plugin is unloaded."""
-    global _context, _remove_source_guard, _remove_image_bridge
+    global _context, _remove_source_guard, _remove_image_bridge, _remove_citation_bridge
     _context = None
+    if _remove_citation_bridge is not None:
+        _remove_citation_bridge()
+        _remove_citation_bridge = None
     if _remove_image_bridge is not None:
         _remove_image_bridge()
         _remove_image_bridge = None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
@@ -17,6 +18,7 @@ os.chdir(ASTRBOT_ROOT)
 import httpx
 import source_lifecycle_test as lifecycle_fixtures
 from astrbot.core.agent.tool import FunctionTool, ToolSet
+from astrbot.dashboard.services import chat_service
 from openai import AsyncOpenAI
 
 package = lifecycle_fixtures.runtime.__package__.rsplit(".", 1)[0]
@@ -345,6 +347,23 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
             [item.completion_text for item in sdk_output],
         )
 
+        async def stream_with_completion_check():
+            for event in sdk_events[:-1]:
+                yield event
+            publish.assert_called_once_with(
+                {
+                    "https://example.com/1": "First Title",
+                    "https://example.org/2": "https://example.org/2",
+                }
+            )
+            yield sdk_events[-1]
+
+        with mock.patch.object(runtime.chatui_citations, "publish") as publish:
+            async for _ in provider._consume_stream(
+                stream_with_completion_check(), None
+            ):
+                pass
+
     async def test_citations_from_completed_output_and_edge_cases(self):
         # Completed response.output directly carries web_search_call, message, and edge annotations
         events = [
@@ -442,6 +461,111 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(plain_output[-1].completion_text, "Plain.")
         self.assertNotIn("来源：", plain_output[-1].completion_text)
+
+    async def test_annotation_delta_precedes_final_response(self):
+        annotation = {
+            "type": "url_citation",
+            "url": "https://example.com/article",
+            "title": "Article",
+            "start_index": 0,
+            "end_index": 6,
+        }
+        annotation_event = {
+            "type": "response.output_text.annotation.added",
+            "annotation": annotation,
+            "item_id": "message-1",
+            "annotation_index": 0,
+            "content_index": 0,
+            "output_index": 0,
+            "sequence_number": 2,
+        }
+        answer = "Answer. [Second](https://example.org/second)"
+        events = [
+            {
+                "type": "response.output_text.delta",
+                "delta": "Answer. [Second](https://exa",
+            },
+            annotation_event,
+            annotation_event,
+            {"type": "response.output_text.delta", "delta": "mple.org/second)"},
+            DEFAULT_SUCCESS[-1],
+        ]
+        run = chat_service.ChatRunState(
+            "run", "user", "session", "turn", "webchat", asyncio.Queue()
+        )
+        parts = [
+            {"type": "think", "think": "Checking the source."},
+            {"type": "plain", "text": answer},
+        ]
+        run.message_parts = list(parts)
+        service = object.__new__(chat_service.ChatService)
+        service.chat_runs = {run.run_id: run}
+        subscriber = asyncio.Queue()
+        run.subscribers.add(subscriber)
+        bridge = runtime.chatui_citations
+        state = bridge._CitationRun(service, run)
+        token = bridge._producer.set(state)
+        try:
+            _, output = await self._run_query(
+                _new_provider(native_web_search=True), events
+            )
+        finally:
+            bridge._producer.reset(token)
+        _, snapshot = subscriber.get_nowait()
+        self.assertTrue(subscriber.empty())
+        content = snapshot["data"]["content"]
+        self.assertEqual(content["refs"]["used"][0]["url"], annotation["url"])
+        cards = {"type": "plain", "text": "<ref>codex-1</ref>\n\n"}
+        self.assertEqual(content["message"], [parts[0], cards, parts[1]])
+        later_work = {"type": "think", "think": "Checking another result."}
+        run.message_parts = [*parts, later_work]
+        state._publish_chat_run(run, {"type": "plain", "chain_type": "reasoning"})
+        _, update = subscriber.get_nowait()
+        self.assertEqual(
+            update["data"]["content"]["message"], [*parts, later_work, cards]
+        )
+        service.save_bot_message = mock.AsyncMock()
+        await state.save_bot_message("session", parts, {}, {})
+        self.assertEqual(
+            service.save_bot_message.await_args.args[1], [parts[0], cards, parts[1]]
+        )
+        expected = answer + "\n\n来源：\n1. [Article](https://example.com/article)"
+        self.assertEqual(
+            "".join(item.completion_text for item in output if item.is_chunk), expected
+        )
+        self.assertEqual(output[-1].completion_text, expected)
+
+    async def test_reload_during_active_chat_restores_hooks(self):
+        from astrbot.core.agent.runners.tool_loop_agent_runner import (
+            ToolLoopAgentRunner,
+        )
+
+        started, finish = asyncio.Event(), asyncio.Event()
+
+        async def consume(service, run):
+            started.set()
+            await finish.wait()
+
+        original_stream = ToolLoopAgentRunner._recorded_responses
+        original_extract = chat_service.extract_web_search_refs
+        with mock.patch.object(chat_service.ChatService, "_consume_chat_run", consume):
+            uninstall = runtime.chatui_citations.install()
+            task = asyncio.create_task(
+                chat_service.ChatService._consume_chat_run(
+                    None, mock.Mock(run_id="run")
+                )
+            )
+            await started.wait()
+            uninstall()
+            uninstall = runtime.chatui_citations.install()
+            try:
+                finish.set()
+                await task
+            finally:
+                uninstall()
+            self.assertIs(chat_service.ChatService._consume_chat_run, consume)
+            self.assertIs(ToolLoopAgentRunner._recorded_responses, original_stream)
+            self.assertIs(chat_service.extract_web_search_refs, original_extract)
 
     async def test_web_search_call_with_function_call(self):
         fn_tools = _make_tool_set("lookup")
