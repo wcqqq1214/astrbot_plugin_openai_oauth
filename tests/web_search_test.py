@@ -458,11 +458,16 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("来源：", plain_output[-1].completion_text)
 
     async def test_inline_citations_in_live_and_saved_chat(self):
-        sentence = "🔎第一条。"
+        from astrbot.core.db.po import PlatformMessageHistory
+
+        url = "https://www.example.com/article_(2026)?utm_source=openai"
+        ordinary = f"查看[原文]({url})，也可浏览 [example.com]({url})。"
+        visible = ordinary + "🔎第一条。"
+        sentence = visible + f"([example.com]({url}))"
         second = sentence + "更多。"
         annotation = {
             "type": "url_citation",
-            "url": "https://example.com/article",
+            "url": url,
             "title": "Article",
             "start_index": 0,
             "end_index": len(sentence),
@@ -505,7 +510,7 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(subscriber.get_nowait()[1]["type"], "plain")
             _, snapshot = subscriber.get_nowait()
             self.assertEqual(
-                snapshot["data"]["content"]["message"][-1]["text"], sentence + tag
+                snapshot["data"]["content"]["message"][-1]["text"], visible + tag
             )
 
             yield {
@@ -541,7 +546,7 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         state._publish_chat_run(run, {"type": "plain", "data": second})
         expected = [
             *prelude,
-            {"type": "plain", "text": sentence + tag + sentence + tag + "更多。"},
+            {"type": "plain", "text": visible + tag + visible + tag + "更多。"},
         ]
         snapshot = service.get_active_chat_runs("user", "session")[0]["content"]
         self.assertEqual(snapshot["message"], expected)
@@ -552,7 +557,22 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         service.save_bot_message = mock.AsyncMock()
         await state.save_bot_message("session", raw, {}, {})
         saved = service.save_bot_message.await_args.args
-        self.assertEqual((saved[1], saved[3]), (expected, snapshot["refs"]))
+        record = PlatformMessageHistory(
+            platform_id="webchat",
+            user_id="session",
+            content={"type": "bot", "message": saved[1], "refs": saved[3]},
+        )
+        self.assertIn(
+            f"([example.com]({url})){tag}", record.content["message"][-1]["text"]
+        )
+        uninstall = bridge.install()
+        try:
+            reopened = chat_service.serialize_history_entry(record)["content"]
+        finally:
+            uninstall()
+        self.assertEqual(
+            (reopened["message"], reopened["refs"]), (expected, snapshot["refs"])
+        )
         self.assertEqual(
             "".join(item.completion_text for item in output if item.is_chunk), body
         )

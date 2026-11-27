@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import re
 from bisect import bisect_left
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from contextlib import aclosing
 from contextvars import ContextVar
 from dataclasses import dataclass, field, fields
@@ -13,6 +14,41 @@ from functools import wraps
 from inspect import isasyncgenfunction, iscoroutinefunction, signature
 from itertools import accumulate
 from typing import Any
+from urllib.parse import urlsplit
+
+
+def _display_parts(parts: list[dict], refs: Iterable[dict]) -> list[dict]:
+    """Collapse a domain-only citation link directly followed by its native card."""
+    rendered = list(parts)
+    for ref in refs:
+        index = str(ref.get("index", ""))
+        if not re.fullmatch(r"codex-[0-9]+", index):
+            continue
+        url = ref.get("url")
+        if not isinstance(url, str):
+            continue
+        try:
+            host = urlsplit(url).hostname
+        except ValueError:
+            continue
+        if not host:
+            continue
+        label = re.escape(host.removeprefix("www."))
+        if host.startswith("www."):
+            label = rf"(?:www\.)?{label}"
+        link = rf"\[{label}\]\({re.escape(url)}\)"
+        # Multiple cards may share a citation offset. Keep their order intact.
+        duplicate = re.compile(
+            rf"(?<![!\\])(?:\({link}\)|（{link}）|{link})"
+            rf"(?=[ \t]*(?:<ref>codex-[0-9]+</ref>)*<ref>{index}</ref>)"
+        )
+        for i, part in enumerate(rendered):
+            if part.get("type") == "plain":
+                text = part["text"]
+                compact = duplicate.sub("", text)
+                if compact != text:
+                    rendered[i] = {**part, "text": compact}
+    return rendered
 
 
 @dataclass
@@ -82,7 +118,8 @@ class _CitationRun:
     def refresh(self) -> bool:
         if self.run.message_parts is not self.rendered_parts:
             self.raw_parts = self.run.message_parts
-        self.rendered_parts, marks = self.render(self.raw_parts)
+        parts, marks = self.render(self.raw_parts)
+        self.rendered_parts = _display_parts(parts, self.sources.values())
         self.run.message_parts = self.rendered_parts
         changed = marks != self.visible_marks
         self.visible_marks = marks
@@ -258,7 +295,20 @@ def install() -> Callable[[], None]:
                     _producer.reset(token)
                 yield response
 
+    serialize_history = chat_service.serialize_history_entry
+
+    @wraps(serialize_history)
+    def serialize_entry(history):
+        entry = serialize_history(history)
+        content = entry["content"]
+        if content.get("type") == "bot" and content.get("refs"):
+            content["message"] = _display_parts(
+                content["message"], content["refs"].get("used", [])
+            )
+        return entry
+
     hooks = (
+        (chat_service, "serialize_history_entry", serialize_entry, serialize_history),
         (service, "_consume_chat_run", consume_run, consume),
         (runner, stream_name, stream_response, stream),
     )
