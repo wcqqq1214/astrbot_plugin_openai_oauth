@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import math
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 _CREDENTIAL_SCHEMA_VERSION = 1
@@ -180,6 +182,24 @@ def token_email(token: Any) -> str:
     return email.strip() if isinstance(email, str) else ""
 
 
+_PLAN_TYPES = frozenset(
+    {"free", "go", "plus", "pro", "team", "business", "enterprise", "edu"}
+)
+
+
+def token_plan_type(token: Any) -> str | None:
+    """Read the ChatGPT subscription plan type from an access token, if known."""
+    auth = jwt_claims(token).get(AUTH_CLAIM)
+    if not isinstance(auth, dict):
+        return None
+    plan = auth.get("chatgpt_plan_type")
+    if isinstance(plan, str):
+        normalized = plan.strip().lower()
+        if normalized in _PLAN_TYPES:
+            return normalized
+    return None
+
+
 def _as_string(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
@@ -330,6 +350,44 @@ def credentials_match(left: CredentialSnapshot, right: CredentialSnapshot) -> bo
     )
 
 
+@dataclass
+class _UsageCache:
+    authoritative: dict[str, Any] | None = None
+    expires_at: float = 0
+    passive: dict[int, tuple[float, dict[str, Any]]] = field(default_factory=dict)
+    plan_type: str | None = None
+
+    def display(self, now: float) -> dict[str, Any] | None:
+        active = self.authoritative if now < self.expires_at else None
+        # Cooldown decisions must use the exact windows of the authoritative denial.
+        if active is not None and (
+            active.get("limit_reached") or active.get("allowed") is False
+        ):
+            return deepcopy(active)
+        self.passive = {
+            label: row for label, row in self.passive.items() if row[0] > now
+        }
+        if not self.passive:
+            return deepcopy(active)
+        result: dict[str, Any] = (
+            deepcopy(active)
+            if active is not None
+            else {"allowed": True, "limit_reached": False, "plan_type": self.plan_type}
+        )
+        if result.get("plan_type") is None:
+            result["plan_type"] = self.plan_type
+        windows = result.setdefault("windows", [])
+        by_label = {row.get("label_seconds"): row for row in windows}
+        for label, (_, reading) in self.passive.items():
+            if label in by_label:
+                by_label[label].update(
+                    {k: v for k, v in reading.items() if v is not None}
+                )
+            else:
+                windows.append(dict(reading))
+        return result
+
+
 class CredentialCoordinator:
     """Coordinate source-scoped OAuth refresh, persistence, and health state."""
 
@@ -352,9 +410,11 @@ class CredentialCoordinator:
         self._refresh_skew_seconds = refresh_skew_seconds
         self._usage_cache_ttl_seconds = usage_cache_ttl_seconds
         self._source_locks: dict[str, asyncio.Lock] = {}
-        self._usage_locks: dict[str, asyncio.Lock] = {}
+        self._usage_queries: dict[
+            tuple[str, str, str], asyncio.Task[dict[str, Any]]
+        ] = {}
         self._states: dict[str, CredentialStatus] = {}
-        self._usage_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._usage_cache: dict[str, _UsageCache] = {}
         self.sealer: CredentialSealer | None = None
         self.check_write: Callable[[], None] | None = None
 
@@ -393,9 +453,6 @@ class CredentialCoordinator:
 
     def source_lock(self, source_id: str) -> asyncio.Lock:
         return self._source_locks.setdefault(source_id, asyncio.Lock())
-
-    def _usage_lock(self, source_id: str) -> asyncio.Lock:
-        return self._usage_locks.setdefault(source_id, asyncio.Lock())
 
     def source(self, source_id: str) -> dict[str, Any]:
         source = find_source(self.config(), source_id, self.provider_type)
@@ -609,29 +666,109 @@ class CredentialCoordinator:
         self,
         source_id: str | None,
         fetch_usage: UsageFetcher,
+        *,
+        force_refresh: bool = False,
     ) -> dict[str, Any]:
         """Fetch usage with source-scoped single-flight and a short cache."""
         resolved_source_id = source_id or self.default_source_id
-        now = time.monotonic()
         cached = self._usage_cache.get(resolved_source_id)
-        if cached is not None and cached[0] > now:
-            return dict(cached[1])
+        if cached is not None and not force_refresh:
+            reading = cached.display(time.monotonic())
+            if reading is not None:
+                return reading
 
-        async with self._usage_lock(resolved_source_id):
-            now = time.monotonic()
-            cached = self._usage_cache.get(resolved_source_id)
-            if cached is not None and cached[0] > now:
-                return dict(cached[1])
-            snapshot = await self.get_snapshot(
-                resolved_source_id,
-                check_cooldown=False,
+        snapshot = await self.get_snapshot(resolved_source_id, check_cooldown=False)
+        key = (resolved_source_id, snapshot.credential_origin, snapshot.access_token)
+        pending = self._usage_queries.get(key)
+        if pending is None:
+
+            async def fetch() -> dict[str, Any]:
+                try:
+                    usage = await fetch_usage(snapshot)
+                    self._usage_cache[resolved_source_id] = _UsageCache(
+                        authoritative=deepcopy(usage),
+                        expires_at=time.monotonic() + self._usage_cache_ttl_seconds,
+                    )
+                    return usage
+                finally:
+                    self._usage_queries.pop(key, None)
+
+            pending = asyncio.create_task(fetch())
+            self._usage_queries[key] = pending
+            # A cancelled waiter must not cancel the shared request or leave an
+            # unobserved exception if it was the last consumer.
+            pending.add_done_callback(
+                lambda task: None if task.cancelled() else task.exception()
             )
-            usage = await fetch_usage(snapshot)
-            self._usage_cache[resolved_source_id] = (
-                time.monotonic() + self._usage_cache_ttl_seconds,
-                dict(usage),
-            )
-            return dict(usage)
+        return deepcopy(await asyncio.shield(pending))
+
+    def record_passive_usage(
+        self,
+        source_id: str | None,
+        windows: list[dict[str, Any]],
+        *,
+        expected_access_token: str | None = None,
+        expected_account_id: str | None = None,
+        expected_origin: str | None = None,
+    ) -> bool:
+        """Merge passive chat rate-limit windows into the display cache.
+
+        Passive readings never mark an account as cooling; only explicit 429
+        handling or authoritative ``/wham/usage`` checks persist cooldowns.
+        """
+        valid_windows: list[dict[str, Any]] = []
+        for item in windows:
+            if not isinstance(item, dict):
+                continue
+            label = item.get("label_seconds")
+            used = item.get("used_percent")
+            if (
+                isinstance(label, bool)
+                or not isinstance(label, int)
+                or label <= 0
+                or isinstance(used, bool)
+                or not isinstance(used, (int, float))
+                or not math.isfinite(used)
+            ):
+                continue
+            entry: dict[str, Any] = {
+                "label_seconds": label,
+                "used_percent": float(used),
+                "reset_after_seconds": item.get("reset_after_seconds"),
+                "reset_at": item.get("reset_at"),
+            }
+            valid_windows.append(entry)
+        if not valid_windows:
+            return False
+
+        resolved_source_id = source_id or self.default_source_id
+        try:
+            current = self.read_snapshot(resolved_source_id)
+        except CredentialError:
+            return False
+        if not current.access_token:
+            return False
+        if expected_origin and current.credential_origin != expected_origin:
+            return False
+        if expected_account_id:
+            if current.account_id != expected_account_id:
+                return False
+        elif expected_access_token and current.access_token != expected_access_token:
+            return False
+
+        cache = self._usage_cache.setdefault(resolved_source_id, _UsageCache())
+        cache.plan_type = token_plan_type(current.access_token)
+        now = time.monotonic()
+        for incoming in valid_windows:
+            label = incoming["label_seconds"]
+            prior = cache.passive.get(label)
+            if prior is not None and prior[0] > now:
+                incoming = {
+                    **prior[1],
+                    **{k: v for k, v in incoming.items() if v is not None},
+                }
+            cache.passive[label] = (now + self._usage_cache_ttl_seconds, incoming)
+        return True
 
     def status(self, source_id: str | None = None) -> CredentialStatus:
         """Return a safe state without requesting or exposing credentials."""

@@ -343,6 +343,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
         reply_language: str | None = None,
         before_attempt: Callable[[], None] | None = None,
         on_stream_open: Callable[[], None] | None = None,
+        on_rate_limits: Callable[[list[dict[str, Any]]], None] | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
         """Stream one request shaped for the Codex backend, retrying only
         temporary failures that happen before any output. The final response is
@@ -448,14 +449,26 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                 retry_rate_limits=False,
                 max_attempts=max_attempts - attempts,
             )
+            if on_rate_limits is not None:
+                headers = getattr(getattr(stream, "response", None), "headers", None)
+                if headers is not None:
+                    windows = oauth.parse_rate_limit_headers(headers)
+                    if windows:
+                        on_rate_limits(windows)
             if on_stream_open is not None:
                 on_stream_open()
             try:
-                consume_kwargs = (
+                consume_kwargs: dict[str, Any] = (
                     {"reply_language": reply_language}
                     if reply_language is not None
                     else {}
                 )
+                if (
+                    on_rate_limits is not None
+                    and getattr(self._consume_stream, "__func__", None)
+                    is CodexStreamMixin._consume_stream
+                ):
+                    consume_kwargs["on_rate_limits"] = on_rate_limits
                 async for response in self._consume_stream(
                     stream, tools, **consume_kwargs
                 ):
@@ -538,6 +551,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
             usage = await coordinator.get_usage(
                 snapshot.source_id,
                 lambda current: usage_service.fetch_usage(current, attempts=2),
+                force_refresh=True,
             )
             cooldown_until = usage_service.cooldown_until_from_usage(usage)
         except Exception as exc:  # noqa: BLE001 - a failed usage lookup is non-fatal
@@ -714,7 +728,31 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                     )
                 seen.add(identity)
                 selected_identity = identity
+
+            def record_limits(
+                windows: list[dict[str, Any]],
+                *,
+                current: CredentialSnapshot = snapshot,
+            ) -> None:
+                coordinator.record_passive_usage(
+                    current.source_id,
+                    windows,
+                    expected_access_token=current.access_token,
+                    expected_account_id=current.account_id,
+                    expected_origin=current.credential_origin,
+                )
+
             try:
+                query_kwargs: dict[str, Any] = (
+                    {"reply_language": reply_language}
+                    if reply_language is not None
+                    else {}
+                )
+                if (
+                    getattr(self._query_stream, "__func__", None)
+                    is ProviderOpenAICodex._query_stream
+                ):
+                    query_kwargs["on_rate_limits"] = record_limits
                 async with (
                     self._source_client(snapshot) as request_client,
                     aclosing(
@@ -726,11 +764,7 @@ class ProviderOpenAICodex(CodexStreamMixin, ProviderOpenAIResponses):
                             session_effort=session_effort,
                             before_attempt=guard,
                             on_stream_open=on_stream_open,
-                            **(
-                                {"reply_language": reply_language}
-                                if reply_language is not None
-                                else {}
-                            ),
+                            **query_kwargs,
                         )
                     ) as stream,
                 ):

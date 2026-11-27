@@ -505,6 +505,119 @@ def test_usage_schemas() -> None:
             "unknown usage never advertises a full allowance",
         )
 
+    # Passive header and codex.rate_limits event parsers.
+    hdr_windows = oauth.parse_rate_limit_headers(
+        {
+            "X-Codex-Primary-Used-Percent": "12.5",
+            "X-Codex-Primary-Window-Minutes": "300",
+            "X-Codex-Primary-Reset-At": "1900000100",
+            "X-Codex-Secondary-Used-Percent": "40",
+            "X-Codex-Secondary-Window-Minutes": "10080",
+            "X-Codex-Secondary-Reset-After-Seconds": "3600",
+        },
+        now=1000.0,
+    )
+    check(
+        len(hdr_windows) == 2
+        and hdr_windows[0]["label_seconds"] == 18000
+        and hdr_windows[0]["used_percent"] == 12.5
+        and hdr_windows[0]["reset_at"] == 1900000100
+        and hdr_windows[1]["label_seconds"] == 604800
+        and hdr_windows[1]["reset_at"] == 4600,
+        "parse_rate_limit_headers parses primary and secondary windows",
+    )
+    check(
+        oauth.parse_rate_limit_headers(
+            {
+                "x-codex-active-limit": "imagegen_premium",
+                "x-codex-primary-used-percent": "100",
+                "x-codex-primary-window-minutes": "1440",
+            }
+        )
+        == [],
+        "parse_rate_limit_headers ignores specialized image limits",
+    )
+    check(
+        oauth.parse_rate_limit_headers(
+            {
+                "x-codex-primary-used-percent": "nan",
+                "x-codex-primary-window-minutes": "300",
+                "x-codex-secondary-used-percent": "20",
+                "x-codex-secondary-window-minutes": "0",
+            }
+        )
+        == [],
+        "parse_rate_limit_headers skips non-finite and invalid windows",
+    )
+
+    ev_windows = oauth.parse_rate_limit_event(
+        {
+            "type": "codex.rate_limits",
+            "metered_limit_name": "codex",
+            "rate_limits": {
+                "primary": {
+                    "used_percent": 65,
+                    "window_minutes": 300,
+                    "reset_after_seconds": 600,
+                },
+                "secondary": None,
+            },
+        },
+        now=2000.0,
+    )
+    check(
+        len(ev_windows) == 1
+        and ev_windows[0]["label_seconds"] == 18000
+        and ev_windows[0]["used_percent"] == 65.0
+        and ev_windows[0]["reset_at"] == 2600,
+        "parse_rate_limit_event extracts partial codex windows",
+    )
+    check(
+        oauth.parse_rate_limit_event(
+            {
+                "type": "codex.rate_limits",
+                "metered_limit_name": "codex_bengalfox",
+                "rate_limits": {"primary": {"used_percent": 90, "window_minutes": 300}},
+            }
+        )
+        == [],
+        "parse_rate_limit_event ignores non-account metered_limit_name",
+    )
+
+    # fetch_rate_limits forwards originator alongside User-Agent and version.
+    usage_calls = []
+
+    class _UsageClient:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def get(self, url, **kwargs):
+            usage_calls.append((url, kwargs))
+            return _Response(200, current)
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    usage_client = _UsageClient()
+
+    async def run_usage_fetch() -> None:
+        with patch.object(oauth, "create_proxy_client", return_value=usage_client):
+            await oauth.fetch_rate_limits(
+                "tok",
+                "acc-1",
+                None,
+                "agent-test",
+                "originator-test",
+            )
+
+    asyncio.run(run_usage_fetch())
+    check(
+        usage_calls[0][1]["headers"]["originator"] == "originator-test"
+        and usage_calls[0][1]["headers"]["User-Agent"] == "agent-test"
+        and usage_client.closed,
+        "fetch_rate_limits sends originator and User-Agent",
+    )
+
 
 def test_error_classification() -> None:
     print("\n=== Upstream error classification ===")

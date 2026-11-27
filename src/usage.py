@@ -143,6 +143,7 @@ async def fetch_usage(
             snapshot.account_id,
             settings["proxy"],
             oauth.resolve_user_agent(settings["user_agent"]),
+            settings["originator"] or oauth.DEFAULT_ORIGINATOR,
         ),
         retry_rate_limits=False,
         max_attempts=attempts,

@@ -473,21 +473,29 @@ class LocalCredentialCoordinator(CredentialCoordinator):
             return snapshot
         self.ensure_writable()
         self._local_cooldowns[snapshot.account_id] = (cooldown_until, reason)
-        self._usage_cache.pop(source_id, None)
         return self.read_snapshot(source_id)
 
     async def get_usage(
-        self, source_id: str | None, fetch_usage: Any
+        self,
+        source_id: str | None,
+        fetch_usage: Any,
+        *,
+        force_refresh: bool = False,
     ) -> dict[str, Any]:
         source_id = source_id or self.default_source_id
         self.read_snapshot(source_id)
 
         async def fetch(snapshot: CredentialSnapshot) -> dict[str, Any]:
             result = await fetch_usage(snapshot)
-            if self.read_snapshot(source_id) != snapshot:
+            current = self.read_snapshot(source_id)
+            if (
+                current.access_token != snapshot.access_token
+                or current.account_id != snapshot.account_id
+                or current.credential_origin != snapshot.credential_origin
+            ):
                 raise ReauthenticationRequiredError(
                     "The account changed. Retry the quota lookup."
                 )
             return result
 
-        return await super().get_usage(source_id, fetch)
+        return await super().get_usage(source_id, fetch, force_refresh=force_refresh)

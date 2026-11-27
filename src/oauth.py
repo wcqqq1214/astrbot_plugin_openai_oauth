@@ -635,6 +635,7 @@ async def fetch_rate_limits(
     account_id: str = "",
     proxy: str | None = None,
     user_agent: str = "",
+    originator: str = DEFAULT_ORIGINATOR,
 ) -> dict:
     """Query the ChatGPT subscription allowance (GET /wham/usage).
 
@@ -647,6 +648,7 @@ async def fetch_rate_limits(
     user_agent = resolve_user_agent(user_agent)
     headers = {
         "Authorization": f"Bearer {access_token}",
+        "originator": originator or DEFAULT_ORIGINATOR,
         "User-Agent": user_agent,
         "version": client_version_header(user_agent),
         "Accept": "application/json",
@@ -740,6 +742,145 @@ def _parse_usage_payload(data: Any) -> dict:
             else None
         ),
     }
+
+
+def _is_codex_limit_name(value: Any) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, str):
+        return False
+    normalized = value.strip().lower().replace("-", "_")
+    return not normalized or normalized == "codex"
+
+
+def _coerce_finite_number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            number = float(stripped)
+        except ValueError:
+            return None
+    else:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _parse_passive_window(
+    used: Any,
+    window_minutes: Any,
+    reset_at: Any,
+    reset_after: Any,
+    *,
+    now: float,
+) -> dict[str, Any] | None:
+    used_percent = _coerce_finite_number(used)
+    minutes = _coerce_finite_number(window_minutes)
+    if (
+        used_percent is None
+        or minutes is None
+        or minutes <= 0
+        or not minutes.is_integer()
+    ):
+        return None
+
+    parsed_reset_at = _coerce_finite_number(reset_at)
+    parsed_reset_after = _coerce_finite_number(reset_after)
+    reset_after_seconds = (
+        int(parsed_reset_after)
+        if parsed_reset_after is not None and parsed_reset_after >= 0
+        else None
+    )
+    if parsed_reset_at is not None and parsed_reset_at > 0:
+        reset_at_ts: int | None = int(parsed_reset_at)
+    elif reset_after_seconds is not None:
+        reset_at_ts = int(now + reset_after_seconds)
+    else:
+        reset_at_ts = None
+
+    return {
+        "label_seconds": int(minutes) * 60,
+        "used_percent": used_percent,
+        "reset_after_seconds": reset_after_seconds,
+        "reset_at": reset_at_ts,
+    }
+
+
+def _header_get(headers: Any, name: str) -> Any:
+    if hasattr(headers, "get"):
+        value = headers.get(name)
+        if value is not None:
+            return value
+    if isinstance(headers, dict):
+        target = name.lower()
+        for key, value in headers.items():
+            if isinstance(key, str) and key.lower() == target:
+                return value
+    return None
+
+
+def _event_field(obj: Any, name: str, default: Any = None) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
+def parse_rate_limit_headers(
+    headers: Any, *, now: float | None = None
+) -> list[dict[str, Any]]:
+    """Extract account-level Codex rate-limit windows from response headers."""
+    if headers is None:
+        return []
+    if not _is_codex_limit_name(_header_get(headers, "x-codex-active-limit")):
+        return []
+    current_time = time.time() if now is None else now
+    windows: list[dict[str, Any]] = []
+    for slot in ("primary", "secondary"):
+        prefix = f"x-codex-{slot}-"
+        window = _parse_passive_window(
+            _header_get(headers, f"{prefix}used-percent"),
+            _header_get(headers, f"{prefix}window-minutes"),
+            _header_get(headers, f"{prefix}reset-at"),
+            _header_get(headers, f"{prefix}reset-after-seconds"),
+            now=current_time,
+        )
+        if window is not None:
+            windows.append(window)
+    return windows
+
+
+def parse_rate_limit_event(
+    event: Any, *, now: float | None = None
+) -> list[dict[str, Any]]:
+    """Extract account-level Codex windows from a ``codex.rate_limits`` event."""
+    if _event_field(event, "type") != "codex.rate_limits":
+        return []
+    if not _is_codex_limit_name(_event_field(event, "metered_limit_name")):
+        return []
+    rate_limits = _event_field(event, "rate_limits")
+    if rate_limits is None:
+        return []
+    current_time = time.time() if now is None else now
+    windows: list[dict[str, Any]] = []
+    for slot in ("primary", "secondary"):
+        item = _event_field(rate_limits, slot)
+        if item is None:
+            continue
+        window = _parse_passive_window(
+            _event_field(item, "used_percent"),
+            _event_field(item, "window_minutes"),
+            _event_field(item, "reset_at"),
+            _event_field(item, "reset_after_seconds"),
+            now=current_time,
+        )
+        if window is not None:
+            windows.append(window)
+    return windows
 
 
 def build_credentials(

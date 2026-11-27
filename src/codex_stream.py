@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -12,7 +12,7 @@ from astrbot.api.event import MessageChain
 from astrbot.core.exceptions import EmptyModelOutputError
 from astrbot.core.provider.entities import LLMResponse, TokenUsage
 
-from . import messages
+from . import messages, oauth
 
 
 class CodexStreamMixin:
@@ -47,7 +47,12 @@ class CodexStreamMixin:
         }
 
     async def _consume_stream(
-        self, stream: Any, tools: Any, *, reply_language: str | None = None
+        self,
+        stream: Any,
+        tools: Any,
+        *,
+        reply_language: str | None = None,
+        on_rate_limits: Callable[[list[dict[str, Any]]], None] | None = None,
     ) -> AsyncGenerator[LLMResponse, None]:
         """Keep partial response state scoped to a single stream attempt."""
         response_id: str | None = None
@@ -64,6 +69,13 @@ class CodexStreamMixin:
             event_response = self._field(event, "response")
             if event_response is not None:
                 response_id = self._field(event_response, "id", response_id)
+
+            if event_type == "codex.rate_limits":
+                if on_rate_limits is not None:
+                    windows = oauth.parse_rate_limit_event(event)
+                    if windows:
+                        on_rate_limits(windows)
+                continue
 
             if event_type == "error":
                 code = self._field(event, "code", "stream_error")

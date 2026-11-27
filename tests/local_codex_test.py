@@ -304,6 +304,18 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
         self.write(auth())
         self.assertEqual(self.coordinator.status().state, "cooling")
 
+    async def test_local_cooldown_retains_authoritative_quota_for_display(self):
+        self.write(auth())
+        denied = {"allowed": False, "limit_reached": True, "windows": []}
+        fetch = AsyncMock(return_value=denied)
+        await self.coordinator.get_usage(None, fetch)
+        await self.coordinator.mark_cooling(None, 9999999999)
+        self.coordinator.record_passive_usage(
+            None, [{"label_seconds": 18000, "used_percent": 40}]
+        )
+        self.assertEqual(await self.coordinator.get_usage(None, fetch), denied)
+        fetch.assert_awaited_once()
+
     async def test_quota_cooldown_uses_only_exhausted_windows(self):
         self.write(auth())
         now = 2000000000
@@ -314,7 +326,8 @@ class LocalCodexTests(unittest.IsolatedAsyncioTestCase):
             (40, 100, weekly_reset),
         ):
             with self.subTest(short_used=short_used, weekly_used=weekly_used):
-                # A fresh lookup also corrects a previously excessive cooldown.
+                # Start a fresh quota observation for each independent case.
+                self.coordinator.forget(self.coordinator.default_source_id)
                 await self.coordinator.mark_cooling(None, weekly_reset)
                 usage = {
                     "allowed": False,

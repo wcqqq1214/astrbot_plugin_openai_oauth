@@ -819,6 +819,123 @@ class WebSearchConfigIntegrationTests(unittest.IsolatedAsyncioTestCase):
         finally:
             provider_module.messages.set_language("zh-CN")
 
+    async def test_passive_rate_limits_update_display_cache_and_filter_non_codex(self):
+        await self.registry.migrate()
+        saved_model = self.conf["provider"][0]
+        await self.manager.reload(saved_model)
+        loaded = self.manager.inst_map[saved_model["id"]]
+        self.assertIsInstance(loaded, provider_module.ProviderOpenAICodex)
+
+        usage_service = provider_module.usage_service
+        oauth_mod = provider_module.oauth
+
+        stream_events = [
+            {
+                "type": "codex.rate_limits",
+                "metered_limit_name": "codex",
+                "rate_limits": {
+                    "primary": {
+                        "used_percent": 42,
+                        "window_minutes": 300,
+                        "reset_at": 1_900_000_500,
+                    },
+                    "secondary": {
+                        "used_percent": 15,
+                        "window_minutes": 10080,
+                        "reset_at": 1_900_500_000,
+                    },
+                },
+            },
+            {"type": "response.output_text.delta", "delta": "ok"},
+            {
+                "type": "response.completed",
+                "response": {"id": "resp-limits", "status": "completed", "output": []},
+            },
+        ]
+        response_headers = {
+            "content-type": "text/event-stream",
+            "x-codex-primary-used-percent": "38",
+            "x-codex-primary-window-minutes": "300",
+            "x-codex-primary-reset-at": "1900000400",
+        }
+        other_events = [
+            {
+                "type": "codex.rate_limits",
+                "metered_limit_name": "imagegen_premium",
+                "rate_limits": {
+                    "primary": {
+                        "used_percent": 100,
+                        "window_minutes": 1440,
+                        "reset_at": 1_900_086_400,
+                    }
+                },
+            },
+            {"type": "response.output_text.delta", "delta": "ok"},
+            {
+                "type": "response.completed",
+                "response": {"id": "resp-img", "status": "completed", "output": []},
+            },
+        ]
+        other_headers = {
+            "content-type": "text/event-stream",
+            "x-codex-active-limit": "imagegen_premium",
+            "x-codex-primary-used-percent": "100",
+            "x-codex-primary-window-minutes": "1440",
+            "x-codex-primary-reset-at": "1900086400",
+        }
+
+        current_reply = [stream_events, response_headers]
+
+        def respond(_request: httpx.Request) -> httpx.Response:
+            events, headers = current_reply
+            return httpx.Response(
+                200,
+                text="".join(f"data: {json.dumps(e)}\n\n" for e in events),
+                headers=headers,
+            )
+
+        loaded._create_http_client = lambda _cfg: httpx.AsyncClient(
+            transport=httpx.MockTransport(respond)
+        )
+
+        with (
+            mock.patch.object(runtime, "_config_mgr", self.coordinator.config_manager),
+            mock.patch.object(runtime, "_credential_coordinator", self.coordinator),
+            mock.patch.object(runtime, "_startup_error", None),
+        ):
+            reply = await loaded.text_chat(prompt="Hello")
+            self.assertEqual(reply.completion_text, "ok")
+
+            with mock.patch.object(
+                oauth_mod, "fetch_rate_limits", new=mock.AsyncMock()
+            ) as active_fetch:
+                cached = await usage_service.fetch_source_usage(loaded._source_id)
+            active_fetch.assert_not_awaited()
+            self.assertEqual(
+                [w["used_percent"] for w in cached["windows"]],
+                [42.0, 15.0],
+            )
+            self.assertEqual(
+                [w["label_seconds"] for w in cached["windows"]],
+                [18000, 604800],
+            )
+
+            # Image or specialized metered limits never overwrite account windows or cool the account.
+            current_reply[:] = [other_events, other_headers]
+            await loaded.text_chat(prompt="Hello again")
+            self.assertNotEqual(
+                self.coordinator.status(loaded._source_id).state, "cooling"
+            )
+            with mock.patch.object(
+                oauth_mod, "fetch_rate_limits", new=mock.AsyncMock()
+            ) as active_fetch:
+                still_cached = await usage_service.fetch_source_usage(loaded._source_id)
+            active_fetch.assert_not_awaited()
+            self.assertEqual(
+                [w["used_percent"] for w in still_cached["windows"]],
+                [42.0, 15.0],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
