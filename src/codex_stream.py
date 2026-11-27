@@ -125,6 +125,8 @@ class CodexStreamMixin:
             if event_type in {"response.output_text.delta", "response.refusal.delta"}:
                 delta = self._field(event, "delta", "")
                 if delta:
+                    if attempt is not None:
+                        attempt.mark_first_token()
                     if texts is not None:
                         key = (
                             self._field(event, "output_index", 0),
@@ -148,6 +150,8 @@ class CodexStreamMixin:
             }:
                 delta = self._field(event, "delta", "")
                 if delta:
+                    if attempt is not None:
+                        attempt.mark_first_token()
                     segment = (
                         self._field(event, "item_id"),
                         self._field(event, "summary_index"),
@@ -282,21 +286,26 @@ class CodexStreamMixin:
                         f"Responses stream returned no usable output. "
                         f"response_id={response_id}"
                     )
-                if bot is not None:
+                # Earlier tool rounds may still need a source overview.
+                turn = bot or bot_citations.current_turn()
+                if turn is not None:
                     raw_text = final.completion_text or ""
-                    body = bot.render(
+                    body = turn.render(
                         raw_text,
-                        texts,
+                        texts or {},
                         citations,
                         reply_language,
                         final_answer=not final.tools_call_name,
                     )
                     if body != raw_text:
                         final.completion_text = body
-                    if body:
+                    chunk = (
+                        body[len(raw_text) :] if bot is None and text_parts else body
+                    )
+                    if chunk:
                         yield LLMResponse(
                             "assistant",
-                            result_chain=MessageChain().message(body),
+                            result_chain=MessageChain().message(chunk),
                             is_chunk=True,
                             id=final.id or response_id,
                         )

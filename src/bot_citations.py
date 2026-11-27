@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -59,33 +58,58 @@ def _link(platform: str, label: str, url: str) -> str:
     return f"[{label}]({dest})"
 
 
-def _link_spans(text: str) -> Iterator[tuple[int, int]]:
-    """Keep a citation inside a Markdown link from breaking its label or URL."""
-    labels = []
-    start = depth = 0
-    for match in re.finditer(r"\\.|<https?://[^>\n]+>|\]\(|[][()]", text):
-        token = match[0]
-        if depth:
-            if token in ("(", "]("):
-                depth += 1
-            elif token == ")":
-                depth -= 1
-                if not depth:
-                    yield start, match.end()
-        elif token.startswith("<"):
-            yield match.span()
-        elif token == "[":
-            labels.append(match.start())
-        elif token == "]" and labels:
-            labels.pop()
-        elif token == "](" and labels:
-            start = labels.pop()
-            depth = 1
+def _queue_line_sources(event, body: str, card: MessageChain, overview: str) -> None:
+    """Use the reply token for the answer and its buttons in the same LINE request."""
+    send = event.send
+
+    async def send_with_sources(message: MessageChain):
+        if message.type == "reasoning":
+            return await send(message)
+        for index, component in enumerate(message.chain):
+            if isinstance(component, Comp.Plain):
+                fragment = component.text.strip()
+                if fragment and (body in fragment or fragment in body):
+                    break
+        else:
+            return await send(message)
+
+        event.send = send
+        payload = await event.build_line_messages(message)
+        [template] = await event.build_line_messages(card)
+        if len(payload) < 5:
+            native = [*payload, template]
+        else:
+            # LINE permits five messages per reply. Attach the same URL actions
+            # to the last message when the original chain already fills the batch.
+            actions = template["template"]["actions"]
+            quick_reply = {
+                "items": [{"type": "action", "action": action} for action in actions]
+            }
+            native = [*payload[:-1], {**payload[-1], "quickReply": quick_reply}]
+
+        raw = event.message_obj.raw_message
+        token = raw.get("replyToken") if isinstance(raw, dict) else None
+        if token:
+            sent = await event.line_api.reply_message(token, native)
+        else:
+            target = event.get_group_id() or event.get_sender_id()
+            sent = await event.line_api.push_message(target, native)
+        if sent:
+            return await AstrMessageEvent.send(event, message)
+
+        # The adapter's send() hides rejected requests. Retry with the URLs
+        # beside the answer, using its normal reply/push delivery.
+        if len(payload) < 5:
+            return await send(message.derive([*message.chain, Comp.Plain(overview)]))
+        await send(message.derive([component, Comp.Plain(overview)]))
+        await send(message.derive(message.chain[:index] + message.chain[index + 1 :]))
+
+    event.send = send_with_sources
 
 
 @dataclass
 class BotCitations:
-    platform: str
+    event: AstrMessageEvent
     sources: dict[str, tuple[int, str]] = field(default_factory=dict)
     pending_card: tuple[str, MessageChain, str] | None = None
     delivery_result: MessageEventResult | None = None
@@ -102,7 +126,8 @@ class BotCitations:
         if not citations and not self.sources:
             return body
 
-        inline = self.platform in _LINK_PLATFORMS
+        platform = self.event.get_platform_name()
+        inline = platform in _LINK_PLATFORMS
         # Each end_index counts characters from the start of its output_text.
         ordered_parts = [parts[key] for key in sorted(parts)]
         linked = set()
@@ -110,27 +135,13 @@ class BotCitations:
             rendered = []
             for part in ordered_parts:
                 cursor = 0
-                spans = iter(_link_spans(part.text))
-                span = next(spans, None)
-                inserted = set()
-                for end, url in sorted(part.marks, key=lambda mark: mark[0]):
-                    if end > len(part.text):
-                        continue
-                    while span and span[1] <= end:
-                        span = next(spans, None)
-                    if span and span[0] < end < span[1]:
-                        end = span[1]
-                    if (end, url) in inserted:
-                        continue
-                    inserted.add((end, url))
+                for end, url in part.positioned_marks():
                     index, _ = self.sources.setdefault(
                         url, (len(self.sources) + 1, citations[url])
                     )
                     number = f"〔{index}〕"
                     rendered.append(part.text[cursor:end])
-                    rendered.append(
-                        _link(self.platform, number, url) if inline else number
-                    )
+                    rendered.append(_link(platform, number, url) if inline else number)
                     linked.add(url)
                     cursor = end
                 rendered.append(part.text[cursor:])
@@ -153,7 +164,8 @@ class BotCitations:
         if (
             body.strip()
             and hasattr(Comp, "ActionRow")
-            and self.platform in _CARD_PLATFORMS
+            and platform in _CARD_PLATFORMS
+            and (platform != "line" or len(lines) <= self.event.BUTTONS_PER_TEMPLATE)
         ):
             buttons = [
                 Comp.Button(
@@ -163,13 +175,13 @@ class BotCitations:
                 )
                 for url, (number, title) in self.sources.items()
             ]
-            self.pending_card = (
-                body,
-                MessageChain(
-                    chain=[Comp.ActionRow(buttons=buttons, fallback_text=heading)]
-                ),
-                overview,
+            card = MessageChain(
+                chain=[Comp.ActionRow(buttons=buttons, fallback_text=heading)]
             )
+            if platform == "line":
+                _queue_line_sources(self.event, body, card, overview)
+            else:
+                self.pending_card = (body, card, overview)
             return body
         if not body or body.endswith("\n\n"):
             return body + overview
@@ -180,17 +192,22 @@ def for_request(tools) -> BotCitations | None:
     event = event_context.get()
     if event is None:
         return None
-    state = event.get_extra(_TURN_KEY)
     if not any(
         isinstance(tool, dict)
         and tool.get("type") in {"web_search", "web_search_preview"}
         for tool in tools or []
     ):
-        return state if state and state.sources else None
+        return None
+    state = event.get_extra(_TURN_KEY)
     if state is None:
-        state = BotCitations(event.get_platform_name())
+        state = BotCitations(event)
         event.set_extra(_TURN_KEY, state)
     return state
+
+
+def current_turn() -> BotCitations | None:
+    event = event_context.get()
+    return event.get_extra(_TURN_KEY) if event is not None else None
 
 
 async def deliver_card(event: AstrMessageEvent, *, after_send: bool) -> None:
