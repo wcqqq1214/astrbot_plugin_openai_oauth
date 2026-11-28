@@ -69,6 +69,7 @@ def check_entry_point(module) -> None:
         "openai_login",
         "draw",
         "codex_generate_image",
+        "codex_edit_image",
         "prepare_image_tool",
         "remember_image_account",
         "prepare_bot_sources",

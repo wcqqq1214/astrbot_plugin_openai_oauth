@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 支持使用本轮聊天的订阅账号编辑同一条消息中的一张参考图。附图并描述修改要求即可收到 PNG，只询问图片内容时仍以文字回答。
+
+### Added
+
+- Edit one reference image with the subscription account serving the chat turn. Send the attachment and edit instructions together to receive a PNG. Questions about the image still receive a text answer.
+
 ## [v2.7.0] - 2026-11-28
 
 ### 新增

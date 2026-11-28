@@ -12,7 +12,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 from astrbot.api import AstrBotConfig
-from astrbot.core.agent.tool import FunctionTool, ToolSet
+from astrbot.core.agent.tool import ToolSet
+from astrbot.core.provider.register import llm_tools
 from astrbot.dashboard.services import config_service
 from local_codex_test import Config
 from login_test import payload, plugin, request_context
@@ -91,17 +92,27 @@ class ImageSettingsTests(unittest.IsolatedAsyncioTestCase):
         )
         event = SimpleNamespace(
             unified_msg_origin="session",
+            get_messages=Mock(return_value=[]),
             set_extra=Mock(),
             should_call_llm=Mock(),
             send=AsyncMock(),
         )
         tool_name = plugin.image_generation.TOOL_NAME
+        edit_name = plugin.image_generation.EDIT_TOOL_NAME
         tools = ToolSet(
-            tools=[FunctionTool(name=tool_name, description="Draw", parameters={})]
+            tools=[llm_tools.get_func(name) for name in (tool_name, edit_name)]
         )
-        request = SimpleNamespace(conversation=None, func_tool=tools)
-        await self.star.prepare_image_tool(event, request)
-        self.assertEqual(request.func_tool.get_tool(tool_name) is not None, enabled)
+        for parts, expected in (
+            ([], tool_name),
+            ([plugin.Image(file="missing.png")], edit_name),
+        ):
+            event.get_messages.return_value = parts
+            request = SimpleNamespace(conversation=None, func_tool=tools)
+            await self.star.prepare_image_tool(event, request)
+            self.assertEqual(
+                [t.name for t in request.func_tool.tools], [expected] if enabled else []
+            )
+        self.assertEqual(len(tools.tools), 2)
         account = plugin.image_generation.ChatAccount("model", "selected", "id")
         self.star._image_accounts[("session", "chat")] = account
         invocation = plugin.image_generation.ToolInvocation(account, 120)

@@ -171,7 +171,7 @@ export const strings = {
     webSearchTitle: "Native web search",
     webSearchHint: "Let models search the web and cite sources.",
     imageTitle: "GPT Image generation",
-    imageHint: "Generate images in chat or with /draw.",
+    imageHint: "Generate images in chat or with /draw, or attach one image with instructions to edit it.",
   },
   zh: {
     // Stable error codes reported by the plugin's WebUI API.
@@ -340,7 +340,7 @@ export const strings = {
     webSearchTitle: "原生网络搜索",
     webSearchHint: "允许模型联网搜索并附带来源链接。",
     imageTitle: "GPT Image 生图",
-    imageHint: "支持在对话中自动生图，或使用 /draw 命令生图。",
+    imageHint: "可在对话中生图、编辑同一条消息中附带的参考图，或用 /draw 生图。",
   },
   ru: {
     // Stable error codes reported by the plugin's WebUI API.
@@ -501,7 +501,7 @@ export const strings = {
     webSearchTitle: "Встроенный веб-поиск",
     webSearchHint: "Разрешить моделям искать в сети и добавлять ссылки на источники.",
     imageTitle: "Генерация GPT Image",
-    imageHint: "Генерация изображений в чате и командой /draw.",
+    imageHint: "Создавайте изображения в чате или командой /draw. Для редактирования отправьте одно изображение вместе с описанием изменений.",
   },
   ja: {
     // Stable error codes reported by the plugin's WebUI API.
@@ -662,6 +662,6 @@ export const strings = {
     webSearchTitle: "ネイティブ Web 検索",
     webSearchHint: "モデルによる Web 検索と出典リンクの付与を許可します。",
     imageTitle: "GPT Image 画像生成",
-    imageHint: "チャット内での自動生成や /draw コマンドでの画像生成を利用できます。",
+    imageHint: "チャットや /draw で画像を生成できます。編集するには、画像を1枚添付して変更内容と一緒に送信してください。",
   },
 };

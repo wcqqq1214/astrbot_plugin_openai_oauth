@@ -29,7 +29,7 @@
     },
     "image_enabled": {
       "description": "GPT Image 画像生成",
-      "hint": "チャット内での自動生成や /draw コマンドでの画像生成を利用できます。"
+      "hint": "チャットや /draw で画像を生成できます。編集するには、画像を1枚添付して変更内容と一緒に送信してください。"
     },
     "image_account": {
       "description": "画像生成アカウント ID（任意）",

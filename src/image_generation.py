@@ -15,6 +15,9 @@ from uuid import uuid4
 
 import httpx
 from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent
+from astrbot.core.message.components import Image as ImageComponent
+from astrbot.core.utils.media_utils import resolve_image_ref_to_base64_data
 from PIL import Image
 
 from . import oauth, runtime
@@ -25,6 +28,7 @@ if TYPE_CHECKING:
 
 IMAGE_MODEL = "gpt-image-2"
 TOOL_NAME = "codex_generate_image"
+EDIT_TOOL_NAME = "codex_edit_image"
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 MAX_ERROR_RESPONSE_BYTES = 64 * 1024
 MAX_IMAGE_PIXELS = 16 * 1024 * 1024
@@ -83,12 +87,32 @@ class ImageError(RuntimeError):
     """A message catalog key safe to show in chat."""
 
 
+async def read_edit_image(event: AstrMessageEvent) -> str:
+    """Read exactly one direct attachment from the event passed to the tool."""
+    attachments = [
+        part for part in event.get_messages() if isinstance(part, ImageComponent)
+    ]
+    if len(attachments) != 1:
+        raise ImageError("image.reference_required")
+    attachment = attachments[0]
+    try:
+        image = await resolve_image_ref_to_base64_data(
+            attachment.url or attachment.file, default_mime_type=None
+        )
+    except Exception as exc:
+        raise ImageError("image.reference_unreadable") from exc
+    if image is None:
+        raise ImageError("image.reference_unreadable")
+    return image.to_data_url()
+
+
 async def generate(
-    provider: ProviderOpenAICodex, account: ChatAccount, prompt: str
+    provider: ProviderOpenAICodex,
+    account: ChatAccount,
+    prompt: str,
+    *,
+    reference_image: str | None = None,
 ) -> bytes:
-    prompt = prompt.strip()
-    if not prompt or len(prompt) > 32000:
-        raise ImageError("image.prompt")
     coordinator = runtime.get_coordinator()
 
     def validate_account(snapshot: CredentialSnapshot) -> None:
@@ -107,6 +131,10 @@ async def generate(
         "n": 1,
         "output_format": "png",
     }
+    endpoint = "generations"
+    if reference_image is not None:
+        endpoint = "edits"
+        payload["images"] = [{"image_url": reference_image}]
     turn_id = str(uuid4())
     try:
         for refresh in (False, True):
@@ -145,7 +173,7 @@ async def generate(
                 )
                 async with transport.stream(
                     "POST",
-                    f"{oauth.CODEX_BASE}/images/generations",
+                    f"{oauth.CODEX_BASE}/images/{endpoint}",
                     json=payload,
                     headers=headers,
                     follow_redirects=False,

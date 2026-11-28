@@ -29,7 +29,7 @@
     },
     "image_enabled": {
       "description": "GPT Image generation",
-      "hint": "Generate images in chat or with /draw."
+      "hint": "Generate images in chat or with /draw, or attach one image with instructions to edit it."
     },
     "image_account": {
       "description": "Image account ID (optional)",
