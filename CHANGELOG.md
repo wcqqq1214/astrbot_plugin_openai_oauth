@@ -4,11 +4,11 @@
 
 ### 新增
 
-- 支持使用本轮聊天的订阅账号编辑同一条消息中的一张参考图。ChatUI 也可直接继续编辑同一会话上一条机器人回复中的图片，本条消息的附件优先。只询问图片内容时仍以文字回答。
+- 支持使用本轮聊天的订阅账号编辑同一条消息中的一张参考图。ChatUI 也可直接继续编辑同一会话中机器人最近发的图片，中间的文字回复会被跳过，本条消息的附件优先。只询问图片内容时仍以文字回答。
 
 ### Added
 
-- Edit one reference image with the subscription account serving the chat turn. In ChatUI, follow up to edit the image from the immediately preceding assistant reply in the same chat. A new attachment takes priority. Questions about the image still receive a text answer.
+- Edit one reference image with the subscription account serving the chat turn. In ChatUI, follow up to edit the most recent image the assistant sent in the same chat, even after intervening text replies. A new attachment takes priority. Questions about the image still receive a text answer.
 
 ## [v2.7.0] - 2026-11-28
 

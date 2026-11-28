@@ -131,7 +131,7 @@ _CATALOG: dict[str, dict[str, str]] = {
     "en-US": {
         "image.disabled": "Enable GPT Image generation in the plugin settings first.",
         "image.prompt": "Usage: /draw <prompt>",
-        "image.edit_prompt": "Describe the changes in up to {limit} characters. Attach the original or, in ChatUI, refer to the image in the previous reply.",
+        "image.edit_prompt": "Describe the changes in up to {limit} characters. Attach the original or, in ChatUI, refer to the last image the assistant sent in this chat.",
         "image.reference_required": "Send one reference image and the requested changes together in the same message.",
         "image.reference_unreadable": "I couldn’t read the reference image. Please attach it again with your edit instructions.",
         "image.no_account": "Send a message in this conversation before using /draw.",
@@ -228,7 +228,7 @@ _CATALOG: dict[str, dict[str, str]] = {
     "ru-RU": {
         "image.disabled": "Сначала включите генерацию GPT Image в настройках плагина.",
         "image.prompt": "Использование: /draw <описание>",
-        "image.edit_prompt": "Опишите изменения, используя не более {limit} символов. Прикрепите исходное изображение или укажите, что нужно изменить изображение из предыдущего ответа в ChatUI.",
+        "image.edit_prompt": "Опишите изменения, используя не более {limit} символов. Прикрепите исходное изображение или укажите, что нужно изменить последнее изображение, отправленное ботом в этом чате ChatUI.",
         "image.reference_required": "Отправьте одно исходное изображение и описание изменений в одном сообщении.",
         "image.reference_unreadable": "Не удалось прочитать исходное изображение. Прикрепите его ещё раз вместе с описанием изменений.",
         "image.no_account": "Сначала отправьте сообщение в этом диалоге, затем используйте /draw.",
@@ -325,7 +325,7 @@ _CATALOG: dict[str, dict[str, str]] = {
     "ja-JP": {
         "image.disabled": "先にプラグイン設定で GPT Image 画像生成を有効にしてください。",
         "image.prompt": "使い方: /draw <プロンプト>",
-        "image.edit_prompt": "変更内容を{limit}文字以内で書いてください。元の画像を添付するか、ChatUI で直前の返信の画像を指定してください。",
+        "image.edit_prompt": "変更内容を{limit}文字以内で書いてください。元の画像を添付するか、ChatUI でこのチャットで最後に送られたアシスタントの画像を指定してください。",
         "image.reference_required": "参考画像を1枚添付し、変更内容と一緒に送信してください。",
         "image.reference_unreadable": "参考画像を読み込めませんでした。画像を添付し直し、変更内容と一緒に送信してください。",
         "image.no_account": "この会話で一度メッセージを送信してから /draw を使用してください。",

@@ -166,7 +166,8 @@ class OpenAI_OAuth_Plugin(Star):
 
         Use the current attachment first. In ChatUI, a follow-up such as
         "keep the composition and change the background to daytime" edits
-        the image in the immediately preceding assistant reply.
+        the most recent image sent by the assistant in this chat, even if
+        text-only replies followed it.
         Answer questions about the image directly without calling this tool.
         Use codex_generate_image for a new image. If editing fails, report the error.
 

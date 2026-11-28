@@ -20,7 +20,7 @@ from astrbot.core.db.po import PlatformMessageHistory
 from astrbot.core.message.components import Image as ImageComponent
 from astrbot.core.utils.media_utils import resolve_image_ref_to_base64_data
 from PIL import Image
-from sqlalchemy import select, tuple_
+from sqlalchemy import func, select, tuple_
 
 from . import chatui_citations, oauth, runtime
 from .credential_store import CredentialSnapshot, jwt_claims
@@ -89,7 +89,7 @@ class ImageError(RuntimeError):
     """A message catalog key safe to show in chat."""
 
 
-async def _previous_reply_image(event: AstrMessageEvent) -> str:
+async def _latest_reply_image(event: AstrMessageEvent) -> str:
     state = chatui_citations.active_chat_run(event)
     if state is None:
         raise ImageError("image.reference_required")
@@ -121,27 +121,31 @@ async def _previous_reply_image(event: AstrMessageEvent) -> str:
         .limit(1)
         .scalar_subquery()
     )
-    previous = (
-        select(history.content)
+    parts = func.json_each(history.content, "$.message").table_valued("value")
+    kind = func.json_extract(parts.c.value, "$.type")
+    is_image = (kind == "image") | (
+        (kind == "view")
+        & (func.json_extract(parts.c.value, "$.name") == "image_progress")
+    )
+    latest = (
+        select(
+            func.count(), func.min(func.json_extract(parts.c.value, "$.attachment_id"))
+        )
+        .select_from(history)
+        .join(parts, is_image)
         .where(*scope, role == "bot", tuple_(history.created_at, history.id) < current)
+        .group_by(history.id)
         .order_by(history.created_at.desc(), history.id.desc())
         .limit(1)
     )
     async with db.get_db() as session:
-        reply = (await session.execute(previous)).scalar_one_or_none()
-    parts = reply["message"] if reply else []
-    ids = [
-        part["attachment_id"]
-        for part in parts
-        if part.get("attachment_id")
-        and (
-            part.get("type") == "image"
-            or (part.get("type") == "view" and part.get("name") == "image_progress")
-        )
-    ]
-    if len(ids) != 1:
+        row = (await session.execute(latest)).one_or_none()
+    if row is None:
         raise ImageError("image.reference_required")
-    attachment = await db.get_attachment_by_id(ids[0])
+    count, attachment_id = row
+    if count != 1:
+        raise ImageError("image.reference_required")
+    attachment = await db.get_attachment_by_id(attachment_id)
     if attachment is None or attachment.type != "image":
         raise ImageError("image.reference_unreadable")
     return attachment.path
@@ -157,7 +161,7 @@ async def read_edit_image(event: AstrMessageEvent) -> str:
     ref = (
         (attachments[0].url or attachments[0].file)
         if attachments
-        else await _previous_reply_image(event)
+        else await _latest_reply_image(event)
     )
     try:
         image = await resolve_image_ref_to_base64_data(ref, default_mime_type=None)

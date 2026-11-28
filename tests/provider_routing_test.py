@@ -451,7 +451,7 @@ class RoutingTests(RoutingFixture):
             self.assertEqual(header, "data:image/png;base64")
             self.assertEqual(b64decode(encoded, validate=True), sources[body["prompt"]])
 
-    async def test_chatui_followup_uses_only_the_previous_bot_reply(self):
+    async def test_chatui_followup_uses_latest_bot_image_before_the_turn(self):
         await self.collect()
         star, _ = await self.image_entrypoints()
         event = Mock(spec=WebChatMessageEvent)
@@ -521,8 +521,10 @@ class RoutingTests(RoutingFixture):
         request = plugin.ProviderRequest(func_tool=tools)
         await star.prepare_image_tool(event, request)
         self.assertEqual(request.func_tool.tools, tools.tools)
+        await save("bot", [other])
         await save("bot", [original])
         await save("bot", [other], session="another-chat")
+        await save("bot", [{"type": "plain", "text": "Please attach the image."}])
         await start_turn("edit-to-daytime")
         # A later response must not change this turn's source.
         await save("bot", [other])
@@ -541,12 +543,18 @@ class RoutingTests(RoutingFixture):
             ref = json.loads(sent.content)["images"][0]["image_url"]
             self.assertEqual(b64decode(ref.split(",")[1]), expected)
 
-        await save("bot", [{"type": "plain", "text": "Done"}])
-        await start_turn("after-text")
+        await save("bot", [original, other])
+        await start_turn("after-two-images")
         event.get_messages.return_value = []
         self.assertEqual(
             await star.codex_edit_image(event, "Change it again"),
             plugin.messages.text("image.reference_required"),
+        )
+        await save("bot", [dict(other, attachment_id="deleted-attachment")])
+        await start_turn("after-deleted-image")
+        self.assertEqual(
+            await star.codex_edit_image(event, "Change it again"),
+            plugin.messages.text("image.reference_unreadable"),
         )
         self.assertEqual(len(self.requests), 3)
 
