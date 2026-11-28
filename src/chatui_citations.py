@@ -303,18 +303,19 @@ _producer: ContextVar[_CitationRun | None] = ContextVar(
 _active_runs: dict[str, _CitationRun] = {}
 
 
-@asynccontextmanager
-async def image_generation_indicator(event: Any):
+def active_chat_run(event: Any) -> _CitationRun | None:
     if not _active_runs:
-        yield None
-        return
+        return None
     from astrbot.core.platform.sources.webchat.webchat_event import WebChatMessageEvent
 
-    state = (
-        _active_runs.get(str(event.message_obj.message_id))
-        if isinstance(event, WebChatMessageEvent)
-        else None
-    )
+    if isinstance(event, WebChatMessageEvent):
+        return _active_runs.get(str(event.message_obj.message_id))
+    return None
+
+
+@asynccontextmanager
+async def image_generation_indicator(event: Any):
+    state = active_chat_run(event)
     if (
         state is None
         or state.run.status != "running"

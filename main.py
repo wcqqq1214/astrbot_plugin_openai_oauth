@@ -105,7 +105,7 @@ class OpenAI_OAuth_Plugin(Star):
             request.func_tool.remove_tool(image_generation.EDIT_TOOL_NAME)
         elif any(isinstance(part, Image) for part in event.get_messages()):
             request.func_tool.remove_tool(image_generation.TOOL_NAME)
-        else:
+        elif chatui_citations.active_chat_run(event) is None:
             request.func_tool.remove_tool(image_generation.EDIT_TOOL_NAME)
 
     @filter.on_llm_response()
@@ -152,8 +152,8 @@ class OpenAI_OAuth_Plugin(Star):
     async def codex_generate_image(self, event: AstrMessageEvent, prompt: str) -> str:
         """Generate and send a new image when the user asks for one from text.
 
-        If the user wants to change an existing image, ask them to attach it
-        with their instructions in the same message.
+        For edits to an existing image, use codex_edit_image when available.
+        If the source is unavailable, ask the user to attach it.
 
         Args:
             prompt(string): Describe the image, including any requested orientation and composition.
@@ -162,10 +162,13 @@ class OpenAI_OAuth_Plugin(Star):
 
     @filter.llm_tool(name=image_generation.EDIT_TOOL_NAME)
     async def codex_edit_image(self, event: AstrMessageEvent, prompt: str) -> str:
-        """Edit and send the attached image when the user asks to change it.
+        """Edit an image only when the user asks to change it.
 
+        Use the current attachment first. In ChatUI, a follow-up such as
+        "keep the composition and change the background to daytime" edits
+        the image in the immediately preceding assistant reply.
         Answer questions about the image directly without calling this tool.
-        If editing fails, report the error.
+        Use codex_generate_image for a new image. If editing fails, report the error.
 
         Args:
             prompt(string): Describe the requested changes and what to preserve. The plugin supplies the attachment.

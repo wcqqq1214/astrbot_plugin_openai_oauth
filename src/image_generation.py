@@ -16,11 +16,13 @@ from uuid import uuid4
 import httpx
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
+from astrbot.core.db.po import PlatformMessageHistory
 from astrbot.core.message.components import Image as ImageComponent
 from astrbot.core.utils.media_utils import resolve_image_ref_to_base64_data
 from PIL import Image
+from sqlalchemy import select, tuple_
 
-from . import oauth, runtime
+from . import chatui_citations, oauth, runtime
 from .credential_store import CredentialSnapshot, jwt_claims
 
 if TYPE_CHECKING:
@@ -87,18 +89,78 @@ class ImageError(RuntimeError):
     """A message catalog key safe to show in chat."""
 
 
+async def _previous_reply_image(event: AstrMessageEvent) -> str:
+    state = chatui_citations.active_chat_run(event)
+    if state is None:
+        raise ImageError("image.reference_required")
+    run, db = state.run, state.service.db
+    owner = (
+        await db.get_webchat_thread_by_id(run.session_id)
+        if run.platform_history_id == "webchat_thread"
+        else await db.get_platform_session_by_id(run.session_id)
+    )
+    if owner is None or owner.creator != run.username:
+        raise ImageError("image.reference_required")
+
+    history = PlatformMessageHistory
+    scope = [
+        history.platform_id == run.platform_history_id,
+        history.user_id == run.session_id,
+    ]
+    # AstrBot releases before conversation events link rows by checkpoint.
+    if hasattr(history, "turn_id"):
+        scope.append(history.is_active.is_(True))
+        turn = history.turn_id == run.turn_id
+    else:
+        turn = history.llm_checkpoint_id == run.llm_checkpoint_id
+    role = history.content["type"].as_string()
+    current = (
+        select(history.created_at, history.id)
+        .where(*scope, role == "user", history.sender_id == run.username, turn)
+        .order_by(history.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    previous = (
+        select(history.content)
+        .where(*scope, role == "bot", tuple_(history.created_at, history.id) < current)
+        .order_by(history.created_at.desc(), history.id.desc())
+        .limit(1)
+    )
+    async with db.get_db() as session:
+        reply = (await session.execute(previous)).scalar_one_or_none()
+    parts = reply["message"] if reply else []
+    ids = [
+        part["attachment_id"]
+        for part in parts
+        if part.get("attachment_id")
+        and (
+            part.get("type") == "image"
+            or (part.get("type") == "view" and part.get("name") == "image_progress")
+        )
+    ]
+    if len(ids) != 1:
+        raise ImageError("image.reference_required")
+    attachment = await db.get_attachment_by_id(ids[0])
+    if attachment is None or attachment.type != "image":
+        raise ImageError("image.reference_unreadable")
+    return attachment.path
+
+
 async def read_edit_image(event: AstrMessageEvent) -> str:
-    """Read exactly one direct attachment from the event passed to the tool."""
+    """Prefer the direct attachment; only ChatUI can supply a prior reply."""
     attachments = [
         part for part in event.get_messages() if isinstance(part, ImageComponent)
     ]
-    if len(attachments) != 1:
+    if len(attachments) > 1:
         raise ImageError("image.reference_required")
-    attachment = attachments[0]
+    ref = (
+        (attachments[0].url or attachments[0].file)
+        if attachments
+        else await _previous_reply_image(event)
+    )
     try:
-        image = await resolve_image_ref_to_base64_data(
-            attachment.url or attachment.file, default_mime_type=None
-        )
+        image = await resolve_image_ref_to_base64_data(ref, default_mime_type=None)
     except Exception as exc:
         raise ImageError("image.reference_unreadable") from exc
     if image is None:

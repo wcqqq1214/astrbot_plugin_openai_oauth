@@ -13,14 +13,18 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from zlib import compress, crc32
 
 sys.path.insert(0, str(Path(__file__).parent))
 import httpx
+from astrbot.core import db_helper
 from astrbot.core.agent.tool import ToolSet
+from astrbot.core.db.po import PlatformMessageHistory
 from astrbot.core.message.components import Reply
+from astrbot.core.platform.sources.webchat.webchat_event import WebChatMessageEvent
 from astrbot.core.provider.register import llm_tools
 from local_codex_test import Config, jwt, local, store
 from login_test import payload, plugin, request_context
@@ -446,6 +450,105 @@ class RoutingTests(RoutingFixture):
             header, encoded = image["image_url"].split(",")
             self.assertEqual(header, "data:image/png;base64")
             self.assertEqual(b64decode(encoded, validate=True), sources[body["prompt"]])
+
+    async def test_chatui_followup_uses_only_the_previous_bot_reply(self):
+        await self.collect()
+        star, _ = await self.image_entrypoints()
+        event = Mock(spec=WebChatMessageEvent)
+        event.message_obj = SimpleNamespace(message_id="followup-run")
+        event.unified_msg_origin = "webchat"
+        event.get_messages.return_value = []
+        await db_helper.initialize()
+        await db_helper.create_platform_session("user", session_id="followup")
+        directory = Path(self.enterContext(TemporaryDirectory()))
+        red, blue = sample_png("red"), sample_png("blue")
+
+        async def save_image(data, name):
+            path = directory / name
+            path.write_bytes(data)
+            return (
+                await db_helper.insert_attachment(str(path), "image", "image/png")
+            ).attachment_id
+
+        original = {
+            "type": "view",
+            "name": "image_progress",
+            "attachment_id": await save_image(red, "original.png"),
+        }
+        other = {"type": "image", "attachment_id": await save_image(blue, "other.png")}
+        turn_key = (
+            "turn_id"
+            if hasattr(PlatformMessageHistory, "turn_id")
+            else "llm_checkpoint_id"
+        )
+        run = SimpleNamespace(
+            username="user",
+            session_id="followup",
+            platform_history_id="webchat",
+            status="running",
+        )
+
+        async def save(role, parts, session="followup", **turn):
+            await db_helper.insert_platform_message_history(
+                "webchat",
+                session,
+                {"type": role, "message": parts},
+                sender_id=role,
+                **turn,
+            )
+
+        async def start_turn(name):
+            setattr(run, turn_key, name)
+            await save("user", [], **{turn_key: name})
+
+        token = image_generation.tool_invocation.set(
+            image_generation.ToolInvocation(self.output[-1]._codex_image_account, 120)
+        )
+        self.addCleanup(image_generation.tool_invocation.reset, token)
+        state = SimpleNamespace(service=SimpleNamespace(db=db_helper), run=run)
+        self.enterContext(
+            patch.dict(plugin.chatui_citations._active_runs, {"followup-run": state})
+        )
+        tools = ToolSet(
+            tools=[
+                llm_tools.get_func(name)
+                for name in (
+                    image_generation.EDIT_TOOL_NAME,
+                    image_generation.TOOL_NAME,
+                )
+            ]
+        )
+        request = plugin.ProviderRequest(func_tool=tools)
+        await star.prepare_image_tool(event, request)
+        self.assertEqual(request.func_tool.tools, tools.tools)
+        await save("bot", [original])
+        await save("bot", [other], session="another-chat")
+        await start_turn("edit-to-daytime")
+        # A later response must not change this turn's source.
+        await save("bot", [other])
+        self.outcomes["local"] = [image_response(blue), image_response(red)]
+        for attachments, expected in (
+            ([], red),
+            ([plugin.Image.fromBytes(blue)], blue),
+        ):
+            event.get_messages.return_value = attachments
+            self.assertEqual(
+                await star.codex_edit_image(event, "Change the background"),
+                plugin.messages.text("image.sent"),
+            )
+            sent = self.requests[-1][1]
+            self.assertEqual(str(sent.url), f"{oauth.CODEX_BASE}/images/edits")
+            ref = json.loads(sent.content)["images"][0]["image_url"]
+            self.assertEqual(b64decode(ref.split(",")[1]), expected)
+
+        await save("bot", [{"type": "plain", "text": "Done"}])
+        await start_turn("after-text")
+        event.get_messages.return_value = []
+        self.assertEqual(
+            await star.codex_edit_image(event, "Change it again"),
+            plugin.messages.text("image.reference_required"),
+        )
+        self.assertEqual(len(self.requests), 3)
 
     async def test_failed_edit_never_generates_or_uses_cached_account(self):
         self.provider._source_id = "same"
