@@ -161,6 +161,26 @@ class _CitationRun:
     def __getattr__(self, name):
         return getattr(self.service, name)
 
+    def has_live_reply_image(self) -> bool:
+        for run_id in self.service.chat_runs_by_session[self.run.session_id]:
+            reply = self.service.chat_runs[run_id]
+            if (
+                reply is self.run
+                or reply.username != self.run.username
+                or reply.platform_history_id != self.run.platform_history_id
+            ):
+                continue
+            if any(
+                part.get("attachment_id")
+                and (
+                    part["type"] == "image"
+                    or (part["type"] == "view" and part["name"] == "image_progress")
+                )
+                for part in reply.message_parts
+            ):
+                return True
+        return False
+
     def render(self, parts: list[dict]) -> tuple[list[dict], list[tuple[int, str]]]:
         # The host may split one output_text across several plain message parts.
         plain = [
@@ -504,14 +524,18 @@ def install() -> Callable[[], None]:
 
     @wraps(capture)
     def capture_follow_up(event, *args, **kwargs):
+        state = active_chat_run(event)
         if (
-            active_chat_run(event) is not None
-            and any(isinstance(part, Image) for part in event.get_messages())
+            state is not None
+            and (
+                any(isinstance(part, Image) for part in event.get_messages())
+                or state.has_live_reply_image()
+            )
             and edits_enabled(
                 event.get_extra("selected_provider"), event.unified_msg_origin
             )
         ):
-            # Steering carries text only. Let AstrBot queue a turn with its own event.
+            # A steered tool call would see the original event and its history cutoff.
             return None
         return capture(event, *args, **kwargs)
 

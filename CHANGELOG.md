@@ -8,7 +8,7 @@
 
 ### 修复
 
-- ChatUI 在机器人回复期间收到的新参考图会单独处理。附件失效时提示重新上传，本轮编辑失败后不会再调用文生图。
+- ChatUI 在机器人回复期间收到的新参考图会单独处理。机器人发出图片后，即使还在输出文字，用户也可以直接追问改图。附件失效时提示重新上传，本轮编辑失败后不会再调用文生图。
 
 ### Added
 
@@ -16,7 +16,7 @@
 
 ### Fixed
 
-- In ChatUI, a reference image sent while the assistant is responding gets its own turn. An expired attachment prompts for a new upload, and a failed edit blocks text-to-image generation for that turn.
+- In ChatUI, a reference image sent while the assistant is responding gets its own turn. Once the image appears, users can request an edit while the caption is still streaming. An expired attachment prompts for a new upload, and a failed edit blocks text-to-image generation for that turn.
 
 ## [v2.7.0] - 2026-11-28
 

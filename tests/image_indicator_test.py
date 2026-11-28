@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import sys
 import tempfile
@@ -217,7 +218,7 @@ class ImageIndicatorTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertNotIn("image_progress", str(self.run.message_parts))
 
-    async def test_draw_delivers_only_the_finished_png(self):
+    async def test_draw_delivers_the_finished_png_for_followup_edits(self):
         directory = self.service.attachments_dir
         png = BytesIO()
         Image.new("RGB", (2, 2), "blue").save(png, format="PNG")
@@ -263,6 +264,37 @@ class ImageIndicatorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await download).content, data)
         await self.next_frame("run_snapshot")
         await self.next_frame("message_saved")
+        stream = await self.service.build_chat_stream(
+            "user", {"session_id": "session", "message": "把刚才那张换成白天"}
+        )
+        followup = next(
+            run for run in self.service.chat_runs.values() if run is not self.run
+        )
+        try:
+            await asyncio.sleep(0)  # Start the incoming ChatUI consumer.
+            event = Mock(spec=WebChatMessageEvent)
+            event.message_obj = SimpleNamespace(message_id=followup.run_id)
+            event.unified_msg_origin = "session"
+            event.get_messages.return_value = []
+            event.get_extra.side_effect = {"selected_provider": "model"}.get
+            active_turn = Mock()
+            active_turn.steer.return_value = None
+            with (
+                patch.object(
+                    plugin.runtime, "get_plugin_config", return_value=self.star.config
+                ),
+                patch.object(
+                    plugin.runtime, "get_context", return_value=self.star.context
+                ),
+            ):
+                internal.try_capture_follow_up(event, active_turn)
+            active_turn.steer.assert_not_called()
+            reference = await plugin.image_generation.read_edit_image(event)
+            self.assertEqual(base64.b64decode(reference.split(",", 1)[1]), data)
+        finally:
+            await followup.back_queue.put({"type": "end", "data": ""})
+            await followup.task
+            await stream.aclose()
         self.service.chat_runs.pop("run")
         record, _, _, _ = await self.service.get_chat_view("user", view_id)
         saved = await db_helper.get_platform_message_history_by_id(
