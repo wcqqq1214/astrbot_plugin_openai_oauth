@@ -1,22 +1,26 @@
 # Changelog
 
-## [Unreleased]
+## [v2.8.0] - 2026-11-28
 
 ### 新增
 
 - 支持使用本轮聊天的订阅账号编辑同一条消息中的一张参考图。ChatUI 也可直接继续编辑同一会话中机器人最近发的图片，中间的文字回复会被跳过，本条消息的附件优先。只询问图片内容时仍以文字回答。
+- Providers 页面可直接切换 GPT Image，与插件设置共用同一开关。ChatUI 在生成期间显示加载提示，并在图片传输时显示下载进度。
 
 ### 修复
 
 - ChatUI 在机器人回复期间收到的新参考图会单独处理。机器人发出图片后，即使还在输出文字，用户也可以直接追问改图。附件失效时提示重新上传，本轮编辑失败后不会再调用文生图。
+- 修复旧版 ChatUI 中 Providers 页面入口的兼容问题。
 
 ### Added
 
 - Edit one reference image with the subscription account serving the chat turn. In ChatUI, follow up to edit the most recent image the assistant sent in the same chat, even after intervening text replies. A new attachment takes priority. Questions about the image still receive a text answer.
+- The Providers page now shares the GPT Image toggle with plugin settings. ChatUI shows a loading indicator during generation and download progress as the image arrives.
 
 ### Fixed
 
 - In ChatUI, a reference image sent while the assistant is responding gets its own turn. Once the image appears, users can request an edit while the caption is still streaming. An expired attachment prompts for a new upload, and a failed edit blocks text-to-image generation for that turn.
+- Restore access to the Providers page on older ChatUI versions.
 
 ## [v2.7.0] - 2026-11-28
 
