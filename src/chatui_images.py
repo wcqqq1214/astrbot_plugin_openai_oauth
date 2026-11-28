@@ -46,7 +46,7 @@ class ImageCard:
             "name": VIEW,
             "target": "chat_message",
             "title": "GPT Image",
-            "text": "0%",
+            "text": "GPT Image",
         }
 
     async def deliver(self, image: bytes) -> None:
@@ -70,7 +70,6 @@ class ImageCard:
                         **self.part,
                         "attachment_id": attachment["attachment_id"],
                         "filename": filename,
-                        "text": "GPT Image",
                     },
                     "message_id": state.run.run_id,
                 },
@@ -95,7 +94,7 @@ async def create(state: _CitationRun) -> ImageCard:
             view_store.create,
             MODULE,
             spec,
-            ViewResult(name=VIEW, data={}, text="0%"),
+            ViewResult(name=VIEW, data={}, text="GPT Image"),
             owner=run.username,
             session_id=run.session_id,
             platform_id="webchat",

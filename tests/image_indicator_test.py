@@ -109,7 +109,8 @@ class ImageIndicatorTests(unittest.IsolatedAsyncioTestCase):
                             shown = await self.next_frame("run_snapshot")
                             parts = shown["data"]["content"]["message"]
                             self.assertEqual(
-                                (parts[-1]["type"], parts[-1]["text"]), ("view", "0%")
+                                (parts[-1]["type"], parts[-1]["text"]),
+                                ("view", "GPT Image"),
                             )
                             self.assertEqual(parts[0]["text"], "Ready")
                             if outcome == "success":
@@ -141,11 +142,7 @@ class ImageIndicatorTests(unittest.IsolatedAsyncioTestCase):
                             await asyncio.gather(task, return_exceptions=True)
                     hidden = await self.next_frame("run_snapshot")
                     final = hidden["data"]["content"]["message"]
-                    self.assertFalse(
-                        any(
-                            p.get("text") == "0%" and p["type"] == "view" for p in final
-                        )
-                    )
+                    self.assertNotIn(parts[-1], final)
                     self.assertEqual(final[0]["text"], "Ready")
 
     async def test_reconnect_concurrent_images_and_history(self):
@@ -162,11 +159,11 @@ class ImageIndicatorTests(unittest.IsolatedAsyncioTestCase):
                 try:
                     frame = json.loads((await anext(resumed)).removeprefix("data: "))
                     self.assertEqual(
-                        frame["data"]["content"]["message"][-1]["text"], "0%"
+                        frame["data"]["content"]["message"][-1]["text"], "GPT Image"
                     )
                 finally:
                     await resumed.aclose()
-            self.assertEqual(self.run.message_parts[-1]["text"], "0%")
+            self.assertEqual(self.run.message_parts[-1]["text"], "GPT Image")
             self.assertNotIn(
                 "image_progress", str(self.service.save_bot_message.await_args_list)
             )
