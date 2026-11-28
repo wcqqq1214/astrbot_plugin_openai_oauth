@@ -602,6 +602,10 @@ class RoutingTests(RoutingFixture):
         event.get_messages = lambda: [source]
         self.outcomes["same"] = [401, 403]
         await check("image.forbidden")
+        self.assertEqual(
+            await star.codex_generate_image(event, "Try a new image instead"),
+            plugin.messages.text("image.forbidden"),
+        )
         self.assertEqual(self.requested(), ["same", "same", "same"])
         first, retry = [request for _, request in self.requests[1:]]
         self.assertEqual(str(first.url), f"{oauth.CODEX_BASE}/images/edits")
@@ -656,7 +660,7 @@ class RoutingTests(RoutingFixture):
         self.outcomes["other"] = [401, image_response(png), 403]
         star, event = await self.image_entrypoints()
         star.config["image_size"] = "1024x1536"
-        prompt = "Draw a cat in a portrait composition with space at the top"
+        prompt = "Draw a cat " + "x" * 32_000
         await star.draw(event, prompt)
         component = event.send.await_args.args[0].chain[0]
         self.assertEqual(component.file, "base64://" + b64encode(png).decode())

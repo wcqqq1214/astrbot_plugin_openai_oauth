@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 from astrbot.core import db_helper
+from astrbot.core.pipeline.process_stage.method.agent_sub_stages import internal
 from astrbot.core.platform.sources.webchat import webchat_event
 from astrbot.core.platform.sources.webchat.webchat_event import WebChatMessageEvent
 from astrbot.core.star.star import star_map
@@ -66,6 +67,7 @@ class ImageIndicatorTests(unittest.IsolatedAsyncioTestCase):
         self.event.message_obj = SimpleNamespace(message_id="run")
         self.event.unified_msg_origin = "session"
         self.event.send = AsyncMock()
+        self.event.get_extra.return_value = None
         self.star = object.__new__(plugin.OpenAI_OAuth_Plugin)
         self.star.config = {"image_enabled": True}
         self.star.context = SimpleNamespace(
@@ -144,6 +146,47 @@ class ImageIndicatorTests(unittest.IsolatedAsyncioTestCase):
                     final = hidden["data"]["content"]["message"]
                     self.assertNotIn(parts[-1], final)
                     self.assertEqual(final[0]["text"], "Ready")
+
+    async def test_chatui_image_followup_and_expired_attachment(self):
+        self.service.db = db_helper
+        with (
+            patch.object(
+                plugin.runtime, "get_plugin_config", return_value=self.star.config
+            ),
+            patch.object(plugin.runtime, "get_context", return_value=self.star.context),
+        ):
+            self.event.get_extra.side_effect = {"selected_provider": "model"}.get
+            self.event.get_messages.return_value = [
+                plugin.Image.fromBytes(b"new image")
+            ]
+            active_turn = Mock()
+            active_turn.steer.return_value = None
+            self.assertIsNone(internal.try_capture_follow_up(self.event, active_turn))
+            active_turn.steer.assert_not_called()
+            stream = await self.service.build_chat_stream(
+                "user",
+                {
+                    "session_id": "session",
+                    "selected_provider": "model",
+                    "message": [
+                        {"type": "image", "attachment_id": "expired"},
+                        {"type": "plain", "text": "Edit this image"},
+                    ],
+                },
+            )
+            frames = [
+                json.loads(frame.removeprefix("data: ")) async for frame in stream
+            ]
+            self.assertEqual(
+                frames,
+                [
+                    {
+                        "type": "error",
+                        "data": plugin.messages.text("image.reference_unreadable"),
+                    },
+                    {"type": "end"},
+                ],
+            )
 
     async def test_reconnect_concurrent_images_and_history(self):
         async with bridge.image_generation_indicator(self.event):

@@ -412,10 +412,14 @@ def install() -> Callable[[], None]:
     global _active_runs
     from astrbot.api.event import AstrMessageEvent
     from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
+    from astrbot.core.message.components import Image
+    from astrbot.core.pipeline.process_stage.method.agent_sub_stages import internal
     from astrbot.core.platform.sources.webchat.webchat_event import WebChatMessageEvent
     from astrbot.dashboard.services import chat_service
 
-    from . import bot_citations
+    from . import bot_citations, messages, runtime
+    from .image_generation import ImageError
+    from .provider import ProviderOpenAICodex
 
     service = chat_service.ChatService
     runner = ToolLoopAgentRunner
@@ -441,6 +445,75 @@ def install() -> Callable[[], None]:
         raise TypeError("WebChat citation state is unavailable")
 
     active_runs: dict[str, _CitationRun] = {}
+
+    def edits_enabled(selected: str | None, umo: str) -> bool:
+        if not runtime.get_plugin_config().get("image_enabled"):
+            return False
+        context = runtime.get_context()
+        provider = (
+            context.get_provider_by_id(selected)
+            if selected
+            else context.get_using_provider(umo=umo)
+        )
+        return isinstance(provider, ProviderOpenAICodex)
+
+    build = service.build_chat_stream
+    parse = service.build_user_message_parts
+    chat_request: ContextVar[tuple[str | None, str] | None] = ContextVar(
+        "codex_chatui_request", default=None
+    )
+
+    async def image_error_stream(message):
+        for frame in ({"type": "error", "data": message}, {"type": "end"}):
+            yield f"data: {json.dumps(frame, ensure_ascii=False)}\n\n"
+
+    @wraps(build)
+    async def build_chat_stream(self, username, post_data, **kwargs):
+        session = post_data.get("session_id") or post_data.get("conversation_id")
+        umo = chat_service.build_thread_unified_msg_origin(username, session)
+        token = chat_request.set((post_data.get("selected_provider"), umo))
+        try:
+            return await build(self, username, post_data, **kwargs)
+        except ImageError as exc:
+            lang = await messages.resolve_language(runtime.get_context(), umo)
+            return image_error_stream(messages.text(str(exc), lang=lang))
+        finally:
+            chat_request.reset(token)
+
+    @wraps(parse)
+    async def build_user_message_parts(self, message):
+        parts = await parse(self, message)
+        request = chat_request.get()
+        if request and isinstance(message, list):
+            resolved = {
+                part["attachment_id"] for part in parts if part["type"] == "image"
+            }
+            missing = any(
+                isinstance(part, dict)
+                and part.get("type") == "image"
+                and str(part.get("attachment_id")) not in resolved
+                for part in message
+            )
+            selected, umo = request
+            if missing and edits_enabled(selected, umo):
+                # Reject before an attachment-less turn is saved or can be regenerated.
+                raise ImageError("image.reference_unreadable")
+        return parts
+
+    capture = internal.try_capture_follow_up
+
+    @wraps(capture)
+    def capture_follow_up(event, *args, **kwargs):
+        if (
+            active_chat_run(event) is not None
+            and any(isinstance(part, Image) for part in event.get_messages())
+            and edits_enabled(
+                event.get_extra("selected_provider"), event.unified_msg_origin
+            )
+        ):
+            # Steering carries text only. Let AstrBot queue a turn with its own event.
+            return None
+        return capture(event, *args, **kwargs)
 
     @wraps(consume)
     async def consume_run(self, run):
@@ -517,6 +590,9 @@ def install() -> Callable[[], None]:
     hooks = (
         (PluginPageService, "resolve_plugin_pages_root", pages_root, roots),
         (chat_service, "serialize_history_entry", serialize_entry, serialize_history),
+        (internal, "try_capture_follow_up", capture_follow_up, capture),
+        (service, "build_chat_stream", build_chat_stream, build),
+        (service, "build_user_message_parts", build_user_message_parts, parse),
         (service, "_consume_chat_run", consume_run, consume),
         (runner, stream_name, stream_response, stream),
     )

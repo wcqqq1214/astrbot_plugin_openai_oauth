@@ -94,6 +94,7 @@ class ImageSettingsTests(unittest.IsolatedAsyncioTestCase):
             unified_msg_origin="session",
             get_messages=Mock(return_value=[]),
             set_extra=Mock(),
+            get_extra={}.get,
             should_call_llm=Mock(),
             send=AsyncMock(),
         )

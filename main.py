@@ -158,6 +158,8 @@ class OpenAI_OAuth_Plugin(Star):
         Args:
             prompt(string): Describe the image, including any requested orientation and composition.
         """
+        if error := event.get_extra("_codex_image_edit_error"):
+            return error
         return await self._run_image_tool(event, prompt, edit=False)
 
     @filter.llm_tool(name=image_generation.EDIT_TOOL_NAME)
@@ -191,6 +193,8 @@ class OpenAI_OAuth_Plugin(Star):
                 if invocation is not None
                 else None,
             )
+            if edit:
+                event.set_extra("_codex_image_edit_error", error)
             return error or messages.text("image.sent")
 
     async def _send_image(
@@ -204,8 +208,8 @@ class OpenAI_OAuth_Plugin(Star):
     ) -> str | None:
         if not self.config.get("image_enabled", False):
             return messages.text("image.disabled")
-        prompt = prompt.strip() if isinstance(prompt, str) else ""
-        if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
+        instructions = prompt.strip() if isinstance(prompt, str) else ""
+        if not instructions or (edit and len(instructions) > MAX_IMAGE_PROMPT_LENGTH):
             return messages.text(
                 "image.edit_prompt" if edit else "image.prompt",
                 limit=MAX_IMAGE_PROMPT_LENGTH,
@@ -229,7 +233,10 @@ class OpenAI_OAuth_Plugin(Star):
                         await image_generation.read_edit_image(event) if edit else None
                     )
                     image = await image_generation.generate(
-                        provider, account, prompt, reference_image=reference
+                        provider,
+                        account,
+                        instructions if edit else prompt,
+                        reference_image=reference,
                     )
                     if card is None:
                         await event.send(MessageChain(chain=[Image.fromBytes(image)]))
